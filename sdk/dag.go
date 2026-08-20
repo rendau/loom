@@ -1,0 +1,95 @@
+package loom
+
+import (
+	"errors"
+	"fmt"
+	"regexp"
+)
+
+// nameRe ограничивает имена дагов, тасков и артефактов: они попадают в пути
+// artifact-сервера и в лейблы kubernetes.
+var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+
+type DAG struct {
+	name     string
+	schedule string
+	tasks    map[string]*Task
+	order    []string // порядок объявления тасков
+	errs     []error  // ошибки, накопленные при объявлении графа
+}
+
+// New создаёт DAG. Ошибки объявления графа накапливаются и возвращаются из
+// Validate — его вызывает Main перед любым режимом работы.
+func New(name string, opts ...DAGOption) *DAG {
+	d := &DAG{name: name, tasks: map[string]*Task{}}
+
+	if !nameRe.MatchString(name) {
+		d.errs = append(d.errs, fmt.Errorf("invalid dag name %q", name))
+	}
+
+	for _, opt := range opts {
+		opt(d)
+	}
+
+	return d
+}
+
+type DAGOption func(*DAG)
+
+// Schedule задаёт cron-расписание дага.
+func Schedule(cronExpr string) DAGOption {
+	return func(d *DAG) { d.schedule = cronExpr }
+}
+
+func (d *DAG) Name() string {
+	return d.name
+}
+
+// Task объявляет таск дага. fn выполняется в отдельном контейнере в
+// распределённом режиме и в горутине — в локальном.
+func (d *DAG) Task(name string, fn TaskFn, opts ...TaskOption) *Task {
+	t := &Task{dag: d, name: name, fn: fn}
+
+	if !nameRe.MatchString(name) {
+		d.errs = append(d.errs, fmt.Errorf("invalid task name %q", name))
+	}
+	if fn == nil {
+		d.errs = append(d.errs, fmt.Errorf("task %q: nil fn", name))
+	}
+
+	for _, opt := range opts {
+		opt(t)
+	}
+
+	if _, ok := d.tasks[name]; ok {
+		d.errs = append(d.errs, fmt.Errorf("duplicate task name %q", name))
+		return t
+	}
+
+	d.tasks[name] = t
+	d.order = append(d.order, name)
+
+	return t
+}
+
+// Validate проверяет корректность объявленного графа. Циклы невозможны по
+// построению: зависимость объявляется указателем на уже созданный таск.
+func (d *DAG) Validate() error {
+	errs := d.errs
+
+	for _, name := range d.order {
+		t := d.tasks[name]
+		for _, dep := range t.deps {
+			switch {
+			case dep.task == nil:
+				errs = append(errs, fmt.Errorf("task %q: nil dependency", name))
+			case dep.task.dag != d:
+				errs = append(errs, fmt.Errorf("task %q: dependency %q belongs to another dag", name, dep.task.name))
+			case dep.task == t:
+				errs = append(errs, fmt.Errorf("task %q: depends on itself", name))
+			}
+		}
+	}
+
+	return errors.Join(errs...)
+}

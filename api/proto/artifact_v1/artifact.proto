@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package artifact_v1;
+
+option go_package = "github.com/rendau/loom/api/artifact_v1;artifact_v1";
+
+// ArtifactService — data plane: обмен артефактами (стримами данных) между
+// тасками рана.
+//
+// Жизненный цикл артефакта: writing → committed | aborted.
+// Артефакт скоупится на попытку таска: (run_id, task, attempt, name) —
+// ретрай таска пишет свои артефакты новой попыткой, не трогая прошлые.
+service ArtifactService {
+  // WriteArtifact пишет артефакт клиентским стримом: первое сообщение —
+  // header, далее chunk'и, последнее — commit. Закрытие стрима без
+  // commit трактуется как abort (писатель упал).
+  rpc WriteArtifact(stream WriteArtifactRequest) returns (WriteArtifactResponse);
+
+  // ReadArtifact читает артефакт с offset. При follow=true читатель,
+  // догнавший хвост пишущегося артефакта, ждёт новых данных; поток
+  // завершается только после commit записи, а abort записи возвращает
+  // читателю ошибку ABORTED.
+  rpc ReadArtifact(ReadArtifactRequest) returns (stream ReadArtifactResponse);
+
+  rpc StatArtifact(StatArtifactRequest) returns (StatArtifactResponse);
+
+  // AbortArtifact принудительно abort'ит запись — используется control
+  // plane'ом для стримов умерших attempt'ов.
+  rpc AbortArtifact(AbortArtifactRequest) returns (AbortArtifactResponse);
+
+  // DeleteRunArtifacts удаляет все артефакты рана (retention).
+  rpc DeleteRunArtifacts(DeleteRunArtifactsRequest) returns (DeleteRunArtifactsResponse);
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message ArtifactRef {
+  string run_id = 1;
+  string task = 2;
+  int32 attempt = 3;
+  string name = 4;
+}
+
+enum ArtifactState {
+  ARTIFACT_STATE_UNSPECIFIED = 0;
+  ARTIFACT_STATE_WRITING = 1;
+  ARTIFACT_STATE_COMMITTED = 2;
+  ARTIFACT_STATE_ABORTED = 3;
+}
+
+// Write
+
+message WriteArtifactRequest {
+  oneof msg {
+    ArtifactRef header = 1;
+    bytes chunk = 2;
+    bool commit = 3;
+  }
+}
+
+message WriteArtifactResponse {
+  int64 size = 1;
+}
+
+// Read
+
+message ReadArtifactRequest {
+  ArtifactRef ref = 1;
+  int64 offset = 2;
+  bool follow = 3;
+}
+
+message ReadArtifactResponse {
+  bytes chunk = 1;
+}
+
+// Stat
+
+message StatArtifactRequest {
+  ArtifactRef ref = 1;
+}
+
+message StatArtifactResponse {
+  ArtifactState state = 1;
+  int64 size = 2;
+}
+
+// Abort
+
+message AbortArtifactRequest {
+  ArtifactRef ref = 1;
+}
+
+message AbortArtifactResponse {}
+
+// DeleteRun
+
+message DeleteRunArtifactsRequest {
+  string run_id = 1;
+}
+
+message DeleteRunArtifactsResponse {}

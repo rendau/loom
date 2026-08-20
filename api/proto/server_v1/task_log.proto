@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package server_v1;
+
+option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
+
+import "google/api/annotations.proto";
+
+// TaskLogService — приём лог-стрима таска на control plane server.
+//
+// SDK держит один стрим на всё время работы attempt'а и шлёт логи батчами
+// (по размеру и по таймеру). Логи дублируются в честный stdout контейнера —
+// страховка на случай OOM/падения SDK: причину смерти тогда дописывает
+// control plane из kubernetes.
+service TaskLogService {
+  // PushTaskLog — клиентский стрим: первое сообщение — header
+  // (идентификация attempt'а), далее — батчи строк.
+  rpc PushTaskLog(stream PushTaskLogRequest) returns (PushTaskLogResponse);
+
+  // ReadTaskLog читает лог попытки с начала; при follow=true стрим живёт до
+  // завершения попытки, отдавая новые строки по мере поступления (live-логи
+  // в админке).
+  rpc ReadTaskLog(ReadTaskLogRequest) returns (stream ReadTaskLogResponse) {
+    option (google.api.http) = {
+      get: "/run/{run_id}/task/{task}/attempt/{attempt}/log"
+    };
+  }
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message PushTaskLogRequest {
+  oneof msg {
+    TaskLogHeader header = 1;
+    TaskLogBatch batch = 2;
+  }
+}
+
+message PushTaskLogResponse {}
+
+message TaskLogHeader {
+  string run_id = 1;
+  string task = 2;
+  int32 attempt = 3;
+}
+
+message TaskLogBatch {
+  repeated TaskLogEntry entries = 1;
+}
+
+// TaskLogSource — происхождение строки: структурный логгер Runtime,
+// перехваченные file descriptor'ы процесса (туда пишут паники Go-рантайма
+// и сторонние библиотеки мимо логгера) или сам control plane (причина
+// смерти пода, когда SDK умер вместе с процессом).
+enum TaskLogSource {
+  TASK_LOG_SOURCE_UNSPECIFIED = 0;
+  TASK_LOG_SOURCE_LOG = 1;
+  TASK_LOG_SOURCE_STDOUT = 2;
+  TASK_LOG_SOURCE_STDERR = 3;
+  TASK_LOG_SOURCE_SERVER = 4;
+}
+
+message TaskLogEntry {
+  int64 ts_unix_ms = 1;
+  TaskLogSource source = 2;
+  string line = 3;
+}
+
+// Read
+
+message ReadTaskLogRequest {
+  string run_id = 1;
+  string task = 2;
+  int32 attempt = 3;
+  bool follow = 4;
+}
+
+message ReadTaskLogResponse {
+  repeated TaskLogEntry entries = 1;
+}

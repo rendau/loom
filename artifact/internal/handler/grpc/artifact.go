@@ -112,6 +112,15 @@ func (h *Artifact) AbortArtifact(_ context.Context, req *pb.AbortArtifactRequest
 	return &pb.AbortArtifactResponse{}, nil
 }
 
+func (h *Artifact) FinishAttempt(_ context.Context, req *pb.FinishAttemptRequest) (*pb.FinishAttemptResponse, error) {
+	key := domain.AttemptKey{RunID: req.GetRunId(), Task: req.GetTask(), Attempt: req.GetAttempt()}
+	if err := h.svc.FinishAttempt(key); err != nil {
+		return nil, encodeErr(err)
+	}
+
+	return &pb.FinishAttemptResponse{}, nil
+}
+
 func (h *Artifact) DeleteRunArtifacts(_ context.Context, req *pb.DeleteRunArtifactsRequest) (*pb.DeleteRunArtifactsResponse, error) {
 	if err := h.svc.DeleteRun(req.GetRunId()); err != nil {
 		return nil, encodeErr(err)

@@ -2,7 +2,9 @@
 .DS_Store
 .env
 
-artifact/cmd/build/
-artifact/data/
+# бинарники make build (<модуль>/cmd/build/svc)
+**/cmd/build/
+
+# данные локальных запусков
 data/
 .loom/

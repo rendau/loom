@@ -41,26 +41,28 @@ type ArtifactWriter interface {
 // Runtime — единственная точка контакта таска с внешним миром:
 // артефакты и логи.
 type Runtime struct {
-	ctx     context.Context
-	task    *Task
-	runID   string
-	attempt int
-	log     *slog.Logger
-	store   artifactStore
+	ctx         context.Context
+	task        *Task
+	runID       string
+	attempt     int
+	log         *slog.Logger
+	store       artifactStore
+	depAttempts map[string]int
 
 	mu      sync.Mutex
 	writers map[string]*outputWriter
 }
 
-func newRuntime(ctx context.Context, task *Task, runID string, attempt int, log *slog.Logger, store artifactStore) *Runtime {
+func newRuntime(ctx context.Context, task *Task, runID string, attempt int, log *slog.Logger, store artifactStore, depAttempts map[string]int) *Runtime {
 	return &Runtime{
-		ctx:     ctx,
-		task:    task,
-		runID:   runID,
-		attempt: attempt,
-		log:     log,
-		store:   store,
-		writers: map[string]*outputWriter{},
+		ctx:         ctx,
+		task:        task,
+		runID:       runID,
+		attempt:     attempt,
+		log:         log,
+		store:       store,
+		depAttempts: depAttempts,
+		writers:     map[string]*outputWriter{},
 	}
 }
 
@@ -112,9 +114,13 @@ func (rt *Runtime) Input(task, name string) (io.ReadCloser, error) {
 }
 
 // depAttempt возвращает номер попытки зависимости, чьи артефакты читаем.
-// В локальном режиме попытка всегда 1; в распределённом номер назначит
-// control plane.
-func (rt *Runtime) depAttempt(_ string) int {
+// В локальном режиме попытка всегда 1; в распределённом номера назначает
+// control plane (env-контракт LOOM_DEP_ATTEMPTS).
+func (rt *Runtime) depAttempt(task string) int {
+	if n, ok := rt.depAttempts[task]; ok {
+		return n
+	}
+
 	return 1
 }
 

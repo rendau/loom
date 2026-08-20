@@ -1,0 +1,56 @@
+package config
+
+import (
+	"time"
+
+	"github.com/caarlos0/env/v9"
+	_ "github.com/joho/godotenv/autoload"
+)
+
+var Conf = struct {
+	Debug    bool   `env:"DEBUG" envDefault:"false"`
+	LogLevel string `env:"LOG_LEVEL" envDefault:"info"`
+
+	GrpcPort       string `env:"GRPC_PORT" envDefault:"5052"`
+	HttpPort       string `env:"HTTP_PORT" envDefault:"8082"`
+	HttpCors       bool   `env:"HTTP_CORS" envDefault:"false"`
+	SystemHttpPort string `env:"SYSTEM_HTTP_PORT" envDefault:"3004"`
+
+	PgDsn string `env:"PG_DSN"`
+
+	// LogDir — каталог streamstore для логов тасков.
+	LogDir string `env:"LOG_DIR" envDefault:"./data/logs"`
+
+	// ArtifactAddr — адрес artifact-сервера для самого control plane
+	// (FinishAttempt-страховка, retention).
+	ArtifactAddr string `env:"ARTIFACT_ADDR" envDefault:"127.0.0.1:5051"`
+
+	// TaskArtifactAddr / TaskServerAddr — адреса artifact-сервера и control
+	// plane, какими их видят поды тасков (cluster DNS); попадают в env
+	// контейнера (LOOM_ARTIFACT_ADDR / LOOM_SERVER_ADDR).
+	TaskArtifactAddr string `env:"TASK_ARTIFACT_ADDR" envDefault:"127.0.0.1:5051"`
+	TaskServerAddr   string `env:"TASK_SERVER_ADDR" envDefault:"127.0.0.1:5052"`
+
+	// DockerBin — бинарь container-CLI для регистрации дагов (pull/describe).
+	DockerBin string `env:"DOCKER_BIN" envDefault:"docker"`
+
+	// Executor: k8s — kubernetes Job'ы; none — не запускать executor
+	// (dev-режим: только API и приём логов).
+	Executor string `env:"EXECUTOR" envDefault:"k8s"`
+
+	K8sNamespace  string `env:"K8S_NAMESPACE" envDefault:"default"`
+	K8sKubeconfig string `env:"K8S_KUBECONFIG"` // пусто — in-cluster, иначе путь к kubeconfig
+	// K8sJobTTL — ttlSecondsAfterFinished завершённых Job'ов.
+	K8sJobTTL time.Duration `env:"K8S_JOB_TTL" envDefault:"1h"`
+
+	// SchedTick — период планировщика; события executor'а будят его раньше.
+	SchedTick time.Duration `env:"SCHED_TICK" envDefault:"2s"`
+	// SchedClaimLimit — сколько queued-тасков забирать за один проход.
+	SchedClaimLimit int64 `env:"SCHED_CLAIM_LIMIT" envDefault:"10"`
+}{}
+
+func init() {
+	if err := env.Parse(&Conf); err != nil {
+		panic(err)
+	}
+}

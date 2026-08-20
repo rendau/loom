@@ -5,4 +5,5 @@ use (
 	./artifact
 	./examples
 	./sdk
+	./server
 )

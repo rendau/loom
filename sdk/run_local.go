@@ -81,7 +81,7 @@ func (d *DAG) RunLocal(ctx context.Context, opts ...LocalOption) error {
 			close(started[t.name])
 
 			taskLog := log.With("task", t.name)
-			rt := newRuntime(ctx, t, runID, 1, taskLog, store)
+			rt := newRuntime(ctx, t, runID, 1, taskLog, store, nil)
 
 			taskLog.Info("task started")
 			startedAt := time.Now()

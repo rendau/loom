@@ -64,6 +64,21 @@
 12. **Стиль** — по эталону `/Users/mdb/projects/mechta/gotemplate`
     (app.App с фазами Init/Start/Listen/Stop, config через env, slog,
     Req/Rep-нейминг в proto, mobone/squirrel для Postgres — см. skill `crud`).
+13. **FinishAttempt вызывает сам SDK** по завершении попытки (успех и ошибка,
+    отдельным контекстом с таймаутом) — RPC `FinishAttempt` в artifact_v1.
+    Control plane повторяет его как страховку при смерти пода — вызов
+    идемпотентен.
+14. **Remote-запись без клиентского буфера**: каждый Write уходит на сервер
+    сразу (режется на chunk'и ≤256KB) — иначе tail-follow ломается: данные
+    зависали бы в буфере писателя. Буферизация — забота дага (bufio.Writer).
+15. **Уточнение к №11**: sdk зависит от модуля `api` обычным require без
+    replace (локально резолвится через go.work); при публикации sdk
+    тегируется и api (`api/vX.Y.Z`). Вторую генерацию proto внутрь sdk не
+    делать — двойная регистрация дескрипторов паникует в одном бинаре.
+    `go mod tidy` в sdk заработает после публикации api.
+16. **Логи — best-effort**: недоступный лог-стрим не валит таск — отправка
+    отключается, дубль в честный stdout продолжается. Без `LOOM_SERVER_ADDR`
+    логи идут только в stdout.
 
 ## Состояние: сделано
 
@@ -77,50 +92,77 @@
 - [x] Artifact server: gRPC handler поверх streamstore, каркас по gotemplate,
       healthcheck, Dockerfile
 - [x] Пример `examples/demo-etl` (extract → stream → transform → load)
+- [x] Фаза 3 — распределённый запуск таска (SDK remote):
+  - `sdk/store_grpc.go` — remote `artifactStore`: Write header → chunks → commit
+    (закрытие стрима без commit = abort), Read follow с offset 0; статусы
+    сервера маппятся обратно в ошибки streamstore (поведение = локальному)
+  - env-контракт `LOOM_*` + `run --task` в cli.go (флаги приоритетнее env;
+    exit-коды: 0 успех, 1 таск упал, 2 некорректный вызов); публичная точка —
+    `DAG.RunTask(ctx, TaskRunSpec)` (для executor'а, тестов, local-strict)
+  - `FinishAttempt` RPC в artifact_v1 + handler; SDK вызывает по завершении
+    попытки (решение №13)
+  - логи: порт `logSink`; remote — batched gRPC-стрим `TaskLogService`
+    (`api/proto/server_v1/task_log.proto`, батч 256 строк / 500ms) с дублем
+    в честный stdout; локальный режим — как раньше, slog в stderr
+  - перехват stdout/stderr процесса (dup2, `sdk/capture_unix.go`) → в logSink;
+    паники рантайма и вывод мимо логгера попадают в лог-стрим
+  - интеграционные тесты `artifact/test/`: tail-follow до commit через grpc,
+    обычное ребро, abort упавшего писателя, NOT_FOUND несозданного артефакта
+    после FinishAttempt, доставка лог-стрима (+ e2e руками: artifact-сервер
+    отдельным процессом, demo-etl по таскам, ретрай новой попыткой)
+
+- [x] Фаза 4 — control plane server (`server/`):
+  - каркас по gotemplate: Postgres + mobone, единая миграция `000001_init`,
+    gRPC (5052) + grpc-gateway (8082, REST для админки), system http (3004);
+    vendor-proto `google/api` в `api/`, `api/proto/common` (ListParams/ErrorRep)
+  - схема БД: `dag` (PK name, image, digest, manifest jsonb, schedule, paused),
+    `run` (снапшот манифеста, пиннинг digest), `task_instance` (PK run+task,
+    статусы pending→queued→starting→running→терминал), `attempt`
+    (PK run+task+attempt, exit_code/exit_reason)
+  - регистрация дага (`POST /dag`): `internal/service/dockercli` — pull →
+    резолв digest (`RepoDigests`; без digest — warning и без пиннинга) →
+    `docker run --rm <image> describe`; серверная валидация манифеста
+    (имена, рёбра, ацикличность) — манифесту образа не доверяем
+  - триггер (`POST /run`) + планировщик `internal/domain/scheduler`:
+    чистый planner (`buildPlan` — promotions, каскад upstream_failed,
+    завершение рана; юнит-тесты) + цикл: очередь через
+    `FOR UPDATE SKIP LOCKED` (claim = переход в starting + attempt+1 +
+    вставка attempt одной транзакцией), запуск через executor-порт,
+    события — каналом; стримовое ребро ко-стартует по событию started
+  - `K8sExecutor` (`internal/service/k8sexecutor`): Job backoffLimit=0,
+    ttlSecondsAfterFinished, идентификация попытки в аннотациях (лейбл-
+    значения ограничены 63 символами), informer по подам с лейблом
+    `app.kubernetes.io/managed-by=loom`, exit code/OOMKilled из
+    containerStatuses; дубли событий гасятся идемпотентной финализацией.
+    ⚠ против живого кластера ещё не гонялся — прогнать при первом деплое
+  - финализация попытки: статусы в БД (идемпотентно) → страховочный
+    `FinishAttempt` на artifact-сервере → строка об исходе (source=server,
+    exit code / OOMKilled) в лог + commit лог-стрима
+  - логи: хранение — **streamstore** (решено: та же стейт-машина, реф
+    `(run, task, attempt, "log")`, JSONL); приём `PushTaskLog` (commit
+    делает планировщик при финализации, не приёмник); чтение
+    `ReadTaskLog` с follow (`GET /run/{id}/task/{t}/attempt/{n}/log`);
+    в enum добавлен `TASK_LOG_SOURCE_SERVER`
+  - API админки: `DagService` (register/list/get/pause/delete),
+    `RunService` (trigger/list/get с тасками и попытками), логи с follow;
+    ошибки — `common.ErrorRep` телом HTTP-ответа
+  - `EXECUTOR=none` — dev-режим без k8s (API и приём логов, раны копятся
+    pending); интеграционные тесты `server/test` — полный цикл планировщика
+    против Postgres (`TEST_PG_DSN`, без него skip) с фейковым executor'ом:
+    happy path со стримовым ребром, каскад падения, launch-ошибка,
+    идемпотентность дублей событий
 
 ## Чеклист: впереди
-
-### Фаза 3 — распределённый запуск таска (SDK remote)
-
-- [ ] `sdk`: remote-реализация `artifactStore` — gRPC-клиент artifact-сервера
-      (Write: header → chunks(~256KB) → commit; Read: follow=true, offset 0)
-- [ ] Контракт env для контейнера таска: `LOOM_SERVER_ADDR`,
-      `LOOM_ARTIFACT_ADDR`, `LOOM_RUN_ID`, `LOOM_TASK`, `LOOM_ATTEMPT`,
-      `LOOM_DEP_ATTEMPTS` (json map таск→attempt для чтения входов), токен
-- [ ] `run --task` в cli.go: собрать Runtime с remote-бэкендом, выполнить один
-      таск, вызвать FinishAttempt (или это делает control plane — решить при
-      реализации), корректные exit-коды
-- [ ] Интеграционный тест: два процесса обмениваются стримом через
-      artifact-сервер (in-process grpc или testcontainer)
-- [ ] Логи: LogSink-порт в Runtime; remote-реализация — batched gRPC-стрим
-      (протокол добавить в `api/`), локальная — как сейчас в stderr
-- [ ] Перехват stdout/stderr процесса таска (dup2) → в LogSink + дублирование
-      в настоящий stdout
-
-### Фаза 4 — control plane server (`server/`)
-
-- [ ] Каркас по gotemplate: Postgres, миграции (единый `000001_init` до
-      первого деплоя), gRPC + gateway, system http
-- [ ] Схема БД: `dag` (name, image digest, manifest, schedule, paused),
-      `run` (dag, digest, status, trigger), `task_instance` / `attempt`
-      (status, started/finished, exit info)
-- [ ] Регистрация дага: по url образа запустить `describe`, валидировать
-      манифест, сохранить (регистрация по digest)
-- [ ] Ручной триггер рана + раскрутка графа: очередь тасков
-      (`FOR UPDATE SKIP LOCKED`), обычные и стримовые рёбра
-- [ ] Executor-интерфейс (Launch/Watch/Kill attempt'а) + `K8sExecutor`
-      (Job backoffLimit=0, labels, informer watch, env-контракт из фазы 3)
-- [ ] Вызов `FinishAttempt`/`AbortArtifact` на artifact-сервере при завершении
-      / смерти attempt'а; фиксация причины смерти пода (exit code, OOM)
-- [ ] Приём лог-стрима от SDK, хранение (файлы через streamstore или отдельное
-      хранилище — решить), API чтения логов с follow
-- [ ] API для админки: список дагов/ранов, детали рана, логи
 
 ### Фаза 5 — надёжность планировщика
 
 - [ ] Cron-расписания (без catchup в первой версии), pause/resume дага
 - [ ] Ретраи с backoff (per-task политика в манифесте), таймауты таска
 - [ ] Зомби-детект: heartbeat attempt'а + watch подов; переотправка в очередь
+      (сейчас упавший между claim и Launch server оставляет attempt в starting)
+- [ ] Восстановление лог-стримов после рестарта server: streamstore помечает
+      осиротевшие writing-стримы aborted — лог живого attempt'а становится
+      нечитаемым; решить (переоткрытие / recovery-commit)
 - [ ] Ресурсы таска в манифесте (cpu/mem requests/limits) → в спеку пода
 - [ ] Retention: TTL ранов, крон-джоб `DeleteRunArtifacts` + чистка логов
 - [ ] Attempt-токены: выдача при Launch, проверка на artifact-сервере и
@@ -147,8 +189,19 @@
 ## Команды
 
 ```bash
-make generate-proto   # protoc: api/proto → api/artifact_v1
-make build            # artifact server → artifact/cmd/build/svc
-make test             # тесты sdk и artifact (в CI гонять с -race)
+make generate-proto   # protoc: api/proto → api/common, api/artifact_v1, api/server_v1 (+gateway)
+make build            # artifact и server → <модуль>/cmd/build/svc
+make test             # тесты sdk, artifact и server (в CI гонять с -race);
+                      # интеграционные server/test требуют TEST_PG_DSN=postgres://...
 cd examples && go run ./demo-etl run   # локальный прогон примера
+
+# распределённый запуск таска против локального artifact-сервера:
+DATA_DIR=/tmp/loom-data ./artifact/cmd/build/svc &
+cd examples && go build -o /tmp/demo-etl ./demo-etl
+LOOM_ARTIFACT_ADDR=127.0.0.1:5051 LOOM_RUN_ID=r1 /tmp/demo-etl run --task=extract
+
+# control plane (нужен Postgres; EXECUTOR=none — без k8s):
+cd server && PG_DSN=postgres://... EXECUTOR=none ./cmd/build/svc
+# REST (gateway): POST /dag {image}, POST /run {dag_name}, GET /run/{id},
+#                 GET /run/{id}/task/{t}/attempt/{n}/log?follow=true
 ```

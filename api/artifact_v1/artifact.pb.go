@@ -563,6 +563,102 @@ func (*AbortArtifactResponse) Descriptor() ([]byte, []int) {
 	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{8}
 }
 
+type FinishAttemptRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	Task          string                 `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
+	Attempt       int32                  `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FinishAttemptRequest) Reset() {
+	*x = FinishAttemptRequest{}
+	mi := &file_artifact_v1_artifact_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FinishAttemptRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FinishAttemptRequest) ProtoMessage() {}
+
+func (x *FinishAttemptRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_artifact_v1_artifact_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FinishAttemptRequest.ProtoReflect.Descriptor instead.
+func (*FinishAttemptRequest) Descriptor() ([]byte, []int) {
+	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *FinishAttemptRequest) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *FinishAttemptRequest) GetTask() string {
+	if x != nil {
+		return x.Task
+	}
+	return ""
+}
+
+func (x *FinishAttemptRequest) GetAttempt() int32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
+type FinishAttemptResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FinishAttemptResponse) Reset() {
+	*x = FinishAttemptResponse{}
+	mi := &file_artifact_v1_artifact_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FinishAttemptResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FinishAttemptResponse) ProtoMessage() {}
+
+func (x *FinishAttemptResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_artifact_v1_artifact_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FinishAttemptResponse.ProtoReflect.Descriptor instead.
+func (*FinishAttemptResponse) Descriptor() ([]byte, []int) {
+	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{10}
+}
+
 type DeleteRunArtifactsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
@@ -572,7 +668,7 @@ type DeleteRunArtifactsRequest struct {
 
 func (x *DeleteRunArtifactsRequest) Reset() {
 	*x = DeleteRunArtifactsRequest{}
-	mi := &file_artifact_v1_artifact_proto_msgTypes[9]
+	mi := &file_artifact_v1_artifact_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -584,7 +680,7 @@ func (x *DeleteRunArtifactsRequest) String() string {
 func (*DeleteRunArtifactsRequest) ProtoMessage() {}
 
 func (x *DeleteRunArtifactsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_artifact_v1_artifact_proto_msgTypes[9]
+	mi := &file_artifact_v1_artifact_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -597,7 +693,7 @@ func (x *DeleteRunArtifactsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRunArtifactsRequest.ProtoReflect.Descriptor instead.
 func (*DeleteRunArtifactsRequest) Descriptor() ([]byte, []int) {
-	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{9}
+	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DeleteRunArtifactsRequest) GetRunId() string {
@@ -615,7 +711,7 @@ type DeleteRunArtifactsResponse struct {
 
 func (x *DeleteRunArtifactsResponse) Reset() {
 	*x = DeleteRunArtifactsResponse{}
-	mi := &file_artifact_v1_artifact_proto_msgTypes[10]
+	mi := &file_artifact_v1_artifact_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -627,7 +723,7 @@ func (x *DeleteRunArtifactsResponse) String() string {
 func (*DeleteRunArtifactsResponse) ProtoMessage() {}
 
 func (x *DeleteRunArtifactsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_artifact_v1_artifact_proto_msgTypes[10]
+	mi := &file_artifact_v1_artifact_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -640,7 +736,7 @@ func (x *DeleteRunArtifactsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRunArtifactsResponse.ProtoReflect.Descriptor instead.
 func (*DeleteRunArtifactsResponse) Descriptor() ([]byte, []int) {
-	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{10}
+	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{12}
 }
 
 var File_artifact_v1_artifact_proto protoreflect.FileDescriptor
@@ -673,7 +769,12 @@ const file_artifact_v1_artifact_proto_rawDesc = "" +
 	"\x04size\x18\x02 \x01(\x03R\x04size\"B\n" +
 	"\x14AbortArtifactRequest\x12*\n" +
 	"\x03ref\x18\x01 \x01(\v2\x18.artifact_v1.ArtifactRefR\x03ref\"\x17\n" +
-	"\x15AbortArtifactResponse\"2\n" +
+	"\x15AbortArtifactResponse\"[\n" +
+	"\x14FinishAttemptRequest\x12\x15\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x12\n" +
+	"\x04task\x18\x02 \x01(\tR\x04task\x12\x18\n" +
+	"\aattempt\x18\x03 \x01(\x05R\aattempt\"\x17\n" +
+	"\x15FinishAttemptResponse\"2\n" +
 	"\x19DeleteRunArtifactsRequest\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\x1c\n" +
 	"\x1aDeleteRunArtifactsResponse*\x85\x01\n" +
@@ -681,12 +782,13 @@ const file_artifact_v1_artifact_proto_rawDesc = "" +
 	"\x1aARTIFACT_STATE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16ARTIFACT_STATE_WRITING\x10\x01\x12\x1c\n" +
 	"\x18ARTIFACT_STATE_COMMITTED\x10\x02\x12\x1a\n" +
-	"\x16ARTIFACT_STATE_ABORTED\x10\x032\xd6\x03\n" +
+	"\x16ARTIFACT_STATE_ABORTED\x10\x032\xae\x04\n" +
 	"\x0fArtifactService\x12X\n" +
 	"\rWriteArtifact\x12!.artifact_v1.WriteArtifactRequest\x1a\".artifact_v1.WriteArtifactResponse(\x01\x12U\n" +
 	"\fReadArtifact\x12 .artifact_v1.ReadArtifactRequest\x1a!.artifact_v1.ReadArtifactResponse0\x01\x12S\n" +
 	"\fStatArtifact\x12 .artifact_v1.StatArtifactRequest\x1a!.artifact_v1.StatArtifactResponse\x12V\n" +
-	"\rAbortArtifact\x12!.artifact_v1.AbortArtifactRequest\x1a\".artifact_v1.AbortArtifactResponse\x12e\n" +
+	"\rAbortArtifact\x12!.artifact_v1.AbortArtifactRequest\x1a\".artifact_v1.AbortArtifactResponse\x12V\n" +
+	"\rFinishAttempt\x12!.artifact_v1.FinishAttemptRequest\x1a\".artifact_v1.FinishAttemptResponse\x12e\n" +
 	"\x12DeleteRunArtifacts\x12&.artifact_v1.DeleteRunArtifactsRequest\x1a'.artifact_v1.DeleteRunArtifactsResponseB4Z2github.com/rendau/loom/api/artifact_v1;artifact_v1b\x06proto3"
 
 var (
@@ -702,7 +804,7 @@ func file_artifact_v1_artifact_proto_rawDescGZIP() []byte {
 }
 
 var file_artifact_v1_artifact_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_artifact_v1_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_artifact_v1_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_artifact_v1_artifact_proto_goTypes = []any{
 	(ArtifactState)(0),                 // 0: artifact_v1.ArtifactState
 	(*ArtifactRef)(nil),                // 1: artifact_v1.ArtifactRef
@@ -714,8 +816,10 @@ var file_artifact_v1_artifact_proto_goTypes = []any{
 	(*StatArtifactResponse)(nil),       // 7: artifact_v1.StatArtifactResponse
 	(*AbortArtifactRequest)(nil),       // 8: artifact_v1.AbortArtifactRequest
 	(*AbortArtifactResponse)(nil),      // 9: artifact_v1.AbortArtifactResponse
-	(*DeleteRunArtifactsRequest)(nil),  // 10: artifact_v1.DeleteRunArtifactsRequest
-	(*DeleteRunArtifactsResponse)(nil), // 11: artifact_v1.DeleteRunArtifactsResponse
+	(*FinishAttemptRequest)(nil),       // 10: artifact_v1.FinishAttemptRequest
+	(*FinishAttemptResponse)(nil),      // 11: artifact_v1.FinishAttemptResponse
+	(*DeleteRunArtifactsRequest)(nil),  // 12: artifact_v1.DeleteRunArtifactsRequest
+	(*DeleteRunArtifactsResponse)(nil), // 13: artifact_v1.DeleteRunArtifactsResponse
 }
 var file_artifact_v1_artifact_proto_depIdxs = []int32{
 	1,  // 0: artifact_v1.WriteArtifactRequest.header:type_name -> artifact_v1.ArtifactRef
@@ -727,14 +831,16 @@ var file_artifact_v1_artifact_proto_depIdxs = []int32{
 	4,  // 6: artifact_v1.ArtifactService.ReadArtifact:input_type -> artifact_v1.ReadArtifactRequest
 	6,  // 7: artifact_v1.ArtifactService.StatArtifact:input_type -> artifact_v1.StatArtifactRequest
 	8,  // 8: artifact_v1.ArtifactService.AbortArtifact:input_type -> artifact_v1.AbortArtifactRequest
-	10, // 9: artifact_v1.ArtifactService.DeleteRunArtifacts:input_type -> artifact_v1.DeleteRunArtifactsRequest
-	3,  // 10: artifact_v1.ArtifactService.WriteArtifact:output_type -> artifact_v1.WriteArtifactResponse
-	5,  // 11: artifact_v1.ArtifactService.ReadArtifact:output_type -> artifact_v1.ReadArtifactResponse
-	7,  // 12: artifact_v1.ArtifactService.StatArtifact:output_type -> artifact_v1.StatArtifactResponse
-	9,  // 13: artifact_v1.ArtifactService.AbortArtifact:output_type -> artifact_v1.AbortArtifactResponse
-	11, // 14: artifact_v1.ArtifactService.DeleteRunArtifacts:output_type -> artifact_v1.DeleteRunArtifactsResponse
-	10, // [10:15] is the sub-list for method output_type
-	5,  // [5:10] is the sub-list for method input_type
+	10, // 9: artifact_v1.ArtifactService.FinishAttempt:input_type -> artifact_v1.FinishAttemptRequest
+	12, // 10: artifact_v1.ArtifactService.DeleteRunArtifacts:input_type -> artifact_v1.DeleteRunArtifactsRequest
+	3,  // 11: artifact_v1.ArtifactService.WriteArtifact:output_type -> artifact_v1.WriteArtifactResponse
+	5,  // 12: artifact_v1.ArtifactService.ReadArtifact:output_type -> artifact_v1.ReadArtifactResponse
+	7,  // 13: artifact_v1.ArtifactService.StatArtifact:output_type -> artifact_v1.StatArtifactResponse
+	9,  // 14: artifact_v1.ArtifactService.AbortArtifact:output_type -> artifact_v1.AbortArtifactResponse
+	11, // 15: artifact_v1.ArtifactService.FinishAttempt:output_type -> artifact_v1.FinishAttemptResponse
+	13, // 16: artifact_v1.ArtifactService.DeleteRunArtifacts:output_type -> artifact_v1.DeleteRunArtifactsResponse
+	11, // [11:17] is the sub-list for method output_type
+	5,  // [5:11] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -756,7 +862,7 @@ func file_artifact_v1_artifact_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_artifact_v1_artifact_proto_rawDesc), len(file_artifact_v1_artifact_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

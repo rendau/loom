@@ -23,6 +23,7 @@ const (
 	ArtifactService_ReadArtifact_FullMethodName       = "/artifact_v1.ArtifactService/ReadArtifact"
 	ArtifactService_StatArtifact_FullMethodName       = "/artifact_v1.ArtifactService/StatArtifact"
 	ArtifactService_AbortArtifact_FullMethodName      = "/artifact_v1.ArtifactService/AbortArtifact"
+	ArtifactService_FinishAttempt_FullMethodName      = "/artifact_v1.ArtifactService/FinishAttempt"
 	ArtifactService_DeleteRunArtifacts_FullMethodName = "/artifact_v1.ArtifactService/DeleteRunArtifacts"
 )
 
@@ -50,6 +51,11 @@ type ArtifactServiceClient interface {
 	// AbortArtifact принудительно abort'ит запись — используется control
 	// plane'ом для стримов умерших attempt'ов.
 	AbortArtifact(ctx context.Context, in *AbortArtifactRequest, opts ...grpc.CallOption) (*AbortArtifactResponse, error)
+	// FinishAttempt помечает попытку таска завершённой: abort её оставшимся
+	// записям, читатели несозданных артефактов получают NOT_FOUND вместо
+	// вечного ожидания. Идемпотентен: SDK вызывает его по завершении таска,
+	// control plane повторяет как страховку при смерти пода.
+	FinishAttempt(ctx context.Context, in *FinishAttemptRequest, opts ...grpc.CallOption) (*FinishAttemptResponse, error)
 	// DeleteRunArtifacts удаляет все артефакты рана (retention).
 	DeleteRunArtifacts(ctx context.Context, in *DeleteRunArtifactsRequest, opts ...grpc.CallOption) (*DeleteRunArtifactsResponse, error)
 }
@@ -114,6 +120,16 @@ func (c *artifactServiceClient) AbortArtifact(ctx context.Context, in *AbortArti
 	return out, nil
 }
 
+func (c *artifactServiceClient) FinishAttempt(ctx context.Context, in *FinishAttemptRequest, opts ...grpc.CallOption) (*FinishAttemptResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FinishAttemptResponse)
+	err := c.cc.Invoke(ctx, ArtifactService_FinishAttempt_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *artifactServiceClient) DeleteRunArtifacts(ctx context.Context, in *DeleteRunArtifactsRequest, opts ...grpc.CallOption) (*DeleteRunArtifactsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteRunArtifactsResponse)
@@ -148,6 +164,11 @@ type ArtifactServiceServer interface {
 	// AbortArtifact принудительно abort'ит запись — используется control
 	// plane'ом для стримов умерших attempt'ов.
 	AbortArtifact(context.Context, *AbortArtifactRequest) (*AbortArtifactResponse, error)
+	// FinishAttempt помечает попытку таска завершённой: abort её оставшимся
+	// записям, читатели несозданных артефактов получают NOT_FOUND вместо
+	// вечного ожидания. Идемпотентен: SDK вызывает его по завершении таска,
+	// control plane повторяет как страховку при смерти пода.
+	FinishAttempt(context.Context, *FinishAttemptRequest) (*FinishAttemptResponse, error)
 	// DeleteRunArtifacts удаляет все артефакты рана (retention).
 	DeleteRunArtifacts(context.Context, *DeleteRunArtifactsRequest) (*DeleteRunArtifactsResponse, error)
 	mustEmbedUnimplementedArtifactServiceServer()
@@ -171,6 +192,9 @@ func (UnimplementedArtifactServiceServer) StatArtifact(context.Context, *StatArt
 }
 func (UnimplementedArtifactServiceServer) AbortArtifact(context.Context, *AbortArtifactRequest) (*AbortArtifactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AbortArtifact not implemented")
+}
+func (UnimplementedArtifactServiceServer) FinishAttempt(context.Context, *FinishAttemptRequest) (*FinishAttemptResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FinishAttempt not implemented")
 }
 func (UnimplementedArtifactServiceServer) DeleteRunArtifacts(context.Context, *DeleteRunArtifactsRequest) (*DeleteRunArtifactsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteRunArtifacts not implemented")
@@ -250,6 +274,24 @@ func _ArtifactService_AbortArtifact_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ArtifactService_FinishAttempt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FinishAttemptRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ArtifactServiceServer).FinishAttempt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ArtifactService_FinishAttempt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ArtifactServiceServer).FinishAttempt(ctx, req.(*FinishAttemptRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ArtifactService_DeleteRunArtifacts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteRunArtifactsRequest)
 	if err := dec(in); err != nil {
@@ -282,6 +324,10 @@ var ArtifactService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AbortArtifact",
 			Handler:    _ArtifactService_AbortArtifact_Handler,
+		},
+		{
+			MethodName: "FinishAttempt",
+			Handler:    _ArtifactService_FinishAttempt_Handler,
 		},
 		{
 			MethodName: "DeleteRunArtifacts",

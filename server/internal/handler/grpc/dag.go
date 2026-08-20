@@ -1,0 +1,73 @@
+package handler
+
+import (
+	"context"
+
+	"github.com/samber/lo"
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	commonPb "github.com/rendau/loom/api/common"
+	pb "github.com/rendau/loom/api/server_v1"
+	"github.com/rendau/loom/server/internal/handler/grpc/dto"
+	dagUsc "github.com/rendau/loom/server/internal/usecase/dag"
+)
+
+type Dag struct {
+	pb.UnsafeDagServiceServer
+
+	usecase *dagUsc.Usecase
+}
+
+func NewDag(uc *dagUsc.Usecase) *Dag {
+	return &Dag{usecase: uc}
+}
+
+func (h *Dag) RegisterDag(ctx context.Context, req *pb.DagRegisterReq) (*pb.DagRegisterRep, error) {
+	result, err := h.usecase.Register(ctx, req.GetImage())
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+	return &pb.DagRegisterRep{Dag: dto.EncodeDagMain(result, 0)}, nil
+}
+
+func (h *Dag) ListDag(ctx context.Context, req *pb.DagListReq) (*pb.DagListRep, error) {
+	if req.ListParams == nil {
+		req.ListParams = &commonPb.ListParamsSt{}
+	}
+
+	items, tCount, err := h.usecase.List(ctx, dto.DecodeDagListReq(req))
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+
+	return &pb.DagListRep{
+		PaginationInfo: &commonPb.PaginationInfoSt{
+			Page:       req.ListParams.Page,
+			PageSize:   req.ListParams.PageSize,
+			TotalCount: tCount,
+		},
+		Results: lo.Map(items, dto.EncodeDagMain),
+	}, nil
+}
+
+func (h *Dag) GetDag(ctx context.Context, req *pb.DagGetReq) (*pb.DagMain, error) {
+	item, err := h.usecase.Get(ctx, req.GetName())
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+	return dto.EncodeDagMain(item, 0), nil
+}
+
+func (h *Dag) SetDagPaused(ctx context.Context, req *pb.DagSetPausedReq) (*emptypb.Empty, error) {
+	if err := h.usecase.SetPaused(ctx, req.GetName(), req.GetPaused()); err != nil {
+		return nil, encodeErr(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
+func (h *Dag) DeleteDag(ctx context.Context, req *pb.DagDeleteReq) (*emptypb.Empty, error) {
+	if err := h.usecase.Delete(ctx, req.GetName()); err != nil {
+		return nil, encodeErr(err)
+	}
+	return &emptypb.Empty{}, nil
+}

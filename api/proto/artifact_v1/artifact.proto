@@ -28,6 +28,12 @@ service ArtifactService {
   // plane'ом для стримов умерших attempt'ов.
   rpc AbortArtifact(AbortArtifactRequest) returns (AbortArtifactResponse);
 
+  // FinishAttempt помечает попытку таска завершённой: abort её оставшимся
+  // записям, читатели несозданных артефактов получают NOT_FOUND вместо
+  // вечного ожидания. Идемпотентен: SDK вызывает его по завершении таска,
+  // control plane повторяет как страховку при смерти пода.
+  rpc FinishAttempt(FinishAttemptRequest) returns (FinishAttemptResponse);
+
   // DeleteRunArtifacts удаляет все артефакты рана (retention).
   rpc DeleteRunArtifacts(DeleteRunArtifactsRequest) returns (DeleteRunArtifactsResponse);
 }
@@ -92,6 +98,16 @@ message AbortArtifactRequest {
 }
 
 message AbortArtifactResponse {}
+
+// FinishAttempt
+
+message FinishAttemptRequest {
+  string run_id = 1;
+  string task = 2;
+  int32 attempt = 3;
+}
+
+message FinishAttemptResponse {}
 
 // DeleteRun
 

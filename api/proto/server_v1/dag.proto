@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+package server_v1;
+
+option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "common/common.proto";
+
+// DagService — управление дагами на control plane.
+//
+// Даг регистрируется по docker-образу: server запускает контейнер в режиме
+// `describe`, валидирует полученный JSON-манифест и сохраняет даг, пиннуя
+// его к digest образа на момент регистрации.
+service DagService {
+  // RegisterDag регистрирует (или перерегистрирует — новая версия образа)
+  // даг по url docker-образа. Имя дага берётся из манифеста.
+  rpc RegisterDag(DagRegisterReq) returns (DagRegisterRep) {
+    option (google.api.http) = {
+      post: "/dag"
+      body: "*"
+    };
+  }
+
+  rpc ListDag(DagListReq) returns (DagListRep) {
+    option (google.api.http) = {
+      get: "/dag"
+    };
+  }
+
+  rpc GetDag(DagGetReq) returns (DagMain) {
+    option (google.api.http) = {
+      get: "/dag/{name}"
+    };
+  }
+
+  // SetDagPaused ставит даг на паузу / снимает с паузы. Пауза останавливает
+  // только запуски по расписанию; ручной триггер работает.
+  rpc SetDagPaused(DagSetPausedReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      put: "/dag/{name}/paused"
+      body: "*"
+    };
+  }
+
+  rpc DeleteDag(DagDeleteReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/dag/{name}"
+    };
+  }
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message DagMain {
+  string name = 1;
+  string image = 2;
+  string image_digest = 3;
+  string schedule = 4;
+  bool paused = 5;
+  string sdk_version = 6;
+  repeated DagTaskMain tasks = 7;
+  google.protobuf.Timestamp created_at = 8;
+  optional google.protobuf.Timestamp modified_at = 9;
+}
+
+message DagTaskMain {
+  string name = 1;
+  repeated DagTaskDepMain depends_on = 2;
+}
+
+message DagTaskDepMain {
+  string task = 1;
+  bool streamed = 2;
+}
+
+// Register
+
+message DagRegisterReq {
+  string image = 1;
+}
+
+message DagRegisterRep {
+  DagMain dag = 1;
+}
+
+// List
+
+message DagListReq {
+  common.ListParamsSt list_params = 1;
+  optional bool paused = 2;
+}
+
+message DagListRep {
+  common.PaginationInfoSt pagination_info = 1;
+  repeated DagMain results = 2;
+}
+
+// Get
+
+message DagGetReq {
+  string name = 1;
+}
+
+// SetPaused
+
+message DagSetPausedReq {
+  string name = 1;
+  bool paused = 2;
+}
+
+// Delete
+
+message DagDeleteReq {
+  string name = 1;
+}

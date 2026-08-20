@@ -1,0 +1,9 @@
+//go:build unix && !linux
+
+package loom
+
+import "golang.org/x/sys/unix"
+
+func dup2(oldfd, newfd int) error {
+	return unix.Dup2(oldfd, newfd)
+}

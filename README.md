@@ -14,10 +14,10 @@ Server регистрирует даг по образу (запуская ег�
 |---|---|
 | `sdk/` | Библиотека для написания дагов: DAG/Task, Runtime, манифест, локальный режим |
 | `sdk/streamstore/` | Общая стейт-машина файловых стримов — единая для artifact-сервера и локального режима |
-| `api/` | Общие proto-контракты и сгенерированный код (`api/proto/`, `api/artifact_v1/`) |
+| `api/` | Общие proto-контракты и сгенерированный код (`api/proto/`, `api/artifact_v1/`, `api/server_v1/`) |
 | `artifact/` | **Artifact server** (data plane): стримовый обмен артефактами между тасками |
+| `server/` | **Control plane**: регистрация дагов, раны, планировщик, k8s-executor, приём логов, REST/gRPC API |
 | `examples/` | Примеры дагов (`demo-etl`) |
-| `server/` | *(планируется)* Control plane: расписания, раны, ретраи, executor (k8s) |
 | `admin/` | *(планируется)* Админка: журнал запусков, логи, управление дагами |
 
 ## SDK
@@ -48,8 +48,8 @@ func main() {
 - `run` — выполняет даг целиком локально: таски горутинами, артефакты — файлами
   в `.loom/runs/<run-id>/` (разработка и отладка без docker и сервера; данные
   остаются после рана — промежуточные артефакты можно изучать);
-- `run --task=... --run-id=... --attempt=N` — один таск в распределённом режиме
-  *(появится вместе с control plane)*.
+- `run --task=... --run-id=... --attempt=N` — один таск в распределённом режиме;
+  параметры приходят и через env-контракт `LOOM_*` (так их передаёт executor).
 
 Правила:
 
@@ -100,22 +100,49 @@ gRPC (`ArtifactService`): `WriteArtifact` (client stream: header → chunks → 
 Конфиг через env: `GRPC_PORT` (5051), `SYSTEM_HTTP_PORT` (3003, `/healthcheck`),
 `DATA_DIR`, `LOG_LEVEL`, `DEBUG`. См. `artifact/.env.example`.
 
+## Control plane server
+
+Postgres-бэкенд (mobone), gRPC (5052) + REST через grpc-gateway (8082),
+system http (3004, `/healthcheck`). Основные потоки:
+
+- **Регистрация дага** — `POST /dag {"image": "..."}`: server делает pull,
+  пиннит digest, запускает контейнер в режиме `describe`, валидирует манифест
+  (имена, рёбра, ацикличность) и сохраняет даг. Имя дага берётся из манифеста,
+  перерегистрация тем же именем — новая версия образа.
+- **Ран** — `POST /run {"dag_name": "..."}`: снапшот манифеста и digest
+  пиннятся на момент триггера. Планировщик раскручивает граф: очередь тасков
+  в Postgres (`FOR UPDATE SKIP LOCKED`), обычное ребро ждёт успеха
+  отправителя, стримовое — ко-стартует с ним. 1 pod (k8s Job,
+  backoffLimit=0) = 1 attempt; события жизненного цикла — informer.
+- **Финализация попытки** — статусы и exit-информация (exit code, OOMKilled)
+  в БД, страховочный `FinishAttempt` на artifact-сервере, строка об исходе
+  в лог попытки.
+- **Логи** — SDK стримит батчи на `TaskLogService`; хранение — тот же
+  streamstore (реф `(run, task, attempt, "log")`, JSONL), чтение с follow:
+  `GET /run/{id}/task/{task}/attempt/{n}/log?follow=true` (live-логи).
+
+Конфиг — `server/.env.example` (`PG_DSN`, `EXECUTOR=k8s|none`,
+`K8S_NAMESPACE`/`K8S_KUBECONFIG`, `TASK_ARTIFACT_ADDR`/`TASK_SERVER_ADDR` —
+адреса, какими их видят поды тасков, `SCHED_TICK` и др.).
+
 ## Команды
 
 ```bash
-make generate-proto   # protoc: api/proto → api/artifact_v1
-make build            # собрать artifact server → artifact/cmd/build/svc
-make test             # тесты sdk и artifact
-make lint             # golangci-lint
+make generate-proto   # protoc: api/proto → api/common, api/artifact_v1, api/server_v1 (+gateway)
+make build            # artifact и server → <модуль>/cmd/build/svc
+make test             # тесты sdk, artifact и server
+                      # интеграционные server/test требуют TEST_PG_DSN=postgres://...
 
 cd examples && go run ./demo-etl describe   # манифест примера
 cd examples && go run ./demo-etl run        # локальный запуск примера
+
+cd server && PG_DSN=postgres://... EXECUTOR=none ./cmd/build/svc  # control plane без k8s
 ```
 
 ## Дорожная карта
 
 План, чеклист по фазам и зафиксированные архитектурные решения — в
-[ROADMAP.md](ROADMAP.md). Кратко: сейчас готовы SDK с локальным режимом и
-artifact-сервер; дальше — remote-бэкенд Runtime и стриминг логов (фаза 3),
-control plane с k8s-executor (фаза 4), надёжность планировщика (фаза 5),
-админка (фаза 6).
+[ROADMAP.md](ROADMAP.md). Кратко: готовы SDK (локальный и распределённый
+режимы), artifact-сервер и control plane с планировщиком и k8s-executor
+(фазы 1–4); дальше — надёжность планировщика: cron, ретраи, зомби-детект,
+retention (фаза 5), админка (фаза 6).

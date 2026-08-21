@@ -139,6 +139,24 @@ cd examples && go run ./demo-etl run        # локальный запуск п
 cd server && PG_DSN=postgres://... EXECUTOR=none ./cmd/build/svc  # control plane без k8s
 ```
 
+## Релиз SDK
+
+Публикуются два модуля: `api` (proto-контракты) и `sdk`; sdk зависит от api
+обычным require (без replace, решение №15 в [ROADMAP.md](ROADMAP.md)),
+поэтому **порядок тегирования важен**:
+
+1. Тег `api/vX.Y.Z` на нужный коммит, пуш тега.
+2. В `sdk/go.mod` зафиксировать эту версию
+   (`cd sdk && go mod edit -require=github.com/rendau/loom/api@vX.Y.Z &&
+   go mod tidy`), собрать/прогнать тесты, закоммитить и запушить.
+3. Тег `sdk/vX.Y.Z` на коммит из п.2, пуш тега.
+4. Проверка из чистого модуля вне монорепы:
+   `go get github.com/rendau/loom/sdk@vX.Y.Z`.
+
+api тегируется даже без изменений в нём (одинаковая версия у пары
+api/sdk проще в сопровождении). Внутренние модули (`artifact`, `server`,
+`examples`) не публикуются — живут на replace/go.work.
+
 ## Дорожная карта
 
 План, чеклист по фазам и зафиксированные архитектурные решения — в

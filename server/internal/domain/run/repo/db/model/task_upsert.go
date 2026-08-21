@@ -4,8 +4,10 @@ type TaskUpsert struct {
 	PKRunId string
 	PKTask  string
 
-	Status  *string
-	Attempt *int32
+	Status   *string
+	Attempt  *int32
+	Pool     *string
+	Priority *int32
 }
 
 func (m *TaskUpsert) CreateColumnMap() map[string]any {
@@ -15,6 +17,12 @@ func (m *TaskUpsert) CreateColumnMap() map[string]any {
 	}
 	if m.Attempt != nil {
 		result["attempt"] = *m.Attempt
+	}
+	if m.Pool != nil {
+		result["pool"] = *m.Pool
+	}
+	if m.Priority != nil {
+		result["priority"] = *m.Priority
 	}
 	return result
 }

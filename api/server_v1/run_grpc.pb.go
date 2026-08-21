@@ -11,6 +11,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -19,9 +20,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RunService_TriggerRun_FullMethodName = "/server_v1.RunService/TriggerRun"
-	RunService_ListRun_FullMethodName    = "/server_v1.RunService/ListRun"
-	RunService_GetRun_FullMethodName     = "/server_v1.RunService/GetRun"
+	RunService_TriggerRun_FullMethodName  = "/server_v1.RunService/TriggerRun"
+	RunService_ListRun_FullMethodName     = "/server_v1.RunService/ListRun"
+	RunService_GetRun_FullMethodName      = "/server_v1.RunService/GetRun"
+	RunService_RetryTask_FullMethodName   = "/server_v1.RunService/RetryTask"
+	RunService_BackfillRun_FullMethodName = "/server_v1.RunService/BackfillRun"
 )
 
 // RunServiceClient is the client API for RunService service.
@@ -37,6 +40,14 @@ type RunServiceClient interface {
 	ListRun(ctx context.Context, in *RunListReq, opts ...grpc.CallOption) (*RunListRep, error)
 	// GetRun возвращает ран вместе с task instance'ами и их попытками.
 	GetRun(ctx context.Context, in *RunGetReq, opts ...grpc.CallOption) (*RunGetRep, error)
+	// RetryTask перезапускает таск завершённого рана: таск возвращается в
+	// очередь, его downstream-подграф сбрасывается в pending, ран снова
+	// running. На выполняющемся ране недоступен (run_not_finished).
+	RetryTask(ctx context.Context, in *RunRetryTaskReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// BackfillRun создаёт раны за прошедший период: по рану на каждый тик
+	// cron-расписания дага в [from, to), trigger=backfill, logical_date=тик.
+	// Требует расписания у дага; число тиков за вызов ограничено.
+	BackfillRun(ctx context.Context, in *RunBackfillReq, opts ...grpc.CallOption) (*RunBackfillRep, error)
 }
 
 type runServiceClient struct {
@@ -77,6 +88,26 @@ func (c *runServiceClient) GetRun(ctx context.Context, in *RunGetReq, opts ...gr
 	return out, nil
 }
 
+func (c *runServiceClient) RetryTask(ctx context.Context, in *RunRetryTaskReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, RunService_RetryTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *runServiceClient) BackfillRun(ctx context.Context, in *RunBackfillReq, opts ...grpc.CallOption) (*RunBackfillRep, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunBackfillRep)
+	err := c.cc.Invoke(ctx, RunService_BackfillRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RunServiceServer is the server API for RunService service.
 // All implementations must embed UnimplementedRunServiceServer
 // for forward compatibility.
@@ -90,6 +121,14 @@ type RunServiceServer interface {
 	ListRun(context.Context, *RunListReq) (*RunListRep, error)
 	// GetRun возвращает ран вместе с task instance'ами и их попытками.
 	GetRun(context.Context, *RunGetReq) (*RunGetRep, error)
+	// RetryTask перезапускает таск завершённого рана: таск возвращается в
+	// очередь, его downstream-подграф сбрасывается в pending, ран снова
+	// running. На выполняющемся ране недоступен (run_not_finished).
+	RetryTask(context.Context, *RunRetryTaskReq) (*emptypb.Empty, error)
+	// BackfillRun создаёт раны за прошедший период: по рану на каждый тик
+	// cron-расписания дага в [from, to), trigger=backfill, logical_date=тик.
+	// Требует расписания у дага; число тиков за вызов ограничено.
+	BackfillRun(context.Context, *RunBackfillReq) (*RunBackfillRep, error)
 	mustEmbedUnimplementedRunServiceServer()
 }
 
@@ -108,6 +147,12 @@ func (UnimplementedRunServiceServer) ListRun(context.Context, *RunListReq) (*Run
 }
 func (UnimplementedRunServiceServer) GetRun(context.Context, *RunGetReq) (*RunGetRep, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRun not implemented")
+}
+func (UnimplementedRunServiceServer) RetryTask(context.Context, *RunRetryTaskReq) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RetryTask not implemented")
+}
+func (UnimplementedRunServiceServer) BackfillRun(context.Context, *RunBackfillReq) (*RunBackfillRep, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BackfillRun not implemented")
 }
 func (UnimplementedRunServiceServer) mustEmbedUnimplementedRunServiceServer() {}
 func (UnimplementedRunServiceServer) testEmbeddedByValue()                    {}
@@ -184,6 +229,42 @@ func _RunService_GetRun_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RunService_RetryTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunRetryTaskReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RunServiceServer).RetryTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RunService_RetryTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RunServiceServer).RetryTask(ctx, req.(*RunRetryTaskReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RunService_BackfillRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunBackfillReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RunServiceServer).BackfillRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RunService_BackfillRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RunServiceServer).BackfillRun(ctx, req.(*RunBackfillReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RunService_ServiceDesc is the grpc.ServiceDesc for RunService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -202,6 +283,14 @@ var RunService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRun",
 			Handler:    _RunService_GetRun_Handler,
+		},
+		{
+			MethodName: "RetryTask",
+			Handler:    _RunService_RetryTask_Handler,
+		},
+		{
+			MethodName: "BackfillRun",
+			Handler:    _RunService_BackfillRun_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

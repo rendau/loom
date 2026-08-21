@@ -5,8 +5,11 @@ package server_v1;
 option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
 
 import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "common/common.proto";
+import "server_v1/dag.proto";
 
 // RunService — запуски дагов: ручной триггер, журнал ранов, детали рана
 // (статусы тасков и попыток).
@@ -32,6 +35,26 @@ service RunService {
       get: "/run/{id}"
     };
   }
+
+  // RetryTask перезапускает таск завершённого рана: таск возвращается в
+  // очередь, его downstream-подграф сбрасывается в pending, ран снова
+  // running. На выполняющемся ране недоступен (run_not_finished).
+  rpc RetryTask(RunRetryTaskReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/run/{run_id}/task/{task}/retry"
+      body: "*"
+    };
+  }
+
+  // BackfillRun создаёт раны за прошедший период: по рану на каждый тик
+  // cron-расписания дага в [from, to), trigger=backfill, logical_date=тик.
+  // Требует расписания у дага; число тиков за вызов ограничено.
+  rpc BackfillRun(RunBackfillReq) returns (RunBackfillRep) {
+    option (google.api.http) = {
+      post: "/run/backfill"
+      body: "*"
+    };
+  }
 }
 
 // ── Messages ────────────────────────────────────────────
@@ -41,10 +64,15 @@ message RunMain {
   string dag_name = 2;
   string image = 3;
   string image_digest = 4;
-  string trigger = 5; // manual | schedule
+  string trigger = 5; // manual | schedule | backfill
   string status = 6;  // running | success | failed
   google.protobuf.Timestamp created_at = 7;
   optional google.protobuf.Timestamp finished_at = 8;
+  // «Дата данных» рана: тик расписания у cron/backfill-рана, момент
+  // триггера у ручного (решение №23).
+  google.protobuf.Timestamp logical_date = 9;
+  // Параметры рана (аналог dagrun.conf); отсутствуют — ран без параметров.
+  google.protobuf.Struct params = 10;
 }
 
 message TaskInstanceMain {
@@ -74,6 +102,9 @@ message AttemptMain {
 
 message RunTriggerReq {
   string dag_name = 1;
+  // Параметры рана (JSON-объект ≤ 64KB), таскам доступны через
+  // LOOM_RUN_PARAMS / rt.Params().
+  google.protobuf.Struct params = 2;
 }
 
 message RunTriggerRep {
@@ -99,8 +130,32 @@ message RunGetReq {
   string id = 1;
 }
 
+// RetryTask
+
+message RunRetryTaskReq {
+  string run_id = 1;
+  string task = 2;
+}
+
+// Backfill
+
+message RunBackfillReq {
+  string dag_name = 1;
+  google.protobuf.Timestamp from = 2; // включительно
+  google.protobuf.Timestamp to = 3;   // исключительно
+  // Общие параметры всех создаваемых ранов (опционально).
+  google.protobuf.Struct params = 4;
+}
+
+message RunBackfillRep {
+  repeated string run_ids = 1;
+}
+
 message RunGetRep {
   RunMain run = 1;
   repeated TaskInstanceMain tasks = 2;
   repeated AttemptMain attempts = 3;
+  // Таски из снапшота манифеста рана (структура графа: depends_on).
+  // Именно снапшот, а не текущий даг — тот мог перерегистрироваться.
+  repeated DagTaskMain manifest_tasks = 4;
 }

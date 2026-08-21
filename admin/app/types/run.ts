@@ -19,10 +19,22 @@ export interface Run {
   dag_name: string
   image: string
   image_digest: string
-  trigger: string // manual | schedule
+  trigger: string // manual | schedule | backfill
   status: RunStatus
   created_at: string
   finished_at?: string
+  // «Дата данных»: тик расписания у cron/backfill-рана, момент триггера у ручного.
+  logical_date: string
+  // Параметры рана (аналог dagrun.conf); отсутствуют — без параметров.
+  params?: Record<string, unknown>
+}
+
+// Мелкое значение таска (аналог XCom).
+export interface TaskValue {
+  task: string
+  key: string
+  value: unknown
+  modified_at: string
 }
 
 export interface TaskInstance {

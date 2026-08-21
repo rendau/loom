@@ -11,6 +11,8 @@ type TaskSelect struct {
 	Task       string
 	Status     string
 	Attempt    int32
+	Pool       string
+	Priority   int32
 	QueuedAt   sql.NullTime
 	StartedAt  sql.NullTime
 	RetryAt    sql.NullTime
@@ -23,6 +25,8 @@ func (m *TaskSelect) ListColumnMap() map[string]any {
 		"task":        &m.Task,
 		"status":      &m.Status,
 		"attempt":     &m.Attempt,
+		"pool":        &m.Pool,
+		"priority":    &m.Priority,
 		"queued_at":   &m.QueuedAt,
 		"started_at":  &m.StartedAt,
 		"retry_at":    &m.RetryAt,
@@ -46,6 +50,8 @@ func EncodeTaskSelect(v *TaskSelect, _ int) *domainModel.TaskInstance {
 		Task:       v.Task,
 		Status:     v.Status,
 		Attempt:    v.Attempt,
+		Pool:       v.Pool,
+		Priority:   v.Priority,
 		QueuedAt:   v.QueuedAt.Time,
 		StartedAt:  v.StartedAt.Time,
 		RetryAt:    v.RetryAt.Time,

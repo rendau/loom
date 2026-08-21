@@ -42,7 +42,16 @@ const (
 const (
 	TriggerManual   = "manual"
 	TriggerSchedule = "schedule"
+	TriggerBackfill = "backfill"
 )
+
+// MaxParamsSize — лимит params рана (решение №23): это конфиг, а не данные;
+// данные текут артефактами.
+const MaxParamsSize = 64 * 1024
+
+// MaxValueSize — лимит значения таска (решение №25): значения — для мелочи
+// вроде счётчиков и id, данные текут артефактами.
+const MaxValueSize = 64 * 1024
 
 // TaskStatusTerminal — терминален ли статус task instance.
 func TaskStatusTerminal(status string) bool {
@@ -54,7 +63,9 @@ func TaskStatusTerminal(status string) bool {
 }
 
 // Main — ран дага. Manifest — снапшот манифеста на момент триггера
-// (ран не зависит от последующих перерегистраций дага).
+// (ран не зависит от последующих перерегистраций дага). Params — параметры
+// рана (raw JSON-объект, nil — без параметров), LogicalDate — «дата данных»
+// (решение №23).
 type Main struct {
 	Id          string
 	DagName     string
@@ -63,8 +74,17 @@ type Main struct {
 	Trigger     string
 	Status      string
 	Manifest    []byte
+	Params      []byte
+	LogicalDate time.Time
 	CreatedAt   time.Time
 	FinishedAt  time.Time // zero — ран ещё идёт
+}
+
+// TriggerSpec — параметры создания рана.
+type TriggerSpec struct {
+	Trigger     string
+	Params      []byte    // raw JSON-объект; nil — без параметров
+	LogicalDate time.Time // zero — момент триггера
 }
 
 // Edit — мутация рана.
@@ -82,16 +102,26 @@ type ListReq struct {
 }
 
 // TaskInstance — таск внутри рана; attempt — номер текущей (последней)
-// попытки, 0 — ещё не стартовала.
+// попытки, 0 — ещё не стартовала. Pool/Priority — денормализация из
+// манифеста для claim-запроса очереди (решение №26).
 type TaskInstance struct {
 	RunId      string
 	Task       string
 	Status     string
 	Attempt    int32
+	Pool       string
+	Priority   int32
 	QueuedAt   time.Time
 	StartedAt  time.Time
 	RetryAt    time.Time // для up_for_retry: когда вернуть в очередь
 	FinishedAt time.Time
+}
+
+// TaskSeed — параметры создания task instance рана.
+type TaskSeed struct {
+	Task     string
+	Pool     string
+	Priority int32
 }
 
 // Attempt — одна попытка таска: 1 pod = 1 attempt.
@@ -112,6 +142,16 @@ type AttemptRef struct {
 	RunId   string
 	Task    string
 	Attempt int32
+}
+
+// TaskValue — мелкое значение таска (аналог XCom, решение №25): скоуп
+// (run, task, key), ретрай перезаписывает.
+type TaskValue struct {
+	RunId      string
+	Task       string
+	Key        string
+	Value      []byte // raw JSON
+	ModifiedAt time.Time
 }
 
 // ClaimedTask — таск, забранный из очереди на запуск.

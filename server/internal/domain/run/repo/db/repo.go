@@ -99,13 +99,15 @@ func (r *Repo) UpdateRun(ctx context.Context, id string, obj *model.Edit) error 
 // ── task_instance ───────────────────────────────────────
 
 // CreateTaskInstances заводит task instance'ы рана в статусе pending.
-func (r *Repo) CreateTaskInstances(ctx context.Context, runId string, tasks []string) error {
-	models := lo.Map(tasks, func(task string, _ int) mobone.CreateModelI {
+func (r *Repo) CreateTaskInstances(ctx context.Context, runId string, tasks []model.TaskSeed) error {
+	models := lo.Map(tasks, func(t model.TaskSeed, _ int) mobone.CreateModelI {
 		return &repoModel.TaskUpsert{
-			PKRunId: runId,
-			PKTask:  task,
-			Status:  new(model.TaskStatusPending),
-			Attempt: new(int32(0)),
+			PKRunId:  runId,
+			PKTask:   t.Task,
+			Status:   new(model.TaskStatusPending),
+			Attempt:  new(int32(0)),
+			Pool:     &t.Pool,
+			Priority: &t.Priority,
 		}
 	})
 	if err := r.TaskStore.CreateMany(ctx, models); err != nil {

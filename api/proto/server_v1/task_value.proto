@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package server_v1;
+
+option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// TaskValueService — мелкие значения тасков (аналог XCom, решение №25):
+// key-value через control plane, не через artifact-сервер. Скоуп значения —
+// (run, task, key): ретрай таска перезаписывает его значения.
+service TaskValueService {
+  // PushTaskValue публикует значение таска (upsert по ключу). Требует
+  // attempt-токен своего attempt'а; пуш от неактуальной (не текущей)
+  // попытки отклоняется.
+  rpc PushTaskValue(TaskValuePushReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/run/{run_id}/task/{task}/value/{key}"
+      body: "*"
+    };
+  }
+
+  // PullTaskValue читает значение таска. Требует токен своего рана
+  // (таски читают значения зависимостей).
+  rpc PullTaskValue(TaskValuePullReq) returns (TaskValuePullRep) {
+    option (google.api.http) = {
+      get: "/run/{run_id}/task/{task}/value/{key}"
+    };
+  }
+
+  // ListTaskValues возвращает все значения рана (админка).
+  rpc ListTaskValues(TaskValueListReq) returns (TaskValueListRep) {
+    option (google.api.http) = {
+      get: "/run/{run_id}/value"
+    };
+  }
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message TaskValueMain {
+  string task = 1;
+  string key = 2;
+  google.protobuf.Value value = 3;
+  google.protobuf.Timestamp modified_at = 4;
+}
+
+message TaskValuePushReq {
+  string run_id = 1;
+  string task = 2;
+  // Номер попытки-автора: пуш от попытки, уже не являющейся текущей,
+  // отклоняется (зомби не перезапишет значение свежего ретрая).
+  int32 attempt = 3;
+  string key = 4;
+  google.protobuf.Value value = 5; // произвольный JSON ≤ 64KB
+}
+
+message TaskValuePullReq {
+  string run_id = 1;
+  string task = 2;
+  string key = 3;
+}
+
+message TaskValuePullRep {
+  google.protobuf.Value value = 1;
+}
+
+message TaskValueListReq {
+  string run_id = 1;
+}
+
+message TaskValueListRep {
+  repeated TaskValueMain values = 1;
+}

@@ -2,10 +2,12 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/rendau/loom/server/internal/domain/run/model"
 )
@@ -64,32 +66,109 @@ func (r *Repo) PromoteTaskInstances(ctx context.Context, runId string, tasks []s
 	return nil
 }
 
-// ClaimQueuedTasks забирает из очереди до limit queued-тасков (FOR UPDATE
-// SKIP LOCKED — безопасно при нескольких воркерах), переводя их в starting
-// с инкрементом номера попытки. Возвращает забранные таски с номером новой
-// попытки.
+// claimCandidateLimit — сколько queued-кандидатов рассматривает один claim:
+// запас на таски полных пулов, которые придётся пропустить.
+const claimCandidateLimit = 500
+
+// ClaimQueuedTasks забирает из очереди до limit queued-тасков с учётом
+// свободных слотов пулов (решение №26), переводя их в starting с инкрементом
+// номера попытки. Пулы лочатся FOR UPDATE — claim'ы конкурентных инстансов
+// сериализуются и не перебирают слоты; кандидаты — приоритетные первыми
+// (внутри приоритета — старейшие), под FOR UPDATE SKIP LOCKED. Вызывать в
+// транзакции. Возвращает забранные таски с номером новой попытки.
 func (r *Repo) ClaimQueuedTasks(ctx context.Context, limit int64) ([]model.ClaimedTask, error) {
-	query := `
+	con := r.TxM.GetConnection(ctx)
+
+	// слоты пулов держим под замком до конца транзакции (FOR UPDATE нельзя
+	// комбинировать с GROUP BY — занятость считаем отдельным запросом)
+	free := map[string]int64{}
+	rows, err := con.Query(ctx, `SELECT name, slots FROM pool FOR UPDATE`)
+	if err != nil {
+		return nil, fmt.Errorf("ClaimQueuedTasks pools: %w", err)
+	}
+	for rows.Next() {
+		var name string
+		var slots int64
+		if err = rows.Scan(&name, &slots); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("ClaimQueuedTasks pools scan: %w", err)
+		}
+		free[name] = slots
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ClaimQueuedTasks pools rows: %w", err)
+	}
+
+	rows, err = con.Query(ctx, `
+		SELECT pool, count(*) FROM task_instance
+		WHERE status = ANY($1) GROUP BY pool`,
+		[]string{model.TaskStatusStarting, model.TaskStatusRunning})
+	if err != nil {
+		return nil, fmt.Errorf("ClaimQueuedTasks occupancy: %w", err)
+	}
+	for rows.Next() {
+		var pool string
+		var busy int64
+		if err = rows.Scan(&pool, &busy); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("ClaimQueuedTasks occupancy scan: %w", err)
+		}
+		free[pool] -= busy
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ClaimQueuedTasks occupancy rows: %w", err)
+	}
+
+	// кандидаты: приоритетные первыми; таски полных пулов пропускаем
+	rows, err = con.Query(ctx, `
+		SELECT run_id, task, pool
+		FROM task_instance
+		WHERE status = $1
+		ORDER BY priority DESC, queued_at
+		LIMIT $2
+		FOR UPDATE SKIP LOCKED`,
+		model.TaskStatusQueued, claimCandidateLimit)
+	if err != nil {
+		return nil, fmt.Errorf("ClaimQueuedTasks candidates: %w", err)
+	}
+	var runIds, tasks []string
+	for rows.Next() {
+		var runId, task, pool string
+		if err = rows.Scan(&runId, &task, &pool); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("ClaimQueuedTasks candidates scan: %w", err)
+		}
+		// неизвестный пул (запись удалена руками из БД) — слотов нет
+		if int64(len(runIds)) >= limit || free[pool] <= 0 {
+			continue
+		}
+		free[pool]--
+		runIds = append(runIds, runId)
+		tasks = append(tasks, task)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ClaimQueuedTasks candidates rows: %w", err)
+	}
+	if len(runIds) == 0 {
+		return nil, nil
+	}
+
+	rows, err = con.Query(ctx, `
 		UPDATE task_instance AS ti
 		SET status = $1, attempt = ti.attempt + 1
-		FROM (
-			SELECT run_id, task
-			FROM task_instance
-			WHERE status = $2
-			ORDER BY queued_at
-			LIMIT $3
-			FOR UPDATE SKIP LOCKED
-		) AS q
+		FROM unnest($2::text[], $3::text[]) AS q(run_id, task)
 		WHERE ti.run_id = q.run_id AND ti.task = q.task
-		RETURNING ti.run_id, ti.task, ti.attempt`
-
-	rows, err := r.TxM.GetConnection(ctx).Query(ctx, query, model.TaskStatusStarting, model.TaskStatusQueued, limit)
+		RETURNING ti.run_id, ti.task, ti.attempt`,
+		model.TaskStatusStarting, runIds, tasks)
 	if err != nil {
 		return nil, fmt.Errorf("ClaimQueuedTasks: %w", err)
 	}
 	defer rows.Close()
 
-	result := make([]model.ClaimedTask, 0, limit)
+	result := make([]model.ClaimedTask, 0, len(runIds))
 	for rows.Next() {
 		var c model.ClaimedTask
 		if err = rows.Scan(&c.RunId, &c.Task, &c.Attempt); err != nil {
@@ -212,6 +291,102 @@ func (r *Repo) PromoteRetries(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
+// RetryTaskSubgraph возвращает таск завершённого рана в очередь, сбрасывает
+// его downstream-подграф в pending и реактивирует ран (running). Guarded:
+// возвращает false без изменений, если ран уже не терминален или таск не в
+// ретраебельном статусе (гонка конкурентных вызовов) — вызывать в
+// транзакции, false у вызывающего должен откатить её целиком.
+func (r *Repo) RetryTaskSubgraph(ctx context.Context, runId, task string, downstream []string) (bool, error) {
+	tag, err := r.TxM.GetConnection(ctx).Exec(ctx, `
+		UPDATE run SET status = $1, finished_at = NULL
+		WHERE id = $2 AND status = ANY($3)`,
+		model.RunStatusRunning, runId, []string{model.RunStatusSuccess, model.RunStatusFailed})
+	if err != nil {
+		return false, fmt.Errorf("RetryTaskSubgraph run: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+
+	tag, err = r.TxM.GetConnection(ctx).Exec(ctx, `
+		UPDATE task_instance
+		SET status = $1, queued_at = now(), started_at = NULL, retry_at = NULL, finished_at = NULL
+		WHERE run_id = $2 AND task = $3 AND status = ANY($4)`,
+		model.TaskStatusQueued, runId, task,
+		[]string{model.TaskStatusSuccess, model.TaskStatusFailed})
+	if err != nil {
+		return false, fmt.Errorf("RetryTaskSubgraph task: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+
+	if len(downstream) > 0 {
+		_, err = r.TxM.GetConnection(ctx).Exec(ctx, `
+			UPDATE task_instance
+			SET status = $1, queued_at = NULL, started_at = NULL, retry_at = NULL, finished_at = NULL
+			WHERE run_id = $2 AND task = ANY($3)`,
+			model.TaskStatusPending, runId, downstream)
+		if err != nil {
+			return false, fmt.Errorf("RetryTaskSubgraph downstream: %w", err)
+		}
+	}
+
+	return true, nil
+}
+
+// UpsertTaskValue сохраняет значение таска; повторный пуш по тому же ключу
+// перезаписывает (ретрай публикует значения заново).
+func (r *Repo) UpsertTaskValue(ctx context.Context, v *model.TaskValue) error {
+	_, err := r.TxM.GetConnection(ctx).Exec(ctx, `
+		INSERT INTO run_value (run_id, task, key, value) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (run_id, task, key)
+		DO UPDATE SET value = excluded.value, modified_at = now()`,
+		v.RunId, v.Task, v.Key, v.Value)
+	if err != nil {
+		return fmt.Errorf("UpsertTaskValue: %w", err)
+	}
+	return nil
+}
+
+func (r *Repo) GetTaskValue(ctx context.Context, runId, task, key string) (*model.TaskValue, bool, error) {
+	v := model.TaskValue{RunId: runId, Task: task, Key: key}
+	err := r.TxM.GetConnection(ctx).QueryRow(ctx, `
+		SELECT value, modified_at FROM run_value
+		WHERE run_id = $1 AND task = $2 AND key = $3`,
+		runId, task, key).Scan(&v.Value, &v.ModifiedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("GetTaskValue: %w", err)
+	}
+	return &v, true, nil
+}
+
+func (r *Repo) ListTaskValues(ctx context.Context, runId string) ([]*model.TaskValue, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
+		SELECT task, key, value, modified_at FROM run_value
+		WHERE run_id = $1 ORDER BY task, key`, runId)
+	if err != nil {
+		return nil, fmt.Errorf("ListTaskValues: %w", err)
+	}
+	defer rows.Close()
+
+	var result []*model.TaskValue
+	for rows.Next() {
+		v := model.TaskValue{RunId: runId}
+		if err = rows.Scan(&v.Task, &v.Key, &v.Value, &v.ModifiedAt); err != nil {
+			return nil, fmt.Errorf("ListTaskValues scan: %w", err)
+		}
+		result = append(result, &v)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListTaskValues rows: %w", err)
+	}
+	return result, nil
+}
+
 // FinishRun закрывает ран терминальным статусом; идемпотентен.
 func (r *Repo) FinishRun(ctx context.Context, runId, status string) error {
 	_, err := r.TxM.GetConnection(ctx).Exec(ctx, `
@@ -252,8 +427,11 @@ func (r *Repo) ListExpiredRuns(ctx context.Context, before time.Time, limit int6
 }
 
 // DeleteRun удаляет ран из БД; task_instance и attempt уходят каскадом.
+// Активный ран не трогаем: ретрай таска мог реактивировать его между
+// выборкой retention-кандидатов и удалением.
 func (r *Repo) DeleteRun(ctx context.Context, runId string) error {
-	_, err := r.TxM.GetConnection(ctx).Exec(ctx, `DELETE FROM run WHERE id = $1`, runId)
+	_, err := r.TxM.GetConnection(ctx).Exec(ctx, `
+		DELETE FROM run WHERE id = $1 AND status <> $2`, runId, model.RunStatusRunning)
 	if err != nil {
 		return fmt.Errorf("DeleteRun: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -21,6 +22,9 @@ const maxTaskRetries = 100
 // nameRe — допустимые имена дагов и тасков; согласовано с ограничениями
 // artifact-сервера (streamstore ref) и лейблов kubernetes.
 var nameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
+
+// envNameRe — допустимые имена env-переменных для инъекции секретов.
+var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 
 type Service struct {
 	repoDb RepoDbI
@@ -54,14 +58,20 @@ func (s *Service) Get(ctx context.Context, name string, errNE bool) (*model.Main
 
 // Register сохраняет даг по манифесту, полученному из образа: валидирует
 // манифест и создаёт/обновляет запись (перерегистрация = новая версия
-// образа). Paused при перерегистрации не трогается; next_run_at
-// пересчитывается от текущего момента (catchup не делаем).
+// образа). Paused при перерегистрации не трогается. next_run_at
+// пересчитывается от текущего момента, кроме catchup-дага с тем же
+// расписанием — его тики наверстает cron-цикл (решение №24).
 func (s *Service) Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest) (*model.Main, error) {
 	if err := ValidateManifest(m); err != nil {
 		return nil, err
 	}
 
-	err := s.repoDb.UpdateOrCreate(ctx, m.Name, &model.Edit{
+	old, oldFound, err := s.Get(ctx, m.Name, false)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.repoDb.UpdateOrCreate(ctx, m.Name, &model.Edit{
 		Image:       &image,
 		ImageDigest: &imageDigest,
 		Schedule:    &m.Schedule,
@@ -72,8 +82,12 @@ func (s *Service) Register(ctx context.Context, image, imageDigest string, rawMa
 		return nil, fmt.Errorf("repoDb.UpdateOrCreate: %w", err)
 	}
 
-	if err = s.resetNextRun(ctx, m.Name, m.Schedule); err != nil {
-		return nil, err
+	keepNextRun := m.Catchup && m.Schedule != "" &&
+		oldFound && old.Schedule == m.Schedule && !old.NextRunAt.IsZero()
+	if !keepNextRun {
+		if err = s.resetNextRun(ctx, m.Name, m.Schedule); err != nil {
+			return nil, err
+		}
 	}
 
 	result, _, err := s.Get(ctx, m.Name, true)
@@ -95,8 +109,9 @@ func (s *Service) SetPaused(ctx context.Context, name string, paused bool) error
 	}
 
 	// снятие с паузы: расписание продолжается со следующего срабатывания,
-	// пропущенные за время паузы запуски не навёрстываются
-	if !paused {
+	// пропущенные за время паузы запуски не навёрстываются — кроме
+	// catchup-дага: его next_run_at не трогаем, тики наверстает cron-цикл
+	if !paused && !(dag.Catchup && !dag.NextRunAt.IsZero()) {
 		if err = s.resetNextRun(ctx, name, dag.Schedule); err != nil {
 			return err
 		}
@@ -192,6 +207,9 @@ func ValidateManifest(m *model.Manifest) error {
 	if len(m.Tasks) == 0 {
 		return fail("в даге нет тасков")
 	}
+	if m.MaxActiveRuns < 0 {
+		return fail("отрицательный max_active_runs")
+	}
 
 	tasks := map[string]model.Task{}
 	for _, t := range m.Tasks {
@@ -212,6 +230,25 @@ func ValidateManifest(m *model.Manifest) error {
 		}
 		if err := validateResources(t.Name, t.Resources); err != nil {
 			return err
+		}
+		if t.Pool != "" && !nameRe.MatchString(t.Pool) {
+			return fail(fmt.Sprintf("таск %q: недопустимое имя пула %q", t.Name, t.Pool))
+		}
+		seenEnv := map[string]bool{}
+		for _, sec := range t.Secrets {
+			if !envNameRe.MatchString(sec.Env) {
+				return fail(fmt.Sprintf("таск %q: недопустимое env-имя секрета %q", t.Name, sec.Env))
+			}
+			if strings.HasPrefix(sec.Env, "LOOM_") {
+				return fail(fmt.Sprintf("таск %q: env %q конфликтует с контрактом LOOM_*", t.Name, sec.Env))
+			}
+			if seenEnv[sec.Env] {
+				return fail(fmt.Sprintf("таск %q: дубль env %q", t.Name, sec.Env))
+			}
+			seenEnv[sec.Env] = true
+			if !nameRe.MatchString(sec.Secret) {
+				return fail(fmt.Sprintf("таск %q: недопустимое имя секрета %q", t.Name, sec.Secret))
+			}
 		}
 		tasks[t.Name] = t
 	}

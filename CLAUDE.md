@@ -17,10 +17,15 @@ docker-образ = один даг, таски запускаются экзе�
 - `artifact/` — artifact-сервер (data plane), каркас по gotemplate
 - `server/` — control plane: Postgres (mobone) + gRPC/gateway, регистрация
   дагов через docker `describe`, планировщик (очередь `FOR UPDATE SKIP
-  LOCKED`, чистый planner + executor-порт, cron-триггер по `next_run_at`,
-  ретраи `up_for_retry` с backoff, таймаут-watchdog, зомби-reconcile),
-  k8s-executor, приём/чтение логов (streamstore), retention (`RUN_TTL`),
-  attempt-токены (`AUTH_SECRET`, пакет `api/attempttoken`)
+  LOCKED`, чистый planner + executor-порт, cron-триггер по `next_run_at`
+  с catchup-режимом, ретраи `up_for_retry` с backoff, таймаут-watchdog,
+  зомби-reconcile), executor'ы k8s и docker (`EXECUTOR=k8s|docker|none`),
+  приём/чтение логов (streamstore), retention (`RUN_TTL`), attempt-токены
+  (`AUTH_SECRET`, пакет `api/attempttoken`), ретрай таска/подграфа
+  (`RetryTask`, только на завершённом ране), параметры рана и
+  `logical_date`, backfill, значения тасков (XCom, `run_value`), пулы
+  слотов с приоритетами и `max_active_runs`, секреты с env-инъекцией
+  (`SECRET_KEY`)
 - `examples/` — примеры дагов
 - `admin/` — админка: Nuxt 4 SPA (`ssr: false`) + Nuxt UI v4 (НЕ Naive UI;
   образец — проект caravaneer). Раздаётся server'ом на `ADMIN_PORT` (8081)
@@ -36,8 +41,11 @@ docker-образ = один даг, таски запускаются экзе�
   `Close()` выхода опционален и НЕ коммитит.
 - `After` — ждать успеха отправителя; `AfterStreamed` — ко-старт и чтение по
   мере записи (opt-in).
-- Локальный режим: `<dag-binary> run`, артефакты в `.loom/runs/<run-id>/`,
-  остаются после рана.
+- Локальный режим: `<dag-binary> run [--params='{...}']`, артефакты и
+  значения в `.loom/runs/<run-id>/`, остаются после рана.
+- Мелкие значения тасков — `rt.PushValue`/`rt.PullValue` (через control
+  plane, лимит 64KB); параметры рана — `rt.Params()`/`rt.BindParams()`,
+  «дата данных» — `rt.LogicalDate()`.
 - Распределённый режим: `run --task=<name>` + env-контракт `LOOM_*`;
   программный вход — `DAG.RunTask`. Логи — батчами на control plane
   (`server_v1.TaskLogService`) с дублем в честный stdout; fd 1/2 процесса

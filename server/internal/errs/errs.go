@@ -21,9 +21,16 @@ const (
 const (
 	DagNotFound       = Err("dag_not_found")
 	RunNotFound       = Err("run_not_found")
+	RunNotFinished    = Err("run_not_finished")
+	TaskNotFound      = Err("task_not_found")
+	TaskNotRetryable  = Err("task_not_retryable")
 	InvalidManifest   = Err("invalid_manifest")
 	ImageRequired     = Err("image_required")
 	AttemptNotFound   = Err("attempt_not_found")
+	AttemptOutdated   = Err("attempt_outdated")
+	PoolNotFound      = Err("pool_not_found")
+	SecretNotFound    = Err("secret_not_found")
+	ValueNotFound     = Err("value_not_found")
 	LogAlreadyPushed  = Err("log_already_pushed")
 	AttemptLogAborted = Err("attempt_log_aborted")
 )
@@ -36,6 +43,10 @@ type ErrFull struct {
 
 func (e ErrFull) Error() string {
 	return e.Err.Error() + ", desc: " + e.Desc
+}
+
+func (e ErrFull) Unwrap() error {
+	return e.Err
 }
 
 // AsErr извлекает Err из цепочки ошибок — и когда она вернулась значением

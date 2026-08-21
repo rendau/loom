@@ -6,14 +6,15 @@ import (
 )
 
 // parseManifest разбирает jsonb-колонку manifest; манифест валидировался
-// при регистрации, поэтому ошибка парсинга здесь — деградация без паники.
-func parseManifest(raw []byte) (sdkVersion string, tasks []domainModel.Task) {
+// при регистрации, поэтому ошибка парсинга здесь — деградация без паники
+// (пустой манифест).
+func parseManifest(raw []byte) *domainModel.Manifest {
 	if len(raw) == 0 {
-		return "", nil
+		return &domainModel.Manifest{}
 	}
 	m, err := manifest.Parse(raw)
 	if err != nil {
-		return "", nil
+		return &domainModel.Manifest{}
 	}
-	return m.SdkVersion, m.Tasks
+	return m
 }

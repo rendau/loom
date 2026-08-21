@@ -44,19 +44,21 @@ func (m *Select) DefaultSortColumns() []string {
 // DTO
 
 func EncodeSelect(v *Select, _ int) *domainModel.Main {
-	sdkVersion, tasks := parseManifest(v.Manifest)
+	m := parseManifest(v.Manifest)
 
 	return &domainModel.Main{
-		Name:        v.Name,
-		Image:       v.Image,
-		ImageDigest: v.ImageDigest,
-		Schedule:    v.Schedule,
-		Paused:      v.Paused,
-		SdkVersion:  sdkVersion,
-		Tasks:       tasks,
-		Manifest:    v.Manifest,
-		NextRunAt:   v.NextRunAt.Time,
-		CreatedAt:   v.CreatedAt,
-		ModifiedAt:  v.ModifiedAt.Time,
+		Name:          v.Name,
+		Image:         v.Image,
+		ImageDigest:   v.ImageDigest,
+		Schedule:      v.Schedule,
+		Catchup:       m.Catchup,
+		MaxActiveRuns: m.MaxActiveRuns,
+		Paused:        v.Paused,
+		SdkVersion:    m.SdkVersion,
+		Tasks:         m.Tasks,
+		Manifest:      v.Manifest,
+		NextRunAt:     v.NextRunAt.Time,
+		CreatedAt:     v.CreatedAt,
+		ModifiedAt:    v.ModifiedAt.Time,
 	}
 }

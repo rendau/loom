@@ -4,6 +4,8 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 const navItems: NavigationMenuItem[][] = [[
   { label: 'Даги', icon: 'i-lucide-workflow', to: '/dags' },
   { label: 'Раны', icon: 'i-lucide-list', to: '/runs' },
+  { label: 'Пулы', icon: 'i-lucide-layers', to: '/pools' },
+  { label: 'Секреты', icon: 'i-lucide-key-round', to: '/secrets' },
 ]]
 </script>
 

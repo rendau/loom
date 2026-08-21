@@ -274,3 +274,66 @@ func TestRunLocalTaskTimeout(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "timeout")
 }
+
+func TestRunLocalParamsAndLogicalDate(t *testing.T) {
+	d := New("params_dag")
+
+	type cfg struct {
+		Date  string `json:"date"`
+		Limit int    `json:"limit"`
+	}
+
+	var got cfg
+	var logicalDate time.Time
+	d.Task("a", func(_ context.Context, rt *Runtime) error {
+		logicalDate = rt.LogicalDate()
+		return rt.BindParams(&got)
+	})
+
+	before := time.Now()
+	err := d.RunLocal(context.Background(), LocalDir(t.TempDir()),
+		LocalParams([]byte(`{"date":"2026-08-01","limit":10}`)))
+	require.NoError(t, err)
+
+	assert.Equal(t, cfg{Date: "2026-08-01", Limit: 10}, got)
+	assert.False(t, logicalDate.Before(before), "logical date локального рана — время запуска")
+
+	// без параметров: Params() == nil, BindParams — ошибка
+	d2 := New("no_params_dag")
+	d2.Task("a", func(_ context.Context, rt *Runtime) error {
+		assert.Nil(t, rt.Params())
+		var v cfg
+		assert.Error(t, rt.BindParams(&v))
+		return nil
+	})
+	require.NoError(t, d2.RunLocal(context.Background(), LocalDir(t.TempDir())))
+}
+
+func TestRunLocalTaskValues(t *testing.T) {
+	d := New("values_dag")
+
+	produce := d.Task("produce", func(_ context.Context, rt *Runtime) error {
+		return rt.PushValue("rows", 42)
+	})
+
+	var got int
+	d.Task("consume", func(_ context.Context, rt *Runtime) error {
+		return rt.PullValue("produce", "rows", &got)
+	}, After(produce))
+
+	require.NoError(t, d.RunLocal(context.Background(), LocalDir(t.TempDir())))
+	assert.Equal(t, 42, got)
+
+	// чтение у не-зависимости и отсутствующего ключа — ошибки
+	d2 := New("values_bad")
+	other := d2.Task("other", func(context.Context, *Runtime) error { return nil })
+	prod2 := d2.Task("produce", func(context.Context, *Runtime) error { return nil })
+	d2.Task("consume", func(_ context.Context, rt *Runtime) error {
+		var v int
+		assert.Error(t, rt.PullValue("other", "rows", &v), "other — не зависимость")
+		assert.Error(t, rt.PullValue("produce", "missing", &v), "ключа нет")
+		return nil
+	}, After(prod2))
+	_ = other
+	require.NoError(t, d2.RunLocal(context.Background(), LocalDir(t.TempDir())))
+}

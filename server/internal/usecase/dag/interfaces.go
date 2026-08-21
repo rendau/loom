@@ -21,3 +21,9 @@ type ImageInspectorI interface {
 	ResolveDigest(ctx context.Context, image string) (string, error)
 	Describe(ctx context.Context, image string) ([]byte, error)
 }
+
+// PoolCheckerI — проверка существования пулов из манифеста при регистрации:
+// таск с неизвестным пулом навсегда завис бы в очереди.
+type PoolCheckerI interface {
+	CheckExist(ctx context.Context, names []string) error
+}

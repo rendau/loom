@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/samber/lo"
+
 	"github.com/rendau/loom/server/internal/domain/dag/manifest"
 	"github.com/rendau/loom/server/internal/domain/dag/model"
 	"github.com/rendau/loom/server/internal/errs"
@@ -13,10 +15,11 @@ import (
 type Usecase struct {
 	svc       ServiceI
 	inspector ImageInspectorI
+	pools     PoolCheckerI
 }
 
-func New(svc ServiceI, inspector ImageInspectorI) *Usecase {
-	return &Usecase{svc: svc, inspector: inspector}
+func New(svc ServiceI, inspector ImageInspectorI, pools PoolCheckerI) *Usecase {
+	return &Usecase{svc: svc, inspector: inspector, pools: pools}
 }
 
 func (u *Usecase) List(ctx context.Context, pars *model.ListReq) ([]*model.Main, int64, error) {
@@ -63,6 +66,15 @@ func (u *Usecase) Register(ctx context.Context, image string) (*model.Main, erro
 	m, err := manifest.Parse(raw)
 	if err != nil {
 		return nil, errs.ErrFull{Err: errs.InvalidManifest, Desc: err.Error()}
+	}
+
+	// пулы манифеста должны существовать: таск с неизвестным пулом навсегда
+	// завис бы в очереди
+	pools := lo.Uniq(lo.FilterMap(m.Tasks, func(t model.Task, _ int) (string, bool) {
+		return t.Pool, t.Pool != ""
+	}))
+	if err = u.pools.CheckExist(ctx, pools); err != nil {
+		return nil, err
 	}
 
 	result, err := u.svc.Register(ctx, image, digest, raw, m)

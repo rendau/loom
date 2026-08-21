@@ -2,8 +2,10 @@ package handler
 
 import (
 	"context"
+	"time"
 
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	commonPb "github.com/rendau/loom/api/common"
 	pb "github.com/rendau/loom/api/server_v1"
@@ -22,7 +24,12 @@ func NewRun(uc *runUsc.Usecase) *Run {
 }
 
 func (h *Run) TriggerRun(ctx context.Context, req *pb.RunTriggerReq) (*pb.RunTriggerRep, error) {
-	runId, err := h.usecase.Trigger(ctx, req.GetDagName())
+	params, err := dto.DecodeRunParams(req.GetParams())
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+
+	runId, err := h.usecase.Trigger(ctx, req.GetDagName(), params)
 	if err != nil {
 		return nil, encodeErr(err)
 	}
@@ -49,15 +56,45 @@ func (h *Run) ListRun(ctx context.Context, req *pb.RunListReq) (*pb.RunListRep, 
 	}, nil
 }
 
+func (h *Run) BackfillRun(ctx context.Context, req *pb.RunBackfillReq) (*pb.RunBackfillRep, error) {
+	params, err := dto.DecodeRunParams(req.GetParams())
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+
+	// nil-timestamp через AsTime даёт epoch, а не zero — конвертируем явно
+	var from, to time.Time
+	if req.GetFrom() != nil {
+		from = req.GetFrom().AsTime()
+	}
+	if req.GetTo() != nil {
+		to = req.GetTo().AsTime()
+	}
+
+	runIds, err := h.usecase.Backfill(ctx, req.GetDagName(), from, to, params)
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+	return &pb.RunBackfillRep{RunIds: runIds}, nil
+}
+
+func (h *Run) RetryTask(ctx context.Context, req *pb.RunRetryTaskReq) (*emptypb.Empty, error) {
+	if err := h.usecase.RetryTask(ctx, req.GetRunId(), req.GetTask()); err != nil {
+		return nil, encodeErr(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
 func (h *Run) GetRun(ctx context.Context, req *pb.RunGetReq) (*pb.RunGetRep, error) {
-	run, tasks, attempts, err := h.usecase.Get(ctx, req.GetId())
+	run, manifestTasks, tasks, attempts, err := h.usecase.Get(ctx, req.GetId())
 	if err != nil {
 		return nil, encodeErr(err)
 	}
 
 	return &pb.RunGetRep{
-		Run:      dto.EncodeRunMain(run, 0),
-		Tasks:    lo.Map(tasks, dto.EncodeTaskInstanceMain),
-		Attempts: lo.Map(attempts, dto.EncodeAttemptMain),
+		Run:           dto.EncodeRunMain(run, 0),
+		Tasks:         lo.Map(tasks, dto.EncodeTaskInstanceMain),
+		Attempts:      lo.Map(attempts, dto.EncodeAttemptMain),
+		ManifestTasks: lo.Map(manifestTasks, dto.EncodeDagTaskMain),
 	}, nil
 }

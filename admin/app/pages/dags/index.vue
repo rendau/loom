@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import { listDags, registerDag, setDagPaused, deleteDag } from '~/api/dag.api'
-import { triggerRun } from '~/api/run.api'
+import { backfillRuns, triggerRun } from '~/api/run.api'
 import type { Dag } from '~/types/dag'
 
 const dags = ref<Dag[]>([])
@@ -37,11 +37,80 @@ async function submitRegister() {
   }
 }
 
-// действия по строке
-async function trigger(dag: Dag) {
-  const rep = await action.run(() => triggerRun(dag.name), { success: 'Ран запущен' })
-  if (rep)
+// ручной триггер: опциональные params (JSON-объект)
+const triggerTarget = ref<Dag | null>(null)
+const triggerParams = ref('')
+
+// parseParams валидирует JSON-объект параметров; null — ошибка ввода.
+function parseParams(raw: string): Record<string, unknown> | undefined | null {
+  const trimmed = raw.trim()
+  if (!trimmed)
+    return undefined
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+      return null
+    return parsed as Record<string, unknown>
+  }
+  catch {
+    return null
+  }
+}
+
+const toast = useToast()
+
+function badParamsToast() {
+  toast.add({ title: 'Параметры должны быть JSON-объектом', color: 'error' })
+}
+
+async function confirmTrigger() {
+  const dag = triggerTarget.value
+  if (!dag)
+    return
+  const params = parseParams(triggerParams.value)
+  if (params === null) {
+    badParamsToast()
+    return
+  }
+  const rep = await action.run(() => triggerRun(dag.name, params), { success: 'Ран запущен' })
+  if (rep) {
+    triggerTarget.value = null
+    triggerParams.value = ''
     await navigateTo(`/runs/${rep.run_id}`)
+  }
+}
+
+// backfill: ран на каждый тик расписания в периоде
+const backfillTarget = ref<Dag | null>(null)
+const backfillFrom = ref('')
+const backfillTo = ref('')
+const backfillParams = ref('')
+
+async function confirmBackfill() {
+  const dag = backfillTarget.value
+  if (!dag)
+    return
+  if (!backfillFrom.value || !backfillTo.value) {
+    toast.add({ title: 'Задайте период from и to', color: 'error' })
+    return
+  }
+  const params = parseParams(backfillParams.value)
+  if (params === null) {
+    badParamsToast()
+    return
+  }
+
+  const from = new Date(backfillFrom.value).toISOString()
+  const to = new Date(backfillTo.value).toISOString()
+  const rep = await action.run(() => backfillRuns(dag.name, from, to, params))
+  if (rep) {
+    toast.add({ title: `Создано ранов: ${rep.run_ids.length}`, color: 'success' })
+    backfillTarget.value = null
+    backfillFrom.value = ''
+    backfillTo.value = ''
+    backfillParams.value = ''
+    await navigateTo('/runs')
+  }
 }
 
 async function togglePaused(dag: Dag) {
@@ -101,7 +170,10 @@ const columns: TableColumn<Dag>[] = [
 
         <template #schedule-cell="{ row }">
           <div v-if="row.original.schedule">
-            <div class="font-mono">{{ row.original.schedule }}</div>
+            <div class="flex items-center gap-1.5">
+              <span class="font-mono">{{ row.original.schedule }}</span>
+              <UBadge v-if="row.original.catchup" color="info" variant="subtle" size="sm">catchup</UBadge>
+            </div>
             <div class="text-xs text-muted">след.: {{ formatDateTime(row.original.next_run_at) }}</div>
           </div>
           <span v-else class="text-muted">—</span>
@@ -122,7 +194,10 @@ const columns: TableColumn<Dag>[] = [
         <template #actions-cell="{ row }">
           <div class="flex justify-end gap-1">
             <UTooltip text="Запустить ран">
-              <UButton icon="i-lucide-play" size="sm" color="primary" variant="ghost" @click="trigger(row.original)" />
+              <UButton icon="i-lucide-play" size="sm" color="primary" variant="ghost" @click="triggerTarget = row.original" />
+            </UTooltip>
+            <UTooltip v-if="row.original.schedule" text="Backfill за период">
+              <UButton icon="i-lucide-calendar-clock" size="sm" color="secondary" variant="ghost" @click="backfillTarget = row.original" />
             </UTooltip>
             <UTooltip :text="row.original.paused ? 'Снять с паузы' : 'Поставить на паузу'">
               <UButton
@@ -161,6 +236,66 @@ const columns: TableColumn<Dag>[] = [
           <div class="flex w-full justify-end gap-2">
             <UButton color="neutral" variant="ghost" label="Отмена" @click="registerOpen = false" />
             <UButton label="Зарегистрировать" :loading="action.loading.value" @click="submitRegister" />
+          </div>
+        </template>
+      </UModal>
+
+      <!-- ручной запуск рана (с опциональными параметрами) -->
+      <UModal
+        :open="triggerTarget !== null"
+        title="Запуск рана"
+        :description="`Даг ${triggerTarget?.name ?? ''}. Параметры доступны таскам через rt.Params().`"
+        @update:open="triggerTarget = null"
+      >
+        <template #body>
+          <UFormField label="Параметры (JSON-объект, опционально)">
+            <UTextarea
+              v-model="triggerParams"
+              class="w-full font-mono"
+              :rows="4"
+              placeholder='{"date": "2026-08-01"}'
+            />
+          </UFormField>
+        </template>
+        <template #footer>
+          <div class="flex w-full justify-end gap-2">
+            <UButton color="neutral" variant="ghost" label="Отмена" @click="triggerTarget = null" />
+            <UButton label="Запустить" :loading="action.loading.value" @click="confirmTrigger" />
+          </div>
+        </template>
+      </UModal>
+
+      <!-- backfill за период -->
+      <UModal
+        :open="backfillTarget !== null"
+        title="Backfill"
+        :description="`Ран на каждый тик расписания «${backfillTarget?.schedule ?? ''}» в периоде [from, to).`"
+        @update:open="backfillTarget = null"
+      >
+        <template #body>
+          <div class="space-y-4">
+            <div class="grid grid-cols-2 gap-3">
+              <UFormField label="From (включительно)">
+                <UInput v-model="backfillFrom" type="datetime-local" class="w-full" />
+              </UFormField>
+              <UFormField label="To (исключительно)">
+                <UInput v-model="backfillTo" type="datetime-local" class="w-full" />
+              </UFormField>
+            </div>
+            <UFormField label="Параметры всех ранов (JSON-объект, опционально)">
+              <UTextarea
+                v-model="backfillParams"
+                class="w-full font-mono"
+                :rows="3"
+                placeholder='{"source": "backfill"}'
+              />
+            </UFormField>
+          </div>
+        </template>
+        <template #footer>
+          <div class="flex w-full justify-end gap-2">
+            <UButton color="neutral" variant="ghost" label="Отмена" @click="backfillTarget = null" />
+            <UButton label="Создать раны" :loading="action.loading.value" @click="confirmBackfill" />
           </div>
         </template>
       </UModal>

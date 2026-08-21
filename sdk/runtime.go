@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
+	json "github.com/goccy/go-json"
 	"github.com/samber/lo"
 )
 
@@ -39,7 +41,7 @@ type ArtifactWriter interface {
 }
 
 // Runtime — единственная точка контакта таска с внешним миром:
-// артефакты и логи.
+// артефакты, параметры рана и логи.
 type Runtime struct {
 	ctx         context.Context
 	task        *Task
@@ -47,27 +49,69 @@ type Runtime struct {
 	attempt     int
 	log         *slog.Logger
 	store       artifactStore
+	values      valueStore
 	depAttempts map[string]int
+	params      []byte
+	logicalDate time.Time
 
 	mu      sync.Mutex
 	writers map[string]*outputWriter
 }
 
-func newRuntime(ctx context.Context, task *Task, runID string, attempt int, log *slog.Logger, store artifactStore, depAttempts map[string]int) *Runtime {
+// runtimeCfg — параметры создания Runtime (общие для локального и
+// распределённого режимов).
+type runtimeCfg struct {
+	runID       string
+	attempt     int
+	store       artifactStore
+	values      valueStore // nil — значения недоступны (нет control plane)
+	depAttempts map[string]int
+	params      []byte
+	logicalDate time.Time
+}
+
+func newRuntime(ctx context.Context, task *Task, log *slog.Logger, cfg runtimeCfg) *Runtime {
 	return &Runtime{
 		ctx:         ctx,
 		task:        task,
-		runID:       runID,
-		attempt:     attempt,
+		runID:       cfg.runID,
+		attempt:     cfg.attempt,
 		log:         log,
-		store:       store,
-		depAttempts: depAttempts,
+		store:       cfg.store,
+		values:      cfg.values,
+		depAttempts: cfg.depAttempts,
+		params:      cfg.params,
+		logicalDate: cfg.logicalDate,
 		writers:     map[string]*outputWriter{},
 	}
 }
 
 func (rt *Runtime) Log() *slog.Logger {
 	return rt.log
+}
+
+// Params возвращает параметры рана как raw JSON-объект; nil — ран без
+// параметров. Для типизированного доступа — BindParams.
+func (rt *Runtime) Params() []byte {
+	return rt.params
+}
+
+// BindParams десериализует параметры рана в v; ран без параметров — ошибка
+// (проверяйте Params(), если параметры опциональны).
+func (rt *Runtime) BindParams(v any) error {
+	if len(rt.params) == 0 {
+		return errors.New("run has no params")
+	}
+	if err := json.Unmarshal(rt.params, v); err != nil {
+		return fmt.Errorf("unmarshal run params: %w", err)
+	}
+	return nil
+}
+
+// LogicalDate — «дата данных» рана: тик расписания у cron/backfill-рана,
+// момент триггера у ручного и локального.
+func (rt *Runtime) LogicalDate() time.Time {
+	return rt.logicalDate
 }
 
 // Output открывает артефакт на запись. Close опционален: он лишь запрещает
@@ -111,6 +155,51 @@ func (rt *Runtime) Input(task, name string) (io.ReadCloser, error) {
 	}
 
 	return r, nil
+}
+
+// PushValue публикует мелкое значение таска (аналог XCom): счётчики, id,
+// статусы — не данные (данные текут артефактами, Output). v сериализуется в
+// JSON, лимит — 64KB; повторный пуш по тому же ключу перезаписывает.
+// В распределённом режиме требует control plane (LOOM_SERVER_ADDR).
+func (rt *Runtime) PushValue(key string, v any) error {
+	if rt.values == nil {
+		return errors.New("task values require control plane (LOOM_SERVER_ADDR is not set)")
+	}
+	if !nameRe.MatchString(key) {
+		return fmt.Errorf("invalid value key %q", key)
+	}
+
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("marshal value %q: %w", key, err)
+	}
+
+	if err = rt.values.Push(rt.ctx, rt.runID, rt.task.name, rt.attempt, key, raw); err != nil {
+		return fmt.Errorf("push value %q: %w", key, err)
+	}
+	return nil
+}
+
+// PullValue читает значение таска-зависимости в dest. Как и Input, доступны
+// только таски, объявленные через After/AfterStreamed. Отсутствующее
+// значение — ошибка (у стримовой зависимости оно может ещё не появиться).
+func (rt *Runtime) PullValue(task, key string, dest any) error {
+	if rt.values == nil {
+		return errors.New("task values require control plane (LOOM_SERVER_ADDR is not set)")
+	}
+	if !lo.ContainsBy(rt.task.deps, func(v taskDep) bool { return v.task.name == task }) {
+		return fmt.Errorf("task %q is not a declared dependency of %q", task, rt.task.name)
+	}
+
+	raw, err := rt.values.Pull(rt.ctx, rt.runID, task, key)
+	if err != nil {
+		return fmt.Errorf("pull value %q/%q: %w", task, key, err)
+	}
+
+	if err = json.Unmarshal(raw, dest); err != nil {
+		return fmt.Errorf("unmarshal value %q/%q: %w", task, key, err)
+	}
+	return nil
 }
 
 // depAttempt возвращает номер попытки зависимости, чьи артефакты читаем.

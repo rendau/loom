@@ -66,6 +66,10 @@ message DagMain {
   optional google.protobuf.Timestamp modified_at = 9;
   // Ближайший запуск по cron-расписанию; отсутствует у дагов без расписания.
   optional google.protobuf.Timestamp next_run_at = 10;
+  // Наверстывать пропущенные тики расписания (решение №24).
+  bool catchup = 11;
+  // Лимит одновременно выполняющихся ранов; 0 — без лимита (решение №26).
+  int32 max_active_runs = 12;
 }
 
 message DagTaskMain {
@@ -75,6 +79,8 @@ message DagTaskMain {
   int32 retry_delay_sec = 4; // базовая пауза backoff'а; 0 — дефолт сервера
   int32 timeout_sec = 5;     // 0 — без таймаута
   optional DagTaskResources resources = 6;
+  string pool = 7;           // пул слотов; пусто — default (решение №26)
+  int32 priority = 8;        // больше — раньше из очереди
 }
 
 message DagTaskDepMain {

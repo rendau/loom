@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package server_v1;
+
+option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// PoolService — пулы слотов параллелизма (решение №26): таски всех дагов
+// конкурируют за слоты своего пула. Удаления нет — на пул могут ссылаться
+// манифесты; slots = 0 ставит пул на паузу.
+service PoolService {
+  rpc ListPool(google.protobuf.Empty) returns (PoolListRep) {
+    option (google.api.http) = {
+      get: "/pool"
+    };
+  }
+
+  // SetPool создаёт пул или меняет число слотов существующего.
+  rpc SetPool(PoolSetReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      put: "/pool/{name}"
+      body: "*"
+    };
+  }
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message PoolMain {
+  string name = 1;
+  int32 slots = 2;
+  google.protobuf.Timestamp created_at = 3;
+  optional google.protobuf.Timestamp modified_at = 4;
+}
+
+message PoolListRep {
+  repeated PoolMain results = 1;
+}
+
+message PoolSetReq {
+  string name = 1;
+  int32 slots = 2;
+}

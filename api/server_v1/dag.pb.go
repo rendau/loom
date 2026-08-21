@@ -37,7 +37,11 @@ type DagMain struct {
 	CreatedAt   *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	ModifiedAt  *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=modified_at,json=modifiedAt,proto3,oneof" json:"modified_at,omitempty"`
 	// Ближайший запуск по cron-расписанию; отсутствует у дагов без расписания.
-	NextRunAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=next_run_at,json=nextRunAt,proto3,oneof" json:"next_run_at,omitempty"`
+	NextRunAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=next_run_at,json=nextRunAt,proto3,oneof" json:"next_run_at,omitempty"`
+	// Наверстывать пропущенные тики расписания (решение №24).
+	Catchup bool `protobuf:"varint,11,opt,name=catchup,proto3" json:"catchup,omitempty"`
+	// Лимит одновременно выполняющихся ранов; 0 — без лимита (решение №26).
+	MaxActiveRuns int32 `protobuf:"varint,12,opt,name=max_active_runs,json=maxActiveRuns,proto3" json:"max_active_runs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -142,6 +146,20 @@ func (x *DagMain) GetNextRunAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *DagMain) GetCatchup() bool {
+	if x != nil {
+		return x.Catchup
+	}
+	return false
+}
+
+func (x *DagMain) GetMaxActiveRuns() int32 {
+	if x != nil {
+		return x.MaxActiveRuns
+	}
+	return 0
+}
+
 type DagTaskMain struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -150,6 +168,8 @@ type DagTaskMain struct {
 	RetryDelaySec int32                  `protobuf:"varint,4,opt,name=retry_delay_sec,json=retryDelaySec,proto3" json:"retry_delay_sec,omitempty"` // базовая пауза backoff'а; 0 — дефолт сервера
 	TimeoutSec    int32                  `protobuf:"varint,5,opt,name=timeout_sec,json=timeoutSec,proto3" json:"timeout_sec,omitempty"`            // 0 — без таймаута
 	Resources     *DagTaskResources      `protobuf:"bytes,6,opt,name=resources,proto3,oneof" json:"resources,omitempty"`
+	Pool          string                 `protobuf:"bytes,7,opt,name=pool,proto3" json:"pool,omitempty"`          // пул слотов; пусто — default (решение №26)
+	Priority      int32                  `protobuf:"varint,8,opt,name=priority,proto3" json:"priority,omitempty"` // больше — раньше из очереди
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -224,6 +244,20 @@ func (x *DagTaskMain) GetResources() *DagTaskResources {
 		return x.Resources
 	}
 	return nil
+}
+
+func (x *DagTaskMain) GetPool() string {
+	if x != nil {
+		return x.Pool
+	}
+	return ""
+}
+
+func (x *DagTaskMain) GetPriority() int32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
 }
 
 type DagTaskDepMain struct {
@@ -683,7 +717,7 @@ var File_server_v1_dag_proto protoreflect.FileDescriptor
 
 const file_server_v1_dag_proto_rawDesc = "" +
 	"\n" +
-	"\x13server_v1/dag.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x13common/common.proto\"\xb7\x03\n" +
+	"\x13server_v1/dag.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x13common/common.proto\"\xf9\x03\n" +
 	"\aDagMain\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x12!\n" +
@@ -698,9 +732,11 @@ const file_server_v1_dag_proto_rawDesc = "" +
 	"\vmodified_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampH\x00R\n" +
 	"modifiedAt\x88\x01\x01\x12?\n" +
 	"\vnext_run_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tnextRunAt\x88\x01\x01B\x0e\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tnextRunAt\x88\x01\x01\x12\x18\n" +
+	"\acatchup\x18\v \x01(\bR\acatchup\x12&\n" +
+	"\x0fmax_active_runs\x18\f \x01(\x05R\rmaxActiveRunsB\x0e\n" +
 	"\f_modified_atB\x0e\n" +
-	"\f_next_run_at\"\x8c\x02\n" +
+	"\f_next_run_at\"\xbc\x02\n" +
 	"\vDagTaskMain\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x128\n" +
 	"\n" +
@@ -709,7 +745,9 @@ const file_server_v1_dag_proto_rawDesc = "" +
 	"\x0fretry_delay_sec\x18\x04 \x01(\x05R\rretryDelaySec\x12\x1f\n" +
 	"\vtimeout_sec\x18\x05 \x01(\x05R\n" +
 	"timeoutSec\x12>\n" +
-	"\tresources\x18\x06 \x01(\v2\x1b.server_v1.DagTaskResourcesH\x00R\tresources\x88\x01\x01B\f\n" +
+	"\tresources\x18\x06 \x01(\v2\x1b.server_v1.DagTaskResourcesH\x00R\tresources\x88\x01\x01\x12\x12\n" +
+	"\x04pool\x18\a \x01(\tR\x04pool\x12\x1a\n" +
+	"\bpriority\x18\b \x01(\x05R\bpriorityB\f\n" +
 	"\n" +
 	"_resources\"@\n" +
 	"\x0eDagTaskDepMain\x12\x12\n" +

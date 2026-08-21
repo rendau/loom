@@ -19,6 +19,14 @@ type Task struct {
 	retryDelay time.Duration
 	timeout    time.Duration
 	resources  ResourceSpec
+	pool       string
+	priority   int
+	secrets    []secretRef
+}
+
+type secretRef struct {
+	env    string // имя env-переменной в контейнере таска
+	secret string // имя секрета на control plane
 }
 
 type taskDep struct {
@@ -81,4 +89,28 @@ type ResourceSpec struct {
 // Resources задаёт requests/limits контейнера попытки таска.
 func Resources(spec ResourceSpec) TaskOption {
 	return func(t *Task) { t.resources = spec }
+}
+
+// Pool относит таск к пулу слотов параллелизма control plane: таски всех
+// дагов конкурируют за слоты своего пула. Пул должен существовать на
+// control plane к моменту регистрации; по умолчанию — пул "default".
+// В локальном режиме игнорируется.
+func Pool(name string) TaskOption {
+	return func(t *Task) { t.pool = name }
+}
+
+// Priority задаёт приоритет таска в очереди: при конкуренции за слоты
+// таски с бОльшим приоритетом забираются первыми (по умолчанию 0).
+// В локальном режиме игнорируется.
+func Priority(n int) TaskOption {
+	return func(t *Task) { t.priority = n }
+}
+
+// Secret инъектит секрет control plane в env контейнера таска: значение
+// секрета secretName попадёт в переменную envName. Секрет создаётся заранее
+// через API/админку; отсутствующий на момент запуска секрет валит попытку
+// (launch_failed). Читайте значение обычным os.Getenv. В локальном режиме
+// игнорируется — задавайте переменную окружением процесса.
+func Secret(envName, secretName string) TaskOption {
+	return func(t *Task) { t.secrets = append(t.secrets, secretRef{env: envName, secret: secretName}) }
 }

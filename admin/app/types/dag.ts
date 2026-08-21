@@ -19,6 +19,8 @@ export interface DagTask {
   retry_delay_sec: number
   timeout_sec: number
   resources?: DagTaskResources
+  pool: string // пусто — default
+  priority: number
 }
 
 export interface Dag {
@@ -32,4 +34,6 @@ export interface Dag {
   created_at: string
   modified_at?: string
   next_run_at?: string
+  catchup: boolean
+  max_active_runs: number // 0 — без лимита
 }

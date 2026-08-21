@@ -13,10 +13,12 @@ import (
 )
 
 type manifestDTO struct {
-	SdkVersion string         `json:"sdk_version"`
-	Name       string         `json:"name"`
-	Schedule   string         `json:"schedule"`
-	Tasks      []manifestTask `json:"tasks"`
+	SdkVersion    string         `json:"sdk_version"`
+	Name          string         `json:"name"`
+	Schedule      string         `json:"schedule"`
+	Catchup       bool           `json:"catchup"`
+	MaxActiveRuns int            `json:"max_active_runs"`
+	Tasks         []manifestTask `json:"tasks"`
 }
 
 type manifestTask struct {
@@ -26,6 +28,14 @@ type manifestTask struct {
 	RetryDelaySec int                `json:"retry_delay_sec"`
 	TimeoutSec    int                `json:"timeout_sec"`
 	Resources     *manifestResources `json:"resources"`
+	Pool          string             `json:"pool"`
+	Priority      int                `json:"priority"`
+	Secrets       []manifestSecret   `json:"secrets"`
+}
+
+type manifestSecret struct {
+	Env    string `json:"env"`
+	Secret string `json:"secret"`
 }
 
 type manifestDep struct {
@@ -47,10 +57,12 @@ func Parse(raw []byte) (*dagModel.Manifest, error) {
 	}
 
 	return &dagModel.Manifest{
-		SdkVersion: m.SdkVersion,
-		Name:       m.Name,
-		Schedule:   m.Schedule,
-		Tasks:      lo.Map(m.Tasks, encodeManifestTask),
+		SdkVersion:    m.SdkVersion,
+		Name:          m.Name,
+		Schedule:      m.Schedule,
+		Catchup:       m.Catchup,
+		MaxActiveRuns: m.MaxActiveRuns,
+		Tasks:         lo.Map(m.Tasks, encodeManifestTask),
 	}, nil
 }
 
@@ -61,6 +73,11 @@ func encodeManifestTask(v manifestTask, _ int) dagModel.Task {
 		Retries:       v.Retries,
 		RetryDelaySec: v.RetryDelaySec,
 		TimeoutSec:    v.TimeoutSec,
+		Pool:          v.Pool,
+		Priority:      v.Priority,
+		Secrets: lo.Map(v.Secrets, func(s manifestSecret, _ int) dagModel.SecretRef {
+			return dagModel.SecretRef{Env: s.Env, Secret: s.Secret}
+		}),
 	}
 	if v.Resources != nil {
 		result.Resources = &dagModel.TaskResources{

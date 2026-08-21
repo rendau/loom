@@ -23,6 +23,8 @@ const (
 	EnvAttempt      = "LOOM_ATTEMPT"
 	EnvDepAttempts  = "LOOM_DEP_ATTEMPTS" // json-объект {"task": attempt}: чьи артефакты читать
 	EnvToken        = "LOOM_TOKEN"        // короткоживущий токен, скоупленный на attempt
+	EnvRunParams    = "LOOM_RUN_PARAMS"   // параметры рана (raw JSON-объект); пусто — без параметров
+	EnvLogicalDate  = "LOOM_LOGICAL_DATE" // «дата данных» рана, RFC3339
 )
 
 // finishAttemptTimeout — на FinishAttempt после завершения таска; вызов
@@ -43,6 +45,9 @@ type TaskRunSpec struct {
 	ServerAddr   string         // адрес control plane; пусто — без лог-стрима
 	Token        string         // attempt-токен; прикладывается metadata'ой к вызовам
 	DepAttempts  map[string]int // таск-зависимость → номер попытки (по умолчанию 1)
+
+	Params      []byte    // параметры рана (raw JSON-объект); nil — без параметров
+	LogicalDate time.Time // «дата данных» рана; zero — время запуска
 
 	CaptureOutput bool // перехват fd stdout/stderr (dup2) в лог-стрим
 }
@@ -87,6 +92,17 @@ func taskRunSpecFromEnv() (TaskRunSpec, error) {
 		if err := json.Unmarshal([]byte(raw), &spec.DepAttempts); err != nil {
 			return spec, fmt.Errorf("parse %s: %w", EnvDepAttempts, err)
 		}
+	}
+
+	if raw := os.Getenv(EnvRunParams); raw != "" {
+		spec.Params = []byte(raw)
+	}
+	if raw := os.Getenv(EnvLogicalDate); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return spec, fmt.Errorf("parse %s: %w", EnvLogicalDate, err)
+		}
+		spec.LogicalDate = t
 	}
 
 	return spec, nil
@@ -165,6 +181,18 @@ func (d *DAG) runTaskWithSink(ctx context.Context, t *Task, spec TaskRunSpec, si
 	}
 	defer func() { _ = store.Close() }()
 
+	// значения тасков живут на control plane; без него PushValue/PullValue
+	// вернут явную ошибку
+	var values valueStore
+	if spec.ServerAddr != "" {
+		vs, vErr := dialGrpcValueStore(spec.ServerAddr, spec.Token)
+		if vErr != nil {
+			return vErr
+		}
+		defer func() { _ = vs.Close() }()
+		values = vs
+	}
+
 	log := slog.New(slog.NewTextHandler(&sinkLineWriter{sink: sink, source: logSourceLog}, nil)).
 		With("dag", d.name, "run_id", spec.RunID, "task", spec.Task, "attempt", spec.Attempt)
 
@@ -174,7 +202,19 @@ func (d *DAG) runTaskWithSink(ctx context.Context, t *Task, spec TaskRunSpec, si
 	taskCtx, taskCancel := taskContext(ctx, t)
 	defer taskCancel()
 
-	rt := newRuntime(taskCtx, t, spec.RunID, spec.Attempt, log, store, spec.DepAttempts)
+	logicalDate := spec.LogicalDate
+	if logicalDate.IsZero() {
+		logicalDate = time.Now()
+	}
+	rt := newRuntime(taskCtx, t, log, runtimeCfg{
+		runID:       spec.RunID,
+		attempt:     spec.Attempt,
+		store:       store,
+		values:      values,
+		depAttempts: spec.DepAttempts,
+		params:      spec.Params,
+		logicalDate: logicalDate,
+	})
 
 	log.Info("task started")
 	startedAt := time.Now()

@@ -15,6 +15,8 @@ type RunUpsert struct {
 	Trigger     *string
 	Status      *string
 	Manifest    *[]byte
+	Params      *[]byte
+	LogicalDate *time.Time
 	FinishedAt  *time.Time
 }
 
@@ -37,6 +39,17 @@ func (m *RunUpsert) CreateColumnMap() map[string]any {
 	}
 	if m.Manifest != nil {
 		result["manifest"] = *m.Manifest
+	}
+	if m.Params != nil {
+		// nil-значение внутри указателя — явный NULL (ран без параметров)
+		if len(*m.Params) == 0 {
+			result["params"] = nil
+		} else {
+			result["params"] = *m.Params
+		}
+	}
+	if m.LogicalDate != nil {
+		result["logical_date"] = *m.LogicalDate
 	}
 	if m.FinishedAt != nil {
 		result["finished_at"] = *m.FinishedAt
@@ -70,6 +83,8 @@ func DecodeRunCreate(v *domainModel.Main) *RunUpsert {
 		Trigger:     &v.Trigger,
 		Status:      &v.Status,
 		Manifest:    &v.Manifest,
+		Params:      &v.Params,
+		LogicalDate: &v.LogicalDate,
 	}
 }
 

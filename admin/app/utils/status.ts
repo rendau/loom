@@ -24,6 +24,23 @@ export function runStatusLabel(status: RunStatus): string {
   }
 }
 
+export function runTriggerLabel(trigger: string): string {
+  switch (trigger) {
+    case 'manual': return 'вручную'
+    case 'schedule': return 'расписание'
+    case 'backfill': return 'backfill'
+    default: return trigger
+  }
+}
+
+export function runTriggerColor(trigger: string): BadgeColor {
+  switch (trigger) {
+    case 'schedule': return 'secondary'
+    case 'backfill': return 'info'
+    default: return 'neutral'
+  }
+}
+
 export function taskStatusColor(status: TaskStatus): BadgeColor {
   switch (status) {
     case 'pending': return 'neutral'

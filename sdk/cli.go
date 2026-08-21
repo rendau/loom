@@ -64,7 +64,13 @@ func runCLI(d *DAG, args []string, stdout, stderr io.Writer) int {
 		task := fs.String("task", "", "имя таска (распределённый режим)")
 		runID := fs.String("run-id", "", "id рана (распределённый режим)")
 		attempt := fs.Int("attempt", 0, "номер попытки (распределённый режим; 0 — из env, иначе 1)")
+		params := fs.String("params", "", "параметры рана, JSON-объект (локальный режим)")
 		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+
+		if *params != "" && !json.Valid([]byte(*params)) {
+			fmt.Fprintf(stderr, "invalid --params: not a valid JSON\n")
 			return 2
 		}
 
@@ -75,7 +81,11 @@ func runCLI(d *DAG, args []string, stdout, stderr io.Writer) int {
 			return runDistributedTask(ctx, d, *task, *runID, *attempt, stderr)
 		}
 
-		if err := d.RunLocal(ctx); err != nil {
+		var opts []LocalOption
+		if *params != "" {
+			opts = append(opts, LocalParams([]byte(*params)))
+		}
+		if err := d.RunLocal(ctx, opts...); err != nil {
 			fmt.Fprintf(stderr, "run failed: %v\n", err)
 			return 1
 		}

@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -63,6 +64,7 @@ type Scheduler struct {
 	executor ExecutorI
 	artifact ArtifactI
 	tasklog  TaskLogI
+	secrets  SecretResolverI
 	cfg      Config
 
 	nudgeCh   chan struct{}
@@ -71,7 +73,7 @@ type Scheduler struct {
 	wg        sync.WaitGroup
 }
 
-func New(runSvc RunServiceI, dagSvc DagServiceI, executor ExecutorI, artifact ArtifactI, tasklog TaskLogI, cfg Config) *Scheduler {
+func New(runSvc RunServiceI, dagSvc DagServiceI, executor ExecutorI, artifact ArtifactI, tasklog TaskLogI, secrets SecretResolverI, cfg Config) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Scheduler{
@@ -80,6 +82,7 @@ func New(runSvc RunServiceI, dagSvc DagServiceI, executor ExecutorI, artifact Ar
 		executor:  executor,
 		artifact:  artifact,
 		tasklog:   tasklog,
+		secrets:   secrets,
 		cfg:       cfg,
 		nudgeCh:   make(chan struct{}, 1),
 		ctx:       ctx,
@@ -213,10 +216,16 @@ func (s *Scheduler) reconcilePass(ctx context.Context) error {
 	return nil
 }
 
+// catchupMaxPerPass — сколько пропущенных тиков наверстывает catchup-даг за
+// один cronPass: троттлинг глубокого бэклога (остаток — следующими проходами).
+const catchupMaxPerPass = 10
+
 // cronPass — один проход cron-триггера: даги с наступившим next_run_at.
 // Сдвиг next_run_at — compare-and-swap до триггера: при гонке инстансов ран
-// создаёт только победитель, а упавший после сдвига триггер теряет тик
-// (catchup не делаем — решение по фазе 5).
+// создаёт только победитель, а упавший после сдвига триггер теряет тик.
+// Обычный даг продолжает расписание от «сейчас» (пропущенные тики теряются,
+// решение №17); catchup-даг двигает next_run_at на следующий тик после
+// сработавшего и наверстывает пропущенное (решение №24).
 func (s *Scheduler) cronPass(ctx context.Context) error {
 	dags, err := s.dagSvc.ListDueSchedules(ctx)
 	if err != nil {
@@ -224,34 +233,63 @@ func (s *Scheduler) cronPass(ctx context.Context) error {
 	}
 
 	for _, dag := range dags {
-		next, err := util.CronNext(dag.Schedule, time.Now())
+		if err = s.cronTriggerDag(ctx, dag); err != nil {
+			slog.Error("cron trigger dag", "dag", dag.Name, "error", err)
+		}
+	}
+
+	return nil
+}
+
+func (s *Scheduler) cronTriggerDag(ctx context.Context, dag *dagModel.Main) error {
+	now := time.Now()
+	tick := dag.NextRunAt
+
+	for range catchupMaxPerPass {
+		if tick.After(now) {
+			return nil // бэклог исчерпан
+		}
+
+		// база следующего тика: у catchup — сработавший тик (наверстываем
+		// подряд), у обычного дага — «сейчас» (пропущенное теряется)
+		base := now
+		if dag.Catchup && !tick.IsZero() {
+			base = tick
+		}
+		next, err := util.CronNext(dag.Schedule, base)
 		if err != nil {
 			// регистрация валидирует расписание — сюда попадает только
 			// legacy-запись; двигать нечего, просто не триггерим
-			slog.Error("cron parse", "dag", dag.Name, "schedule", dag.Schedule, "error", err)
-			continue
+			return fmt.Errorf("cron parse %q: %w", dag.Schedule, err)
 		}
 
-		advanced, err := s.dagSvc.AdvanceNextRun(ctx, dag.Name, dag.NextRunAt, next)
+		advanced, err := s.dagSvc.AdvanceNextRun(ctx, dag.Name, tick, next)
 		if err != nil {
-			slog.Error("advance next run", "dag", dag.Name, "error", err)
-			continue
+			return fmt.Errorf("advance next run: %w", err)
 		}
 		if !advanced {
-			continue // другой инстанс успел первым
+			return nil // другой инстанс успел первым
 		}
-		if dag.NextRunAt.IsZero() {
-			continue // инициализация next_run_at без запуска
+		if tick.IsZero() {
+			return nil // инициализация next_run_at без запуска
 		}
 
-		runId, err := s.runSvc.Trigger(ctx, dag, runModel.TriggerSchedule)
+		runId, err := s.runSvc.Trigger(ctx, dag, runModel.TriggerSpec{
+			Trigger:     runModel.TriggerSchedule,
+			LogicalDate: tick, // сработавший тик — «дата данных» рана
+		})
 		if err != nil {
-			slog.Error("cron trigger run", "dag", dag.Name, "error", err)
-			continue
+			return fmt.Errorf("trigger run: %w", err)
 		}
 
-		slog.Info("run triggered by schedule", "dag", dag.Name, "run_id", runId, "next_run_at", next)
+		slog.Info("run triggered by schedule", "dag", dag.Name, "run_id", runId,
+			"logical_date", tick, "next_run_at", next)
 		s.Nudge()
+
+		if !dag.Catchup {
+			return nil
+		}
+		tick = next
 	}
 
 	return nil
@@ -274,7 +312,7 @@ func (s *Scheduler) pass(ctx context.Context) error {
 		return fmt.Errorf("runSvc.ListActive: %w", err)
 	}
 
-	for _, run := range runs {
+	for _, run := range limitActiveRuns(runs) {
 		if err = s.replanRun(ctx, run); err != nil {
 			slog.Error("scheduler replan run", "run_id", run.Id, "error", err)
 		}
@@ -301,6 +339,40 @@ func (s *Scheduler) pass(ctx context.Context) error {
 	// готовыми; дорасткрутит следующий проход (Nudge из finalize/launch не
 	// нужен: очередной тик и события executor'а покрывают это)
 	return nil
+}
+
+// limitActiveRuns применяет max_active_runs (решение №26): у дага с лимитом
+// раскручиваются только N старейших активных ранов, у остальных таски
+// остаются pending до освобождения места. Лимит берётся из манифеста самого
+// свежего рана дага (актуальная регистрация); финализация запущенных попыток
+// событийная и от replan не зависит — пропуск рана безопасен.
+func limitActiveRuns(runs []*runModel.Main) []*runModel.Main {
+	sorted := make([]*runModel.Main, len(runs))
+	copy(sorted, runs)
+	slices.SortStableFunc(sorted, func(a, b *runModel.Main) int {
+		return a.CreatedAt.Compare(b.CreatedAt)
+	})
+
+	limits := map[string]int{}
+	for _, run := range sorted { // после цикла — значение самого свежего рана
+		m, err := manifest.Parse(run.Manifest)
+		if err != nil {
+			continue
+		}
+		limits[run.DagName] = m.MaxActiveRuns
+	}
+
+	taken := map[string]int{}
+	result := make([]*runModel.Main, 0, len(sorted))
+	for _, run := range sorted {
+		limit := limits[run.DagName]
+		if limit > 0 && taken[run.DagName] >= limit {
+			continue
+		}
+		taken[run.DagName]++
+		result = append(result, run)
+	}
+	return result
 }
 
 func (s *Scheduler) replanRun(ctx context.Context, run *runModel.Main) error {
@@ -433,8 +505,25 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 			loom.EnvDepAttempts:  string(depAttemptsJson),
 			loom.EnvArtifactAddr: s.cfg.TaskEnv.ArtifactAddr,
 			loom.EnvServerAddr:   s.cfg.TaskEnv.ServerAddr,
+			loom.EnvLogicalDate:  run.LogicalDate.UTC().Format(time.RFC3339),
 		},
 		Resources: task.Resources,
+	}
+	if len(run.Params) > 0 {
+		spec.Env[loom.EnvRunParams] = string(run.Params)
+	}
+
+	// секреты манифеста → env контейнера; отсутствующий секрет валит запуск
+	// (launch_failed), после добавления секрета попытку вернёт RetryTask
+	if len(task.Secrets) > 0 {
+		names := lo.Uniq(lo.Map(task.Secrets, func(s dagModel.SecretRef, _ int) string { return s.Secret }))
+		values, err := s.secrets.ResolveValues(ctx, names)
+		if err != nil {
+			return fmt.Errorf("resolve secrets: %w", err)
+		}
+		for _, sec := range task.Secrets {
+			spec.Env[sec.Env] = string(values[sec.Secret])
+		}
 	}
 
 	// attempt-токен: запись только в свой attempt, чтение — в своём ране

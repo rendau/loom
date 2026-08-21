@@ -20,7 +20,7 @@ type RunServiceI interface {
 	MarkAttemptRunning(ctx context.Context, ref runModel.AttemptRef) (bool, error)
 	FinalizeAttempt(ctx context.Context, ref runModel.AttemptRef, exit runModel.ExitInfo, retryAt *time.Time) (bool, error)
 	FinishRun(ctx context.Context, runId, status string) error
-	Trigger(ctx context.Context, dag *dagModel.Main, trigger string) (string, error)
+	Trigger(ctx context.Context, dag *dagModel.Main, spec runModel.TriggerSpec) (string, error)
 }
 
 // DagServiceI — cron-расписания: выборка дагов с наступившим next_run_at и
@@ -45,6 +45,13 @@ type ExecutorI interface {
 // завершении/смерти попытки (решение №13).
 type ArtifactI interface {
 	FinishAttempt(ctx context.Context, ref runModel.AttemptRef) error
+}
+
+// SecretResolverI — расшифровка значений секретов для env попытки
+// (решение №27); отсутствующий секрет — ошибка (Launch не должен стартовать
+// попытку с пустой переменной).
+type SecretResolverI interface {
+	ResolveValues(ctx context.Context, names []string) (map[string][]byte, error)
 }
 
 // TaskLogI — финализация лог-стрима попытки с дописыванием причины смерти.

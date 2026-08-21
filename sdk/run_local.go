@@ -17,7 +17,8 @@ import (
 const defaultLocalDir = ".loom/runs"
 
 type localCfg struct {
-	dir string
+	dir    string
+	params []byte
 }
 
 type LocalOption func(*localCfg)
@@ -25,6 +26,13 @@ type LocalOption func(*localCfg)
 // LocalDir переопределяет каталог, куда локальный ран пишет артефакты.
 func LocalDir(dir string) LocalOption {
 	return func(c *localCfg) { c.dir = dir }
+}
+
+// LocalParams задаёт параметры рана (raw JSON-объект) — то, что в
+// распределённом режиме приходит при триггере. CLI-эквивалент —
+// `run --params='{...}'`.
+func LocalParams(raw []byte) LocalOption {
+	return func(c *localCfg) { c.params = raw }
 }
 
 // RunLocal выполняет весь даг в текущем процессе: таски — горутинами,
@@ -44,7 +52,8 @@ func (d *DAG) RunLocal(ctx context.Context, opts ...LocalOption) error {
 
 	// таймстампный run-id: раны не конфликтуют между собой (артефакты
 	// скоупятся на попытку, повторная запись той же попытки запрещена)
-	runID := "local-" + time.Now().Format("20060102-150405.000")
+	startedAt := time.Now()
+	runID := "local-" + startedAt.Format("20060102-150405.000")
 
 	store, err := newFsStore(cfg.dir)
 	if err != nil {
@@ -85,7 +94,14 @@ func (d *DAG) RunLocal(ctx context.Context, opts ...LocalOption) error {
 			taskCtx, taskCancel := taskContext(ctx, t)
 			defer taskCancel()
 
-			rt := newRuntime(taskCtx, t, runID, 1, taskLog, store, nil)
+			rt := newRuntime(taskCtx, t, taskLog, runtimeCfg{
+				runID:       runID,
+				attempt:     1,
+				store:       store,
+				values:      &fsValueStore{dir: cfg.dir},
+				params:      cfg.params,
+				logicalDate: startedAt,
+			})
 
 			taskLog.Info("task started")
 			startedAt := time.Now()

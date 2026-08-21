@@ -15,6 +15,8 @@ type RunSelect struct {
 	Trigger     string
 	Status      string
 	Manifest    []byte
+	Params      []byte
+	LogicalDate time.Time
 	CreatedAt   time.Time
 	FinishedAt  sql.NullTime
 }
@@ -28,6 +30,8 @@ func (m *RunSelect) ListColumnMap() map[string]any {
 		"trigger":      &m.Trigger,
 		"status":       &m.Status,
 		"manifest":     &m.Manifest,
+		"params":       &m.Params,
+		"logical_date": &m.LogicalDate,
 		"created_at":   &m.CreatedAt,
 		"finished_at":  &m.FinishedAt,
 	}
@@ -52,6 +56,8 @@ func EncodeRunSelect(v *RunSelect, _ int) *domainModel.Main {
 		Trigger:     v.Trigger,
 		Status:      v.Status,
 		Manifest:    v.Manifest,
+		Params:      v.Params,
+		LogicalDate: v.LogicalDate,
 		CreatedAt:   v.CreatedAt,
 		FinishedAt:  v.FinishedAt.Time,
 	}

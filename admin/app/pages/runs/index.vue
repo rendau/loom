@@ -52,6 +52,7 @@ const columns: TableColumn<Run>[] = [
   { accessorKey: 'dag_name', header: 'Даг' },
   { accessorKey: 'trigger', header: 'Триггер' },
   { accessorKey: 'status', header: 'Статус' },
+  { accessorKey: 'logical_date', header: 'Лог. дата' },
   { accessorKey: 'created_at', header: 'Создан' },
   { id: 'duration', header: 'Длительность' },
 ]
@@ -92,15 +93,24 @@ const columns: TableColumn<Run>[] = [
         </template>
 
         <template #trigger-cell="{ row }">
-          <UBadge :color="row.original.trigger === 'schedule' ? 'secondary' : 'neutral'" variant="subtle" size="sm">
-            {{ row.original.trigger === 'schedule' ? 'расписание' : 'вручную' }}
-          </UBadge>
+          <div class="flex items-center gap-1.5">
+            <UBadge :color="runTriggerColor(row.original.trigger)" variant="subtle" size="sm">
+              {{ runTriggerLabel(row.original.trigger) }}
+            </UBadge>
+            <UTooltip v-if="row.original.params" text="Ран с параметрами">
+              <UIcon name="i-lucide-braces" class="size-3.5 text-muted" />
+            </UTooltip>
+          </div>
         </template>
 
         <template #status-cell="{ row }">
           <UBadge :color="runStatusColor(row.original.status)" variant="subtle">
             {{ runStatusLabel(row.original.status) }}
           </UBadge>
+        </template>
+
+        <template #logical_date-cell="{ row }">
+          {{ formatDateTime(row.original.logical_date) }}
         </template>
 
         <template #created_at-cell="{ row }">

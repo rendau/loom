@@ -40,12 +40,21 @@ var Conf = struct {
 	TaskArtifactAddr string `env:"TASK_ARTIFACT_ADDR" envDefault:"127.0.0.1:5051"`
 	TaskServerAddr   string `env:"TASK_SERVER_ADDR" envDefault:"127.0.0.1:5052"`
 
-	// DockerBin — бинарь container-CLI для регистрации дагов (pull/describe).
+	// DockerBin — бинарь container-CLI: регистрация дагов (pull/describe) и
+	// docker-executor.
 	DockerBin string `env:"DOCKER_BIN" envDefault:"docker"`
 
-	// Executor: k8s — kubernetes Job'ы; none — не запускать executor
-	// (dev-режим: только API и приём логов).
+	// Executor: k8s — kubernetes Job'ы; docker — контейнеры на хосте через
+	// docker CLI (решение №28, один хост без кластера); none — не запускать
+	// executor (dev-режим: только API и приём логов).
 	Executor string `env:"EXECUTOR" envDefault:"k8s"`
+
+	// DockerNetwork — docker-сеть контейнеров тасков (пусто — дефолтная);
+	// адреса planes для контейнеров задаются TASK_*_ADDR (например
+	// host.docker.internal:5051).
+	DockerNetwork string `env:"DOCKER_NETWORK"`
+	// DockerPollTick — период поллинга завершений контейнеров docker-executor'ом.
+	DockerPollTick time.Duration `env:"DOCKER_POLL_TICK" envDefault:"3s"`
 
 	K8sNamespace  string `env:"K8S_NAMESPACE" envDefault:"default"`
 	K8sKubeconfig string `env:"K8S_KUBECONFIG"` // пусто — in-cluster, иначе путь к kubeconfig
@@ -73,6 +82,9 @@ var Conf = struct {
 	// AuthSecret — общий секрет attempt-токенов (control plane, artifact-
 	// сервер, лог-приёмник); пусто — проверка токенов выключена (dev).
 	AuthSecret string `env:"AUTH_SECRET"`
+	// SecretKey — парольная фраза шифрования секретов (AES-256-GCM, ключ —
+	// SHA-256 от фразы); пусто — секреты хранятся открытым текстом (dev).
+	SecretKey string `env:"SECRET_KEY"`
 	// TokenTTL — срок действия attempt-токена; должен покрывать максимальную
 	// длительность таска.
 	TokenTTL time.Duration `env:"TOKEN_TTL" envDefault:"24h"`

@@ -130,6 +130,62 @@
     только admin-токен (control plane подписывает свои вызовы минутным
     admin-токеном). Лог-приёмник PushTaskLog требует токен своего attempt'а;
     ReadTaskLog — админский API, токеном не защищается (сеть/ingress).
+23. **Параметры рана и логическая дата.** У рана есть `params` (произвольный
+    JSON-объект ≤ 64KB, задаётся при ручном триггере/backfill, снапшотится)
+    и `logical_date` — «дата данных»: у cron-рана — время тика расписания,
+    у ручного — момент триггера, у backfill — тик периода. В env попытки:
+    `LOOM_RUN_PARAMS` (raw JSON) и `LOOM_LOGICAL_DATE` (RFC3339). SDK:
+    `rt.Params()` / `rt.BindParams(&v)` / `rt.LogicalDate()`; локальный
+    режим — флаг `run --params='{...}'`, logical_date = время запуска.
+24. **Catchup и backfill.** Манифест дага: `catchup` (SDK-опция
+    `loom.Catchup()`, дефолт false — поведение №17). При catchup=true
+    регистрация/unpause не сбрасывают существующий `next_run_at`, а
+    cronPass двигает его CAS'ом на следующий тик после пропущенного (не от
+    «сейчас») — пропущенные тики навёрстываются, максимум N за проход
+    (троттлинг). Backfill — RPC `BackfillRun(dag, from, to, params?)`:
+    ран на каждый cron-тик в [from, to), trigger=`backfill`,
+    logical_date=тик; требует расписания; лимит тиков за вызов (защита от
+    опечатки в периоде). Параллелизм backfill-ранов ограничивает
+    `max_active_runs` (№26).
+25. **Значения тасков (аналог XCom)** — мелкие key-value через control
+    plane, не через artifact-сервер. Таблица `run_value`, скоуп
+    `(run, task, key)` — ретрай перезаписывает (upsert). Значение — JSON
+    ≤ 64KB. RPC `TaskValueService`: Push (токен своего attempt'а), Pull
+    (токен рана), List (админка). SDK: `rt.PushValue(key, v)` /
+    `rt.PullValue(task, key, &dest)` — читать можно только у объявленных
+    зависимостей (как Input). Локальный режим — файлы
+    `.loom/runs/<id>/values/`; распределённый без `LOOM_SERVER_ADDR` —
+    явная ошибка.
+26. **Пулы, приоритеты, max_active_runs.** Таблица `pool(name, slots)`,
+    seed `default`/64; API List/Set (upsert), удаления нет — на пул могут
+    ссылаться манифесты. Манифест таска: `pool` (дефолт `default`,
+    существование проверяется при регистрации) и `priority` (больше —
+    раньше из очереди); SDK-опции `Pool(name)`, `Priority(n)`. `pool` и
+    `priority` денормализуются в `task_instance` при создании рана; claim
+    в одной транзакции лочит пулы (`FOR UPDATE`), считает занятость
+    (starting+running) и забирает queued в пределах свободных слотов,
+    `ORDER BY priority DESC, queued_at`. Пер-даг лимит одновременных
+    ранов — `max_active_runs` в манифесте (SDK-опция дага, 0 = без
+    лимита): планировщик раскручивает только N старейших активных ранов
+    дага, остальные ждут (важно для backfill). Лимиты тасков — пулами.
+27. **Секреты** — env-инъекция в поды из control plane. Таблица
+    `secret(name, value)`; значение шифруется AES-256-GCM (ключ — SHA-256
+    от парольной фразы `SECRET_KEY`; пусто — открытым текстом, dev). API
+    write-only: Set/List(имена)/Delete — значения наружу не отдаются.
+    Манифест таска: `secrets: [{env, secret}]`, SDK-опция
+    `loom.Secret(envName, secretName)`; env-имена валидируются (не LOOM_*),
+    существование секрета при регистрации не требуется (warning). При
+    Launch планировщик резолвит значения в env контейнера; отсутствующий
+    секрет → launch_failed (после добавления — RetryTask). В k8s значения
+    идут напрямую в спеку Job'а (не через k8s Secret) — ограничение v1.
+28. **Уточнение к №8 — DockerExecutor** (`EXECUTOR=docker`): попытки —
+    контейнеры на хосте через `DOCKER_BIN` (CLI, как dockercli). `docker
+    run -d` с лейблами `loom=1` + run/task/attempt; события — поллинг
+    (`DOCKER_POLL_TICK`): `ps -a --filter label` + inspect (exit code,
+    OOMKilled); started — сразу после успешного `run`; финализированный
+    контейнер удаляется; Kill — `rm -f`; ListAlive — `ps` по лейблу.
+    Сеть — `DOCKER_NETWORK`; адреса planes для контейнеров — те же
+    `TASK_ARTIFACT_ADDR`/`TASK_SERVER_ADDR` (напр. host.docker.internal).
 
 ## Состояние: сделано
 
@@ -253,19 +309,111 @@
       (таски и попытки со статусами, exit-инфо, авто-poll пока running)
 - [x] Логи попытки: слайдовер со стримом ReadTaskLog (follow — live-логи),
       подсветка источников (log/stdout/stderr/server)
-- [ ] Граф дага со статусами тасков (визуализация; пока таблица)
-- [ ] Ретрай таска/подграфа (нужен новый RPC на server)
+- [x] Граф дага со статусами тасков: `RunGetRep.manifest_tasks` (рёбра из
+      снапшота манифеста рана, а не текущего дага), SVG-граф в админке —
+      слоистая раскладка (ранг = длиннейший путь, барицентр в колонке),
+      цвета статусов токенами Nuxt UI, стримовые рёбра пунктиром, клик по
+      таску открывает лог
+- [x] Ретрай таска/подграфа: RPC `RetryTask` (`POST
+      /run/{id}/task/{task}/retry`) — только на завершённом ране
+      (планировщик не трогает finished-раны ⇒ сброс не гонится с раскруткой
+      графа): таск → queued (новая попытка attempt+1 обычным claim'ом),
+      его downstream-подграф транзитивно → pending, ран реактивируется;
+      старые попытки остаются историей; upstream_failed-таск не ретраится
+      (не исполнялся — ретраить его упавшую зависимость). DeleteRun
+      retention'а не трогает активный (реактивированный) ран. В админке —
+      кнопка с подтверждением в таблице тасков; интеграционные тесты
+      (ретрай упавшего и успешного, отказ на running/upstream_failed)
 
-### Фаза 7 — зрелость (по мере надобности)
+Фаза 6 закрыта.
 
-- [ ] Backfill / catchup, параметры рана (аналог dagrun.conf)
-- [ ] XCom-подобные мелкие значения (через control plane, с лимитом размера)
-- [ ] Пулы/лимиты параллелизма (per-DAG, per-task, priority)
-- [ ] Secrets/connections (env-инъекция в поды)
-- [ ] `DockerExecutor` (один хост, без k8s) — вторая реализация интерфейса
-- [ ] Масштабирование artifact-сервера (вынесен отдельно уже сейчас);
-      storage-бэкенд за интерфейсом (S3/PVC)
-- [ ] `local-strict` режим: таски подпроцессами (`exec` самого себя) без docker
+### Фаза 7 — зрелость
+
+- [x] Параметры рана и логическая дата (решение №23): `run.params` +
+      `run.logical_date`, env `LOOM_RUN_PARAMS`/`LOOM_LOGICAL_DATE`,
+      SDK `Params`/`BindParams`/`LogicalDate` + `run --params` и
+      `LocalParams` в локальном режиме; params в триггере админки,
+      логическая дата в списке и на странице рана; интеграционные тесты
+- [x] Catchup и backfill (решение №24): опция дага `loom.Catchup()`,
+      наверстывание тиков в cronPass (CAS от сработавшего тика, до 10 за
+      проход), регистрация/unpause не сбрасывают `next_run_at` catchup-дага;
+      RPC `BackfillRun` (лимит 100 тиков за вызов, без идемпотентности) +
+      модалка backfill в админке; интеграционные тесты
+- [x] Значения тасков / XCom (решение №25): таблица `run_value`,
+      `TaskValueService` (Push — токен attempt'а + отсечка неактуальной
+      попытки, Pull — токен рана, List — админка), SDK
+      `rt.PushValue`/`rt.PullValue` (grpc- и файловая реализации порта
+      valueStore), секция значений на странице рана; тесты SDK и сервера
+- [x] Пулы и приоритеты (решение №26): таблица `pool` (seed default/64) +
+      `PoolService` (List/Set, без удаления), опции таска `Pool`/`Priority`,
+      pool/priority денормализованы в `task_instance`, claim в одной
+      транзакции лочит пулы и раздаёт свободные слоты приоритетным первыми;
+      `max_active_runs` дага (`loom.MaxActiveRuns`) — раскрутка только N
+      старейших активных ранов; существование пулов проверяется при
+      регистрации; страница пулов в админке; интеграционные тесты
+- [x] Секреты (решение №27): таблица `secret` (AES-256-GCM при `SECRET_KEY`),
+      write-only `SecretService` (Set/List-метаданные/Delete), опция таска
+      `loom.Secret(env, name)` (валидация env-имён, не LOOM_*), резолв и
+      инъекция при Launch (отсутствующий секрет → launch_failed); страница
+      секретов в админке; интеграционные тесты (включая шифрование в БД)
+- [x] `DockerExecutor` (решение №28, `EXECUTOR=docker`): вторая реализация
+      executor-интерфейса поверх docker CLI — `run -d` с лейблами и
+      детерминированным именем контейнера, started сразу после запуска,
+      finished поллингом `ps`/`inspect` (exit code, OOMKilled) с удалением
+      контейнера, ListAlive по лейблу, лимиты cpu/mem через `--cpus`/
+      `--memory`. ⚠ против живого docker-демона ещё не гонялся — прогнать
+      при первом использовании
+
+Отложено по решению пользователя (2026-08-21, не делаем без явного запроса):
+
+- Масштабирование artifact-сервера; storage-бэкенд за интерфейсом (S3/PVC)
+- `local-strict` режим: таски подпроцессами (`exec` самого себя) без docker
+- Уведомления о провале рана (webhook/мессенджеры, SDK-колбэки)
+
+### Фаза 8 — эксплуатация
+
+Состав согласован с пользователем 2026-08-21 (деплой, наблюдаемость,
+auth админки, публикация SDK, CI с unit-тестами). Порядок — CI первым
+(дальше всё едет под его защитой), деплой последним (собирает остальное).
+
+- [ ] CI (GitHub Actions, без базы в тестах): job'ы — go по модулям
+      (`go vet` + `go test -race`; интеграционные `server/test` сами
+      скипаются без `TEST_PG_DSN` — БД в CI не поднимаем), админка
+      (`pnpm typecheck` + `pnpm lint`), сборка бинарей и docker-образов
+      server/artifact (build-only на PR, пуш образов в registry по
+      git-тегу)
+- [ ] Наблюдаемость — Prometheus-метрики на system-порту (`/metrics`,
+      3004/3003, рядом с healthcheck): планировщик (глубина очереди по
+      статусам, занятость пулов, длительность pass'а, лаг cron), раны и
+      попытки (счётчики завершений по статусам/reason, длительности),
+      executor (запуски, launch-ошибки), artifact-сервер (активные стримы,
+      принятые байты), стандартные gRPC-метрики интерцептором
+- [ ] Auth админского API — статический bearer-токен (`ADMIN_TOKEN` на
+      server; пусто — выключено, dev): интерцептор требует
+      `Authorization: Bearer` на админских RPC (Dag/Run/Pool/Secret,
+      ReadTaskLog, ListTaskValues), task-facing RPC (PushTaskLog,
+      Push/PullTaskValue) остаются на attempt-токенах; в админке —
+      экран ввода токена (localStorage) + заголовок в api-клиенте,
+      обработка 401
+- [ ] Публикация SDK (механика — решение №15): теги `api/v0.1.0` и
+      `sdk/v0.1.0`, после публикации api — `go mod tidy` в sdk (убрать
+      резолв через go.work), README для sdk с минимальным дагом,
+      проверка `go get github.com/rendau/loom/sdk` из чистого модуля вне
+      монорепы; инструкция релиза (порядок тегирования) — в README
+- [ ] Первый деплой и обкатка:
+      - Dockerfile server'а (бинарь + миграции + статика админки
+        `make build-admin`; у artifact уже есть)
+      - решить регистрацию дагов без docker-демона рядом с server'ом —
+        в k8s `docker pull/run describe` изнутри пода не работает
+        (кандидаты: DinD-sidecar, сокет хоста, describe отдельным
+        Job'ом через executor; зафиксировать решением при реализации)
+      - `deploy/`: k8s-манифесты (server + artifact, PVC под данные
+        artifact и логи, Service/Ingress, env-примеры) и docker-compose
+        для одного хоста (`EXECUTOR=docker` + Postgres + artifact)
+      - обкатка: e2e прогон demo-etl под `EXECUTOR=docker` на живом
+        демоне и в k8s-кластере (снять пометки «не гонялся» с №8 и №28),
+        ретрай/логи/секреты проверить руками
+      - документация по развёртыванию (README раздел или deploy/README)
 
 ## Команды
 
@@ -284,8 +432,12 @@ DATA_DIR=/tmp/loom-data ./artifact/cmd/build/svc &
 cd examples && go build -o /tmp/demo-etl ./demo-etl
 LOOM_ARTIFACT_ADDR=127.0.0.1:5051 LOOM_RUN_ID=r1 /tmp/demo-etl run --task=extract
 
-# control plane (нужен Postgres; EXECUTOR=none — без k8s):
+# control plane (нужен Postgres; EXECUTOR=k8s|docker|none):
+#   docker — контейнеры тасков на хосте (TASK_*_ADDR, напр.
+#   host.docker.internal:5051); none — dev без запуска тасков
 cd server && PG_DSN=postgres://... EXECUTOR=none ./cmd/build/svc
-# REST (gateway): POST /dag {image}, POST /run {dag_name}, GET /run/{id},
+# REST (gateway): POST /dag {image}, POST /run {dag_name, params?},
+#                 POST /run/backfill {dag_name, from, to}, GET /run/{id},
+#                 GET /run/{id}/value, PUT /pool/{name}, PUT /secret/{name},
 #                 GET /run/{id}/task/{t}/attempt/{n}/log?follow=true
 ```

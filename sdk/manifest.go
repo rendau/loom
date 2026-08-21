@@ -9,10 +9,12 @@ import (
 // Manifest — самоописание дага. Его печатает команда `describe`; по нему
 // server валидирует и регистрирует даг при регистрации docker-образа.
 type Manifest struct {
-	SDKVersion string         `json:"sdk_version"`
-	Name       string         `json:"name"`
-	Schedule   string         `json:"schedule,omitempty"`
-	Tasks      []TaskManifest `json:"tasks"`
+	SDKVersion    string         `json:"sdk_version"`
+	Name          string         `json:"name"`
+	Schedule      string         `json:"schedule,omitempty"`
+	Catchup       bool           `json:"catchup,omitempty"`
+	MaxActiveRuns int            `json:"max_active_runs,omitempty"`
+	Tasks         []TaskManifest `json:"tasks"`
 }
 
 type TaskManifest struct {
@@ -24,6 +26,15 @@ type TaskManifest struct {
 	RetryDelaySec int                `json:"retry_delay_sec,omitempty"`
 	TimeoutSec    int                `json:"timeout_sec,omitempty"`
 	Resources     *ResourcesManifest `json:"resources,omitempty"`
+	Pool          string             `json:"pool,omitempty"`
+	Priority      int                `json:"priority,omitempty"`
+	Secrets       []SecretManifest   `json:"secrets,omitempty"`
+}
+
+// SecretManifest — инъекция секрета control plane в env контейнера таска.
+type SecretManifest struct {
+	Env    string `json:"env"`
+	Secret string `json:"secret"`
 }
 
 type DepManifest struct {
@@ -40,9 +51,11 @@ type ResourcesManifest struct {
 
 func (d *DAG) Manifest() Manifest {
 	return Manifest{
-		SDKVersion: Version,
-		Name:       d.name,
-		Schedule:   d.schedule,
+		SDKVersion:    Version,
+		Name:          d.name,
+		Schedule:      d.schedule,
+		Catchup:       d.catchup,
+		MaxActiveRuns: d.maxActiveRuns,
 		Tasks: lo.Map(d.order, func(name string, _ int) TaskManifest {
 			t := d.tasks[name]
 			m := TaskManifest{
@@ -50,9 +63,16 @@ func (d *DAG) Manifest() Manifest {
 				Retries:       t.retries,
 				RetryDelaySec: int(t.retryDelay / time.Second),
 				TimeoutSec:    int(t.timeout / time.Second),
+				Pool:          t.pool,
+				Priority:      t.priority,
 			}
 			if len(t.deps) > 0 {
 				m.DependsOn = lo.Map(t.deps, encodeDepManifest)
+			}
+			if len(t.secrets) > 0 {
+				m.Secrets = lo.Map(t.secrets, func(s secretRef, _ int) SecretManifest {
+					return SecretManifest{Env: s.env, Secret: s.secret}
+				})
 			}
 			if t.resources != (ResourceSpec{}) {
 				m.Resources = &ResourcesManifest{

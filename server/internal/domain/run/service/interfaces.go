@@ -16,11 +16,16 @@ type RepoDbI interface {
 	ListExpiredRuns(ctx context.Context, before time.Time, limit int64) ([]string, error)
 	DeleteRun(ctx context.Context, runId string) error
 
-	CreateTaskInstances(ctx context.Context, runId string, tasks []string) error
+	CreateTaskInstances(ctx context.Context, runId string, tasks []model.TaskSeed) error
 	ListTaskInstances(ctx context.Context, runId string) ([]*model.TaskInstance, error)
 	PromoteTaskInstances(ctx context.Context, runId string, tasks []string, fromStatus, toStatus string) error
 	ClaimQueuedTasks(ctx context.Context, limit int64) ([]model.ClaimedTask, error)
 	PromoteRetries(ctx context.Context) (int64, error)
+	RetryTaskSubgraph(ctx context.Context, runId, task string, downstream []string) (bool, error)
+
+	UpsertTaskValue(ctx context.Context, v *model.TaskValue) error
+	GetTaskValue(ctx context.Context, runId, task, key string) (*model.TaskValue, bool, error)
+	ListTaskValues(ctx context.Context, runId string) ([]*model.TaskValue, error)
 
 	CreateAttempt(ctx context.Context, ref model.AttemptRef) error
 	GetAttempt(ctx context.Context, ref model.AttemptRef) (*model.Attempt, bool, error)

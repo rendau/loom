@@ -7,6 +7,7 @@
 package test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -30,11 +31,15 @@ import (
 	"github.com/rendau/loom/server/internal/domain/dag/manifest"
 	dagDb "github.com/rendau/loom/server/internal/domain/dag/repo/db"
 	dagService "github.com/rendau/loom/server/internal/domain/dag/service"
+	poolDb "github.com/rendau/loom/server/internal/domain/pool/repo/db"
+	poolService "github.com/rendau/loom/server/internal/domain/pool/service"
 	domainRetention "github.com/rendau/loom/server/internal/domain/retention"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
 	runDb "github.com/rendau/loom/server/internal/domain/run/repo/db"
 	runService "github.com/rendau/loom/server/internal/domain/run/service"
 	domainScheduler "github.com/rendau/loom/server/internal/domain/scheduler"
+	secretDb "github.com/rendau/loom/server/internal/domain/secret/repo/db"
+	secretService "github.com/rendau/loom/server/internal/domain/secret/service"
 	domainTasklog "github.com/rendau/loom/server/internal/domain/tasklog"
 	tasklogModel "github.com/rendau/loom/server/internal/domain/tasklog/model"
 	"github.com/rendau/loom/server/internal/errs"
@@ -112,6 +117,12 @@ func (e *fakeExecutor) launchedAttempt(task string, attempt int32) (runModel.Lau
 	})
 }
 
+func (e *fakeExecutor) launchedForRun(runId string) []runModel.LaunchSpec {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return lo.Filter(e.launches, func(s runModel.LaunchSpec, _ int) bool { return s.Ref.RunId == runId })
+}
+
 func (e *fakeExecutor) started(ref runModel.AttemptRef) {
 	e.events <- runModel.ExecEvent{Ref: ref, Type: runModel.ExecEventStarted}
 }
@@ -162,6 +173,8 @@ type env struct {
 	pool       *pgxpool.Pool
 	dagSvc     *dagService.Service
 	runSvc     *runService.Service
+	poolSvc    *poolService.Service
+	secretSvc  *secretService.Service
 	tasklogSvc *domainTasklog.Service
 	executor   *fakeExecutor
 	artifact   *fakeArtifact
@@ -187,7 +200,7 @@ func newEnv(t *testing.T) *env {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
-	_, err = pool.Exec(context.Background(), `TRUNCATE attempt, task_instance, run, dag`)
+	_, err = pool.Exec(context.Background(), `TRUNCATE attempt, run_value, task_instance, run, dag, pool, secret`)
 	require.NoError(t, err)
 
 	txm := mobone.NewTransactionManager(pool)
@@ -195,6 +208,14 @@ func newEnv(t *testing.T) *env {
 
 	dagSvc := dagService.New(dagDb.New(base))
 	runSvc := runService.New(runDb.New(base), txm)
+	poolSvc := poolService.New(poolDb.New(base))
+	secretSvc, err := secretService.New(secretDb.New(base), "test-secret-key")
+	require.NoError(t, err)
+
+	// сид дефолтного пула после TRUNCATE
+	_, err = pool.Exec(context.Background(),
+		`INSERT INTO pool (name, slots) VALUES ('default', 64) ON CONFLICT (name) DO NOTHING`)
+	require.NoError(t, err)
 
 	tasklogSvc, err := domainTasklog.New(t.TempDir())
 	require.NoError(t, err)
@@ -202,7 +223,7 @@ func newEnv(t *testing.T) *env {
 	executor := newFakeExecutor()
 	artifact := &fakeArtifact{}
 
-	scheduler := domainScheduler.New(runSvc, dagSvc, executor, artifact, tasklogSvc,
+	scheduler := domainScheduler.New(runSvc, dagSvc, executor, artifact, tasklogSvc, secretSvc,
 		domainScheduler.Config{
 			Tick:          30 * time.Millisecond,
 			CronTick:      50 * time.Millisecond,
@@ -220,6 +241,8 @@ func newEnv(t *testing.T) *env {
 		pool:       pool,
 		dagSvc:     dagSvc,
 		runSvc:     runSvc,
+		poolSvc:    poolSvc,
+		secretSvc:  secretSvc,
 		tasklogSvc: tasklogSvc,
 		executor:   executor,
 		artifact:   artifact,
@@ -317,7 +340,7 @@ func TestSchedulerHappyPathWithStreamedEdge(t *testing.T) {
 	e := newEnv(t)
 	dagName := e.registerDag(t, etlManifest)
 
-	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 
 	// корень уходит в запуск
@@ -382,7 +405,7 @@ func TestSchedulerHappyPathWithStreamedEdge(t *testing.T) {
 	}
 
 	// в деталях рана — попытки с exit-информацией
-	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 3)
 	for _, a := range attempts {
@@ -407,7 +430,7 @@ func TestSchedulerFailureCascade(t *testing.T) {
 		]
 	}`)
 
-	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 
 	a := e.waitLaunched(t, "a")
@@ -423,7 +446,7 @@ func TestSchedulerFailureCascade(t *testing.T) {
 		"c": runModel.TaskStatusUpstreamFailed,
 	}, statuses)
 
-	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	require.NotNil(t, attempts[0].ExitCode)
@@ -447,12 +470,12 @@ func TestSchedulerLaunchFailure(t *testing.T) {
 		"tasks": [{"name": "a"}]
 	}`)
 
-	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 
 	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
 
-	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, runModel.AttemptStatusFailed, attempts[0].Status)
@@ -469,7 +492,7 @@ func TestSchedulerDuplicateEventsIdempotent(t *testing.T) {
 		"tasks": [{"name": "a"}]
 	}`)
 
-	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 
 	a := e.waitLaunched(t, "a")
@@ -480,7 +503,7 @@ func TestSchedulerDuplicateEventsIdempotent(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, runModel.AttemptStatusSuccess, attempts[0].Status)
@@ -501,7 +524,7 @@ func TestSchedulerRetrySucceeds(t *testing.T) {
 		"tasks": [{"name": "a", "retries": 1, "retry_delay_sec": 1}]
 	}`)
 
-	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 
 	first := e.waitLaunchedAttempt(t, "a", 1)
@@ -532,7 +555,7 @@ func TestSchedulerRetrySucceeds(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 2)
 }
@@ -546,7 +569,7 @@ func TestSchedulerRetriesExhausted(t *testing.T) {
 		"tasks": [{"name": "a", "retries": 1, "retry_delay_sec": 1}]
 	}`)
 
-	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 
 	for attempt := int32(1); attempt <= 2; attempt++ {
@@ -558,9 +581,110 @@ func TestSchedulerRetriesExhausted(t *testing.T) {
 	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
 	assert.Equal(t, runModel.TaskStatusFailed, e.taskStatuses(t, runId)["a"])
 
-	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 2)
+}
+
+// Ручной ретрай таска на завершённом ране (RetryTask): упавший таск
+// возвращается в очередь новой попыткой, его upstream_failed-подграф
+// сбрасывается и раскручивается заново, ран завершается success. На
+// выполняющемся ране, для несуществующего и для upstream_failed таска
+// ретрай отклоняется.
+func TestRetryTaskSubgraph(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "manual-retry",
+		"tasks": [
+			{"name": "a"},
+			{"name": "b", "depends_on": [{"task": "a"}]},
+			{"name": "c", "depends_on": [{"task": "b"}]}
+		]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+
+	// пока ран выполняется — ретрай недоступен
+	err = e.runUsecase.RetryTask(context.Background(), runId, "a")
+	assert.ErrorIs(t, err, errs.RunNotFinished)
+
+	a1 := e.waitLaunchedAttempt(t, "a", 1)
+	e.executor.started(a1.Ref)
+	e.executor.finished(a1.Ref, false, 1, "Error")
+	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
+
+	// несуществующий таск и не исполнявшийся (upstream_failed) — отклоняются
+	err = e.runUsecase.RetryTask(context.Background(), runId, "nope")
+	assert.ErrorIs(t, err, errs.TaskNotFound)
+	err = e.runUsecase.RetryTask(context.Background(), runId, "b")
+	assert.ErrorIs(t, err, errs.TaskNotRetryable)
+
+	// ретрай упавшего корня реактивирует ран и раскручивает подграф заново
+	require.NoError(t, e.runUsecase.RetryTask(context.Background(), runId, "a"))
+	assert.Equal(t, runModel.RunStatusRunning, e.runStatus(t, runId))
+
+	a2 := e.waitLaunchedAttempt(t, "a", 2)
+	e.executor.started(a2.Ref)
+	e.executor.finished(a2.Ref, true, 0, "")
+
+	b := e.waitLaunchedAttempt(t, "b", 1)
+	assert.Equal(t, `{"a":2}`, b.Env[loom.EnvDepAttempts], "downstream читает новую попытку")
+	e.executor.started(b.Ref)
+	e.executor.finished(b.Ref, true, 0, "")
+
+	c := e.waitLaunchedAttempt(t, "c", 1)
+	e.executor.started(c.Ref)
+	e.executor.finished(c.Ref, true, 0, "")
+
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+	assert.Equal(t, map[string]string{
+		"a": runModel.TaskStatusSuccess,
+		"b": runModel.TaskStatusSuccess,
+		"c": runModel.TaskStatusSuccess,
+	}, e.taskStatuses(t, runId))
+}
+
+// Ретрай успешного таска: перезапускается и сам таск, и его успешный
+// downstream (он потреблял старые выходы — должен пересчитаться).
+func TestRetryTaskSuccessSubgraph(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "manual-retry-ok",
+		"tasks": [
+			{"name": "a"},
+			{"name": "b", "depends_on": [{"task": "a"}]}
+		]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+
+	for _, task := range []string{"a", "b"} {
+		spec := e.waitLaunchedAttempt(t, task, 1)
+		e.executor.started(spec.Ref)
+		e.executor.finished(spec.Ref, true, 0, "")
+	}
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+
+	require.NoError(t, e.runUsecase.RetryTask(context.Background(), runId, "a"))
+
+	a2 := e.waitLaunchedAttempt(t, "a", 2)
+	e.executor.started(a2.Ref)
+	e.executor.finished(a2.Ref, true, 0, "")
+
+	b2 := e.waitLaunchedAttempt(t, "b", 2)
+	assert.Equal(t, `{"a":2}`, b2.Env[loom.EnvDepAttempts])
+	e.executor.started(b2.Ref)
+	e.executor.finished(b2.Ref, true, 0, "")
+
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	require.NoError(t, err)
+	require.Len(t, attempts, 4, "старые попытки остаются историей")
 }
 
 // Попытка, работающая дольше timeout_sec, убивается сторожевым таймером
@@ -573,7 +697,7 @@ func TestSchedulerTaskTimeout(t *testing.T) {
 		"tasks": [{"name": "a", "timeout_sec": 1}]
 	}`)
 
-	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 
 	a := e.waitLaunched(t, "a")
@@ -582,7 +706,7 @@ func TestSchedulerTaskTimeout(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
 
-	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, runModel.AttemptStatusFailed, attempts[0].Status)
@@ -604,7 +728,7 @@ func TestSchedulerZombieLostBeforeStart(t *testing.T) {
 		"tasks": [{"name": "a"}]
 	}`)
 
-	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 
 	first := e.waitLaunchedAttempt(t, "a", 1)
@@ -617,7 +741,7 @@ func TestSchedulerZombieLostBeforeStart(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 2)
 
@@ -638,7 +762,7 @@ func TestSchedulerZombieRunningPodLost(t *testing.T) {
 		"tasks": [{"name": "a"}]
 	}`)
 
-	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 
 	a := e.waitLaunchedAttempt(t, "a", 1)
@@ -647,7 +771,7 @@ func TestSchedulerZombieRunningPodLost(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
 
-	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, "pod_lost", attempts[0].ExitReason)
@@ -719,6 +843,339 @@ func TestSchedulerCronTrigger(t *testing.T) {
 	assert.True(t, dag.NextRunAt.After(time.Now()))
 }
 
+// Параметры рана и логическая дата доходят до env попытки
+// (LOOM_RUN_PARAMS / LOOM_LOGICAL_DATE); params сверх лимита отклоняются.
+func TestRunParamsAndLogicalDate(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "params-dag",
+		"tasks": [{"name": "a"}]
+	}`)
+
+	params := []byte(`{"date":"2026-08-01","limit":10}`)
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, params)
+	require.NoError(t, err)
+
+	a := e.waitLaunched(t, "a")
+	assert.JSONEq(t, string(params), a.Env[loom.EnvRunParams])
+
+	// логическая дата ручного рана — момент триггера
+	ld, err := time.Parse(time.RFC3339, a.Env[loom.EnvLogicalDate])
+	require.NoError(t, err)
+	assert.WithinDuration(t, time.Now(), ld, time.Minute)
+
+	run, _, err := e.runSvc.Get(context.Background(), runId, true)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(params), string(run.Params))
+	assert.False(t, run.LogicalDate.IsZero())
+
+	// ран без параметров — env-переменной нет
+	runId2, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		specs := e.executor.launchedForRun(runId2)
+		return len(specs) == 1
+	}, waitTimeout, 10*time.Millisecond)
+	spec := e.executor.launchedForRun(runId2)[0]
+	_, hasParams := spec.Env[loom.EnvRunParams]
+	assert.False(t, hasParams)
+
+	// params сверх лимита отклоняются
+	big := append([]byte(`{"x":"`), bytes.Repeat([]byte("a"), runModel.MaxParamsSize)...)
+	big = append(big, '"', '}')
+	_, err = e.runUsecase.Trigger(context.Background(), dagName, big)
+	assert.ErrorIs(t, err, errs.InvalidRequest)
+}
+
+// Catchup-даг наверстывает пропущенные тики расписания: по рану на каждый
+// тик с logical_date=тик; unpause не сбрасывает его next_run_at.
+func TestSchedulerCatchup(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "catchup-dag",
+		"schedule": "@hourly",
+		"catchup": true,
+		"tasks": [{"name": "a"}]
+	}`)
+
+	// имитируем простой: три часа пропущенных тиков
+	var backlogStart time.Time
+	err := e.pool.QueryRow(context.Background(), `
+		UPDATE dag SET next_run_at = date_trunc('hour', now()) - interval '3 hours'
+		WHERE name = $1 RETURNING next_run_at`, dagName).Scan(&backlogStart)
+	require.NoError(t, err)
+
+	// навёрстаны все четыре наступивших тика (-3h, -2h, -1h, -0h)
+	var runs []*runModel.Main
+	require.Eventually(t, func() bool {
+		runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{DagName: &dagName})
+		require.NoError(t, err)
+		return len(runs) >= 4
+	}, waitTimeout, 10*time.Millisecond, "catchup не навёрстывает тики")
+
+	time.Sleep(200 * time.Millisecond) // ещё несколько cron-проходов — дублей нет
+	runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{DagName: &dagName})
+	require.NoError(t, err)
+	require.Len(t, runs, 4)
+
+	wantTicks := lo.Times(4, func(i int) time.Time { return backlogStart.Add(time.Duration(i) * time.Hour) })
+	gotTicks := lo.Map(runs, func(r *runModel.Main, _ int) time.Time { return r.LogicalDate })
+	assert.ElementsMatch(t,
+		lo.Map(wantTicks, func(t time.Time, _ int) string { return t.UTC().Format(time.RFC3339) }),
+		lo.Map(gotTicks, func(t time.Time, _ int) string { return t.UTC().Format(time.RFC3339) }))
+
+	for _, r := range runs {
+		assert.Equal(t, runModel.TriggerSchedule, r.Trigger)
+	}
+
+	// unpause catchup-дага сохраняет next_run_at (пропущенное наверстается);
+	// расписание на паузе — тик в прошлом не триггерит
+	require.NoError(t, e.dagSvc.SetPaused(context.Background(), dagName, true))
+	past := time.Now().Add(-time.Hour).Truncate(time.Second).UTC()
+	_, err = e.pool.Exec(context.Background(),
+		`UPDATE dag SET next_run_at = $1 WHERE name = $2`, past, dagName)
+	require.NoError(t, err)
+
+	require.NoError(t, e.dagSvc.SetPaused(context.Background(), dagName, false))
+	dag, _, err := e.dagSvc.Get(context.Background(), dagName, true)
+	require.NoError(t, err)
+	assert.True(t, dag.NextRunAt.Equal(past) || dag.NextRunAt.After(past),
+		"unpause не должен сбрасывать next_run_at catchup-дага от «сейчас»")
+}
+
+// Backfill создаёт по рану на каждый тик расписания в [from, to) с
+// trigger=backfill и logical_date=тик; некорректные запросы отклоняются.
+func TestBackfill(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "backfill-dag",
+		"schedule": "@daily",
+		"tasks": [{"name": "a"}]
+	}`)
+
+	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	to := from.AddDate(0, 0, 3)
+	params := []byte(`{"source":"backfill"}`)
+
+	runIds, err := e.runUsecase.Backfill(context.Background(), dagName, from, to, params)
+	require.NoError(t, err)
+	require.Len(t, runIds, 3, "по рану на каждый тик @daily в периоде")
+
+	for i, runId := range runIds {
+		run, _, err := e.runSvc.Get(context.Background(), runId, true)
+		require.NoError(t, err)
+		assert.Equal(t, runModel.TriggerBackfill, run.Trigger)
+		assert.JSONEq(t, string(params), string(run.Params))
+		assert.True(t, run.LogicalDate.Equal(from.AddDate(0, 0, i)),
+			"logical_date рана %d: ожидался %s, получен %s", i, from.AddDate(0, 0, i), run.LogicalDate)
+	}
+
+	// ошибки: период наоборот, слишком широкий период, даг без расписания
+	_, err = e.runUsecase.Backfill(context.Background(), dagName, to, from, nil)
+	assert.ErrorIs(t, err, errs.InvalidRequest)
+
+	_, err = e.runUsecase.Backfill(context.Background(), dagName, from, from.AddDate(0, 0, 200), nil)
+	assert.ErrorIs(t, err, errs.InvalidRequest)
+
+	plain := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "backfill-no-schedule",
+		"tasks": [{"name": "a"}]
+	}`)
+	_, err = e.runUsecase.Backfill(context.Background(), plain, from, to, nil)
+	assert.ErrorIs(t, err, errs.InvalidRequest)
+}
+
+// Значения тасков (XCom): пуш от текущей попытки, перезапись по ключу,
+// pull/list; пуш от устаревшей попытки и некорректные значения отклоняются.
+func TestTaskValues(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "values-dag",
+		"tasks": [{"name": "a"}]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+
+	a := e.waitLaunched(t, "a")
+
+	// пуш и перезапись
+	require.NoError(t, e.runUsecase.PushValue(context.Background(), a.Ref, "rows", []byte(`41`)))
+	require.NoError(t, e.runUsecase.PushValue(context.Background(), a.Ref, "rows", []byte(`42`)))
+	require.NoError(t, e.runUsecase.PushValue(context.Background(), a.Ref, "report", []byte(`{"ok":true}`)))
+
+	v, err := e.runUsecase.PullValue(context.Background(), runId, "a", "rows")
+	require.NoError(t, err)
+	assert.JSONEq(t, `42`, string(v.Value))
+
+	values, err := e.runUsecase.ListValues(context.Background(), runId)
+	require.NoError(t, err)
+	require.Len(t, values, 2)
+
+	// отсутствующее значение
+	_, err = e.runUsecase.PullValue(context.Background(), runId, "a", "missing")
+	assert.ErrorIs(t, err, errs.ValueNotFound)
+
+	// пуш от неактуальной попытки — отклоняется (зомби не перезапишет ретрай)
+	stale := runModel.AttemptRef{RunId: runId, Task: "a", Attempt: a.Ref.Attempt + 1}
+	err = e.runUsecase.PushValue(context.Background(), stale, "rows", []byte(`99`))
+	assert.ErrorIs(t, err, errs.AttemptOutdated)
+
+	// некорректные значения
+	err = e.runUsecase.PushValue(context.Background(), a.Ref, "bad json", []byte(`1`))
+	assert.ErrorIs(t, err, errs.InvalidRequest, "ключ с пробелом")
+	err = e.runUsecase.PushValue(context.Background(), a.Ref, "rows", []byte(`{broken`))
+	assert.ErrorIs(t, err, errs.InvalidRequest, "битый JSON")
+	err = e.runUsecase.PushValue(context.Background(), a.Ref, "rows",
+		bytes.Repeat([]byte("1"), runModel.MaxValueSize+1))
+	assert.ErrorIs(t, err, errs.InvalidRequest, "сверх лимита")
+
+	// удаление рана уносит значения каскадом
+	e.executor.started(a.Ref)
+	e.executor.finished(a.Ref, true, 0, "")
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+	require.NoError(t, e.runSvc.DeleteRun(context.Background(), runId))
+	var count int
+	require.NoError(t, e.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM run_value WHERE run_id = $1`, runId).Scan(&count))
+	assert.Zero(t, count)
+}
+
+// Пулы (решение №26): таски конкурируют за слоты пула, приоритетный
+// забирается первым; освобождение слота пускает следующего.
+func TestPoolSlotsAndPriority(t *testing.T) {
+	e := newEnv(t)
+	require.NoError(t, e.poolSvc.Set(context.Background(), "tiny", 1))
+
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "pool-dag",
+		"tasks": [
+			{"name": "low", "pool": "tiny", "priority": 1},
+			{"name": "high", "pool": "tiny", "priority": 5}
+		]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+
+	// один слот: первым уходит high (больший приоритет), low ждёт
+	high := e.waitLaunched(t, "high")
+	time.Sleep(150 * time.Millisecond)
+	_, lowLaunched := e.executor.launched("low")
+	assert.False(t, lowLaunched, "второй таск пула не должен стартовать при занятом слоте")
+
+	// слот освободился — стартует low
+	e.executor.started(high.Ref)
+	e.executor.finished(high.Ref, true, 0, "")
+	low := e.waitLaunched(t, "low")
+	e.executor.started(low.Ref)
+	e.executor.finished(low.Ref, true, 0, "")
+
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+
+	// валидация регистрации: несуществующий пул отклоняется
+	err = e.poolSvc.CheckExist(context.Background(), []string{"default", "ghost"})
+	assert.ErrorIs(t, err, errs.PoolNotFound)
+	require.NoError(t, e.poolSvc.CheckExist(context.Background(), []string{"default", "tiny"}))
+}
+
+// max_active_runs (решение №26): второй ран дага ждёт завершения первого.
+func TestMaxActiveRuns(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "serial-dag",
+		"max_active_runs": 1,
+		"tasks": [{"name": "a"}]
+	}`)
+
+	run1, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+	run2, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return len(e.executor.launchedForRun(run1)) == 1
+	}, waitTimeout, 10*time.Millisecond)
+
+	time.Sleep(150 * time.Millisecond)
+	assert.Empty(t, e.executor.launchedForRun(run2), "второй ран должен ждать первого")
+
+	first := e.executor.launchedForRun(run1)[0]
+	e.executor.started(first.Ref)
+	e.executor.finished(first.Ref, true, 0, "")
+	e.waitRunStatus(t, run1, runModel.RunStatusSuccess)
+
+	// место освободилось — второй ран поехал
+	require.Eventually(t, func() bool {
+		return len(e.executor.launchedForRun(run2)) == 1
+	}, waitTimeout, 10*time.Millisecond)
+	second := e.executor.launchedForRun(run2)[0]
+	e.executor.started(second.Ref)
+	e.executor.finished(second.Ref, true, 0, "")
+	e.waitRunStatus(t, run2, runModel.RunStatusSuccess)
+}
+
+// Секреты (решение №27): значение шифруется в БД и инъектится в env попытки;
+// отсутствующий секрет валит запуск (launch_failed).
+func TestSecrets(t *testing.T) {
+	e := newEnv(t)
+	require.NoError(t, e.secretSvc.Set(context.Background(), "db-password", []byte("s3cr3t-value")))
+
+	// в БД значение зашифровано, плейнтекста нет
+	var stored []byte
+	require.NoError(t, e.pool.QueryRow(context.Background(),
+		`SELECT value FROM secret WHERE name = 'db-password'`).Scan(&stored))
+	assert.NotContains(t, string(stored), "s3cr3t-value")
+
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "secret-dag",
+		"tasks": [{"name": "a", "secrets": [{"env": "DB_PASSWORD", "secret": "db-password"}]}]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+
+	a := e.waitLaunched(t, "a")
+	assert.Equal(t, "s3cr3t-value", a.Env["DB_PASSWORD"], "значение секрета в env попытки")
+
+	e.executor.started(a.Ref)
+	e.executor.finished(a.Ref, true, 0, "")
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+
+	// список секретов — только метаданные
+	metas, err := e.secretSvc.List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, metas, 1)
+	assert.Equal(t, "db-password", metas[0].Name)
+
+	// отсутствующий секрет валит запуск: попытка failed с launch_failed
+	ghostDag := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "ghost-secret-dag",
+		"tasks": [{"name": "a", "secrets": [{"env": "TOKEN", "secret": "ghost"}]}]
+	}`)
+	ghostRun, err := e.runUsecase.Trigger(context.Background(), ghostDag, nil)
+	require.NoError(t, err)
+
+	e.waitRunStatus(t, ghostRun, runModel.RunStatusFailed)
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), ghostRun)
+	require.NoError(t, err)
+	require.Len(t, attempts, 1)
+	assert.Equal(t, "launch_failed", attempts[0].ExitReason)
+
+	// удаление секрета
+	require.NoError(t, e.secretSvc.Delete(context.Background(), "db-password"))
+	assert.ErrorIs(t, e.secretSvc.Delete(context.Background(), "db-password"), errs.SecretNotFound)
+}
+
 // Retention: завершённый ран с истёкшим TTL удаляется целиком — артефакты
 // (вызов на artifact-сервер), логи и записи БД; свежие раны не трогаются.
 func TestRetentionSweep(t *testing.T) {
@@ -729,7 +1186,7 @@ func TestRetentionSweep(t *testing.T) {
 		"tasks": [{"name": "a"}]
 	}`)
 
-	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 
 	a := e.waitLaunched(t, "a")

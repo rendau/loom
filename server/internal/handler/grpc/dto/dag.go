@@ -16,14 +16,16 @@ func EncodeDagMain(v *domainModel.Main, _ int) *pb.DagMain {
 	}
 
 	result := &pb.DagMain{
-		Name:        v.Name,
-		Image:       v.Image,
-		ImageDigest: v.ImageDigest,
-		Schedule:    v.Schedule,
-		Paused:      v.Paused,
-		SdkVersion:  v.SdkVersion,
-		Tasks:       lo.Map(v.Tasks, EncodeDagTaskMain),
-		CreatedAt:   timestamppb.New(v.CreatedAt),
+		Name:          v.Name,
+		Image:         v.Image,
+		ImageDigest:   v.ImageDigest,
+		Schedule:      v.Schedule,
+		Paused:        v.Paused,
+		SdkVersion:    v.SdkVersion,
+		Catchup:       v.Catchup,
+		MaxActiveRuns: int32(v.MaxActiveRuns),
+		Tasks:         lo.Map(v.Tasks, EncodeDagTaskMain),
+		CreatedAt:     timestamppb.New(v.CreatedAt),
 	}
 	if !v.ModifiedAt.IsZero() {
 		result.ModifiedAt = timestamppb.New(v.ModifiedAt)
@@ -41,6 +43,8 @@ func EncodeDagTaskMain(v domainModel.Task, _ int) *pb.DagTaskMain {
 		Retries:       int32(v.Retries),
 		RetryDelaySec: int32(v.RetryDelaySec),
 		TimeoutSec:    int32(v.TimeoutSec),
+		Pool:          v.Pool,
+		Priority:      int32(v.Priority),
 	}
 	if v.Resources != nil {
 		result.Resources = &pb.DagTaskResources{

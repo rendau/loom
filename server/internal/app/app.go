@@ -22,7 +22,11 @@ import (
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
 	dagDb "github.com/rendau/loom/server/internal/domain/dag/repo/db"
 	dagService "github.com/rendau/loom/server/internal/domain/dag/service"
+	poolDb "github.com/rendau/loom/server/internal/domain/pool/repo/db"
+	poolService "github.com/rendau/loom/server/internal/domain/pool/service"
 	domainRetention "github.com/rendau/loom/server/internal/domain/retention"
+	secretDb "github.com/rendau/loom/server/internal/domain/secret/repo/db"
+	secretService "github.com/rendau/loom/server/internal/domain/secret/service"
 	runDb "github.com/rendau/loom/server/internal/domain/run/repo/db"
 	runService "github.com/rendau/loom/server/internal/domain/run/service"
 	domainScheduler "github.com/rendau/loom/server/internal/domain/scheduler"
@@ -30,16 +34,27 @@ import (
 	grpcHandler "github.com/rendau/loom/server/internal/handler/grpc"
 	"github.com/rendau/loom/server/internal/service/artifactcli"
 	"github.com/rendau/loom/server/internal/service/dockercli"
+	"github.com/rendau/loom/server/internal/service/dockerexecutor"
 	"github.com/rendau/loom/server/internal/service/k8sexecutor"
 	dagUsc "github.com/rendau/loom/server/internal/usecase/dag"
+	poolUsc "github.com/rendau/loom/server/internal/usecase/pool"
 	runUsc "github.com/rendau/loom/server/internal/usecase/run"
+	secretUsc "github.com/rendau/loom/server/internal/usecase/secret"
 	tasklogUsc "github.com/rendau/loom/server/internal/usecase/tasklog"
 )
+
+// executorI — исполняемая реализация executor-порта с жизненным циклом
+// (k8s или docker).
+type executorI interface {
+	domainScheduler.ExecutorI
+	Start() error
+	Stop()
+}
 
 type App struct {
 	pgpool      *pgxpool.Pool
 	artifactCli *artifactcli.Service
-	executor    *k8sexecutor.Service
+	executor    executorI
 	scheduler   *domainScheduler.Scheduler
 	retention   *domainRetention.Service
 
@@ -73,6 +88,13 @@ func (a *App) Init() {
 	// domain
 	dagSvc := dagService.New(dagDb.New(repoBase))
 	runSvc := runService.New(runDb.New(repoBase), txm)
+	poolSvc := poolService.New(poolDb.New(repoBase))
+
+	if config.Conf.SecretKey == "" {
+		slog.Warn("secret encryption disabled (SECRET_KEY is empty)")
+	}
+	secretSvc, err := secretService.New(secretDb.New(repoBase), config.Conf.SecretKey)
+	errCheck(err, "secret service init")
 
 	tasklogSvc, err := domainTasklog.New(config.Conf.LogDir)
 	errCheck(err, "tasklog service init")
@@ -93,9 +115,17 @@ func (a *App) Init() {
 	case "k8s":
 		a.executor, err = k8sexecutor.New(config.Conf.K8sNamespace, config.Conf.K8sKubeconfig, config.Conf.K8sJobTTL)
 		errCheck(err, "k8s executor init")
+	case "docker":
+		a.executor = dockerexecutor.New(config.Conf.DockerBin, config.Conf.DockerNetwork, config.Conf.DockerPollTick)
+	case "none":
+		slog.Warn("executor disabled: runs will stay pending (EXECUTOR=none)")
+	default:
+		errCheck(fmt.Errorf("unknown executor %q", config.Conf.Executor), "executor init")
+	}
 
+	if a.executor != nil {
 		a.scheduler = domainScheduler.New(
-			runSvc, dagSvc, a.executor, a.artifactCli, tasklogSvc,
+			runSvc, dagSvc, a.executor, a.artifactCli, tasklogSvc, secretSvc,
 			domainScheduler.Config{
 				Tick:          config.Conf.SchedTick,
 				CronTick:      config.Conf.SchedCronTick,
@@ -111,10 +141,6 @@ func (a *App) Init() {
 			},
 		)
 		schedulerNudger = a.scheduler
-	case "none":
-		slog.Warn("executor disabled: runs will stay pending (EXECUTOR=none)")
-	default:
-		errCheck(fmt.Errorf("unknown executor %q", config.Conf.Executor), "executor init")
 	}
 
 	// retention
@@ -122,20 +148,28 @@ func (a *App) Init() {
 		config.Conf.RunTTL, config.Conf.RetentionTick)
 
 	// usecases
-	dagUsecase := dagUsc.New(dagSvc, dockerCli)
+	dagUsecase := dagUsc.New(dagSvc, dockerCli, poolSvc)
 	runUsecase := runUsc.New(runSvc, dagSvc, schedulerNudger)
 	tasklogUsecase := tasklogUsc.New(tasklogSvc, runSvc)
+	poolUsecase := poolUsc.New(poolSvc)
+	secretUsecase := secretUsc.New(secretSvc)
 
 	// grpc server
 	{
 		dagHandler := grpcHandler.NewDag(dagUsecase)
 		runHandler := grpcHandler.NewRun(runUsecase)
 		tasklogHandler := grpcHandler.NewTaskLog(tasklogUsecase, config.Conf.AuthSecret)
+		taskValueHandler := grpcHandler.NewTaskValue(runUsecase, config.Conf.AuthSecret)
+		poolHandler := grpcHandler.NewPool(poolUsecase)
+		secretHandler := grpcHandler.NewSecret(secretUsecase)
 
 		a.grpcServer = NewGrpcServer("main", func(server *grpc.Server) {
 			pb.RegisterDagServiceServer(server, dagHandler)
 			pb.RegisterRunServiceServer(server, runHandler)
 			pb.RegisterTaskLogServiceServer(server, tasklogHandler)
+			pb.RegisterTaskValueServiceServer(server, taskValueHandler)
+			pb.RegisterPoolServiceServer(server, poolHandler)
+			pb.RegisterSecretServiceServer(server, secretHandler)
 		})
 	}
 
@@ -155,6 +189,9 @@ func (a *App) Init() {
 				pb.RegisterDagServiceHandler,
 				pb.RegisterRunServiceHandler,
 				pb.RegisterTaskLogServiceHandler,
+				pb.RegisterTaskValueServiceHandler,
+				pb.RegisterPoolServiceHandler,
+				pb.RegisterSecretServiceHandler,
 			}
 			for _, h := range handlers {
 				if hErr := h(context.Background(), mux, conn); hErr != nil {
@@ -238,7 +275,7 @@ func (a *App) Start() {
 	if a.executor != nil {
 		err := a.executor.Start()
 		errCheck(err, "executor.Start")
-		slog.Info("k8s executor started, namespace " + config.Conf.K8sNamespace)
+		slog.Info("executor started: " + config.Conf.Executor)
 	}
 	if a.scheduler != nil {
 		a.scheduler.Start()

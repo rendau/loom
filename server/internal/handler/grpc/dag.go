@@ -23,7 +23,7 @@ func NewDag(uc *dagUsc.Usecase) *Dag {
 }
 
 func (h *Dag) RegisterDag(ctx context.Context, req *pb.DagRegisterReq) (*pb.DagRegisterRep, error) {
-	result, err := h.usecase.Register(ctx, req.GetImage())
+	result, err := h.usecase.Register(ctx, req.GetImage(), req.AutoUpdate)
 	if err != nil {
 		return nil, encodeErr(err)
 	}
@@ -60,6 +60,13 @@ func (h *Dag) GetDag(ctx context.Context, req *pb.DagGetReq) (*pb.DagMain, error
 
 func (h *Dag) SetDagPaused(ctx context.Context, req *pb.DagSetPausedReq) (*emptypb.Empty, error) {
 	if err := h.usecase.SetPaused(ctx, req.GetName(), req.GetPaused()); err != nil {
+		return nil, encodeErr(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
+func (h *Dag) SetDagAutoUpdate(ctx context.Context, req *pb.DagSetAutoUpdateReq) (*emptypb.Empty, error) {
+	if err := h.usecase.SetAutoUpdate(ctx, req.GetName(), req.GetAutoUpdate()); err != nil {
 		return nil, encodeErr(err)
 	}
 	return &emptypb.Empty{}, nil

@@ -31,7 +31,7 @@ type testEnv struct {
 
 func newEnv(pods ...corev1.Pod) *testEnv {
 	e := &testEnv{cs: fake.NewClientset()}
-	e.svc = New(e.cs, "ns", "server:5052", 5*time.Second)
+	e.svc = New(e.cs, "ns", "server:5052", 5*time.Second, "dag-registry")
 	e.svc.digestWait = 200 * time.Millisecond
 
 	e.cs.PrependReactor("create", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -95,6 +95,8 @@ func TestInspectSuccess(t *testing.T) {
 	assert.NotNil(t, e.job.Spec.ActiveDeadlineSeconds)
 	assert.Equal(t, managedByLabelValue, e.job.Spec.Template.Labels[managedByLabelKey])
 	assert.Equal(t, e.job.Name, e.job.Spec.Template.Labels[jobLabelKey])
+	assert.Equal(t, []corev1.LocalObjectReference{{Name: "dag-registry"}},
+		e.job.Spec.Template.Spec.ImagePullSecrets)
 
 	// Job удалён сразу после чтения результата
 	deleted := false
@@ -175,7 +177,7 @@ func TestInspectPodSucceededWithoutPush(t *testing.T) {
 
 func TestInspectTimeout(t *testing.T) {
 	// подов нет вовсе (например, нет квоты) и push'а нет — общий таймаут
-	svc := New(fake.NewClientset(), "ns", "server:5052", 50*time.Millisecond)
+	svc := New(fake.NewClientset(), "ns", "server:5052", 50*time.Millisecond, "")
 
 	_, _, err := svc.Inspect(context.Background(), "registry/demo:latest")
 	require.Error(t, err)
@@ -183,7 +185,7 @@ func TestInspectTimeout(t *testing.T) {
 }
 
 func TestDeliverUnknownId(t *testing.T) {
-	svc := New(fake.NewClientset(), "ns", "server:5052", time.Second)
+	svc := New(fake.NewClientset(), "ns", "server:5052", time.Second, "")
 
 	assert.False(t, svc.Deliver("unknown", []byte(`{}`), ""))
 }

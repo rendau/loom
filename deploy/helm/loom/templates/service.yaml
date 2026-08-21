@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Chart.Name }}
+  labels:
+    app: {{ .Chart.Name }}
+spec:
+  selector:
+    app: {{ .Chart.Name }}
+  ports:
+    - name: grpc
+      protocol: TCP
+      port: 5052
+    - name: http
+      protocol: TCP
+      port: 8082
+    - name: admin
+      protocol: TCP
+      port: 8081
+    - name: system
+      protocol: TCP
+      port: 3004
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Chart.Name }}-artifact
+  labels:
+    app: {{ .Chart.Name }}-artifact
+spec:
+  selector:
+    app: {{ .Chart.Name }}-artifact
+  ports:
+    - name: grpc
+      protocol: TCP
+      port: 5051
+    - name: system
+      protocol: TCP
+      port: 3003

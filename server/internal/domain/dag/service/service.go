@@ -58,10 +58,12 @@ func (s *Service) Get(ctx context.Context, name string, errNE bool) (*model.Main
 
 // Register сохраняет даг по манифесту, полученному из образа: валидирует
 // манифест и создаёт/обновляет запись (перерегистрация = новая версия
-// образа). Paused при перерегистрации не трогается. next_run_at
+// образа). Paused при перерегистрации не трогается; autoUpdate (решение
+// №30) обновляется только при явном значении — nil сохраняет текущее (в
+// частности, авто-перерегистрация dagsync флаг не трогает). next_run_at
 // пересчитывается от текущего момента, кроме catchup-дага с тем же
 // расписанием — его тики наверстает cron-цикл (решение №24).
-func (s *Service) Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest) (*model.Main, error) {
+func (s *Service) Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest, autoUpdate *bool) (*model.Main, error) {
 	if err := ValidateManifest(m); err != nil {
 		return nil, err
 	}
@@ -75,6 +77,7 @@ func (s *Service) Register(ctx context.Context, image, imageDigest string, rawMa
 		Image:       &image,
 		ImageDigest: &imageDigest,
 		Schedule:    &m.Schedule,
+		AutoUpdate:  autoUpdate,
 		Manifest:    &rawManifest,
 		ModifiedAt:  new(time.Now()),
 	})
@@ -117,6 +120,33 @@ func (s *Service) SetPaused(ctx context.Context, name string, paused bool) error
 		}
 	}
 	return nil
+}
+
+// SetAutoUpdate включает/выключает poll-синк новой версии образа дага
+// (решение №30).
+func (s *Service) SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error {
+	if _, _, err := s.Get(ctx, name, true); err != nil {
+		return err
+	}
+
+	err := s.repoDb.Update(ctx, name, &model.Edit{
+		AutoUpdate: &autoUpdate,
+		ModifiedAt: new(time.Now()),
+	})
+	if err != nil {
+		return fmt.Errorf("repoDb.Update: %w", err)
+	}
+	return nil
+}
+
+// ListAutoUpdate возвращает даги с включённым авто-обновлением — кандидатов
+// dagsync-цикла.
+func (s *Service) ListAutoUpdate(ctx context.Context) ([]*model.Main, error) {
+	items, _, err := s.repoDb.List(ctx, &model.ListReq{AutoUpdate: new(true)})
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.List: %w", err)
+	}
+	return items, nil
 }
 
 // resetNextRun пересчитывает next_run_at дага от текущего момента; пустое

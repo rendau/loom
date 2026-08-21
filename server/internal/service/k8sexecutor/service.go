@@ -46,17 +46,21 @@ type Service struct {
 	clientset kubernetes.Interface
 	namespace string
 	jobTTL    time.Duration
+	// pullSecret — imagePullSecrets подов попыток (приватные образы дагов);
+	// пусто — без секрета.
+	pullSecret string
 
 	events  chan runModel.ExecEvent
 	factory informers.SharedInformerFactory
 	stopCh  chan struct{}
 }
 
-func New(clientset kubernetes.Interface, namespace string, jobTTL time.Duration) *Service {
+func New(clientset kubernetes.Interface, namespace string, jobTTL time.Duration, pullSecret string) *Service {
 	return &Service{
-		clientset: clientset,
-		namespace: namespace,
-		jobTTL:    jobTTL,
+		clientset:  clientset,
+		namespace:  namespace,
+		jobTTL:     jobTTL,
+		pullSecret: pullSecret,
 		events:    make(chan runModel.ExecEvent, eventsBuffer),
 		stopCh:    make(chan struct{}),
 	}
@@ -185,7 +189,8 @@ func (s *Service) buildJob(spec runModel.LaunchSpec) (*batchv1.Job, error) {
 					Annotations: annotations,
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
+					RestartPolicy:    corev1.RestartPolicyNever,
+					ImagePullSecrets: pullSecretRefs(s.pullSecret),
 					Containers: []corev1.Container{{
 						Name:      containerName,
 						Image:     spec.Image,
@@ -345,4 +350,12 @@ func jobName(ref runModel.AttemptRef) string {
 	}
 
 	return fmt.Sprintf("loom-%s-%d-%s", task, ref.Attempt, hex.EncodeToString(sum[:])[:10])
+}
+
+// pullSecretRefs — imagePullSecrets из имени секрета; пусто — без секрета.
+func pullSecretRefs(name string) []corev1.LocalObjectReference {
+	if name == "" {
+		return nil
+	}
+	return []corev1.LocalObjectReference{{Name: name}}
 }

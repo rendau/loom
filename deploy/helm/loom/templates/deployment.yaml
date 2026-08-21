@@ -1,0 +1,189 @@
+# server (control plane). Реплика одна: LOG_DIR на RWO-PVC. Strategy
+# Recreate — вторая реплика не должна подниматься до освобождения тома
+# (лог-стримы возобновляет ResumeWrite при старте, решение №20).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+  annotations:
+    reloader.stakater.com/auto: "true"
+    keel.sh/policy: force
+    keel.sh/trigger: poll
+    keel.sh/match-tag: "true"
+    keel.sh/approvals: "0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Chart.Name }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}
+    spec:
+      serviceAccountName: {{ .Chart.Name }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: {{ .Values.server.image }}
+          imagePullPolicy: Always
+          env:
+            - name: EXECUTOR
+              value: k8s
+            # in-cluster конфигурация k8s-клиента (K8S_KUBECONFIG пуст);
+            # Job'ы тасков — в namespace релиза
+            - name: K8S_NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: ARTIFACT_ADDR
+              value: {{ .Chart.Name }}-artifact:5051
+            # адреса planes, какими их видят поды тасков (cluster DNS)
+            - name: TASK_ARTIFACT_ADDR
+              value: {{ .Chart.Name }}-artifact:5051
+            - name: TASK_SERVER_ADDR
+              value: {{ .Chart.Name }}:5052
+            - name: LOG_DIR
+              value: /logs
+            # админка и API на разных хостах — браузеру нужен CORS
+            - name: HTTP_CORS
+              value: "true"
+            - name: ADMIN_API_BASE_URL
+              value: https://{{ .Values.server.domain_api }}
+            {{- if .Values.server.dag_registry_secret }}
+            # креды registry образов дагов: pull подов тасков/describe и
+            # digest-чек авто-обновления (№30)
+            - name: K8S_IMAGE_PULL_SECRET
+              value: {{ .Values.server.dag_registry_secret }}
+            - name: REGISTRY_AUTH_FILE
+              value: /registry-auth/config.json
+            {{- end }}
+            {{- range $key, $value := .Values.server.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ .Chart.Name }}-secret
+          volumeMounts:
+            - name: logs
+              mountPath: /logs
+            {{- if .Values.server.dag_registry_secret }}
+            - name: registry-auth
+              mountPath: /registry-auth
+              readOnly: true
+            {{- end }}
+          resources:
+            requests:
+              memory: {{ .Values.server.resource.requests.memory }}
+            limits:
+              memory: {{ .Values.server.resource.limits.memory }}
+          ports:
+            - containerPort: 5052 # grpc
+            - containerPort: 8082 # http api (gateway)
+            - containerPort: 8081 # админка (SPA)
+            - containerPort: 3004 # system (healthcheck, metrics)
+          startupProbe:
+            httpGet:
+              path: /healthcheck
+              port: 3004
+            failureThreshold: 50
+            periodSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthcheck
+              port: 3004
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthcheck
+              port: 3004
+            periodSeconds: 10
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: {{ .Chart.Name }}-logs
+        {{- if .Values.server.dag_registry_secret }}
+        - name: registry-auth
+          secret:
+            secretName: {{ .Values.server.dag_registry_secret }}
+            items:
+              - key: .dockerconfigjson
+                path: config.json
+        {{- end }}
+      {{- if .Values.pull_secret }}
+      imagePullSecrets:
+        - name: {{ .Values.pull_secret }}
+      {{- end }}
+
+---
+
+# artifact (data plane). Реплика одна: файловый streamstore на RWO-PVC.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}-artifact
+  annotations:
+    reloader.stakater.com/auto: "true"
+    keel.sh/policy: force
+    keel.sh/trigger: poll
+    keel.sh/match-tag: "true"
+    keel.sh/approvals: "0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Chart.Name }}-artifact
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}-artifact
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}-artifact
+          image: {{ .Values.artifact.image }}
+          imagePullPolicy: Always
+          env:
+            - name: DATA_DIR
+              value: /data
+            - name: AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Chart.Name }}-secret
+                  key: AUTH_SECRET
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              memory: {{ .Values.artifact.resource.requests.memory }}
+            limits:
+              memory: {{ .Values.artifact.resource.limits.memory }}
+          ports:
+            - containerPort: 5051 # grpc
+            - containerPort: 3003 # system (healthcheck, metrics)
+          startupProbe:
+            httpGet:
+              path: /healthcheck
+              port: 3003
+            failureThreshold: 50
+            periodSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthcheck
+              port: 3003
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthcheck
+              port: 3003
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Chart.Name }}-artifact-data
+      {{- if .Values.pull_secret }}
+      imagePullSecrets:
+        - name: {{ .Values.pull_secret }}
+      {{- end }}

@@ -9,8 +9,9 @@ import (
 type ServiceI interface {
 	List(ctx context.Context, pars *model.ListReq) ([]*model.Main, int64, error)
 	Get(ctx context.Context, name string, errNE bool) (*model.Main, bool, error)
-	Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest) (*model.Main, error)
+	Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest, autoUpdate *bool) (*model.Main, error)
 	SetPaused(ctx context.Context, name string, paused bool) error
+	SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error
 	Delete(ctx context.Context, name string) error
 }
 

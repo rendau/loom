@@ -63,6 +63,10 @@ var Conf = struct {
 	// K8sDescribeTimeout — таймаут describe-Job'а регистрации дага (решение
 	// №29); должен покрывать и pull образа.
 	K8sDescribeTimeout time.Duration `env:"K8S_DESCRIBE_TIMEOUT" envDefault:"5m"`
+	// K8sImagePullSecret — имя dockerconfigjson-секрета в K8S_NAMESPACE для
+	// pull приватных образов дагов: подставляется в imagePullSecrets подов
+	// попыток и describe-Job'ов; пусто — без секрета (публичные образы).
+	K8sImagePullSecret string `env:"K8S_IMAGE_PULL_SECRET"`
 
 	// SchedTick — период планировщика; события executor'а будят его раньше.
 	SchedTick time.Duration `env:"SCHED_TICK" envDefault:"2s"`
@@ -81,6 +85,13 @@ var Conf = struct {
 	RunTTL time.Duration `env:"RUN_TTL" envDefault:"720h"`
 	// RetentionTick — период проходов очистки.
 	RetentionTick time.Duration `env:"RETENTION_TICK" envDefault:"1h"`
+
+	// DagSyncTick — период авто-обновления дагов (решение №30): digest-чек
+	// тега в registry для дагов с auto_update; 0 — выключено.
+	DagSyncTick time.Duration `env:"DAG_SYNC_TICK" envDefault:"5m"`
+	// RegistryAuthFile — путь к docker config.json с кредами registry для
+	// digest-чека приватных образов; пусто — anonymous-доступ.
+	RegistryAuthFile string `env:"REGISTRY_AUTH_FILE"`
 
 	// AuthSecret — общий секрет attempt-токенов (control plane, artifact-
 	// сервер, лог-приёмник); пусто — проверка токенов выключена (dev).

@@ -1,0 +1,84 @@
+# Наружу смотрят только админка (SPA) и HTTP API (gateway, за ADMIN_TOKEN;
+# нужен браузеру админки). gRPC-порты наружу не публикуются — таски ходят
+# по cluster DNS.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Chart.Name }}-admin
+  labels:
+    app: {{ .Chart.Name }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: ingress-redirect-to-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - {{ .Values.server.domain_admin }}
+      secretName: {{ .Chart.Name }}-admin-tls-secret
+  rules:
+    - host: {{ .Values.server.domain_admin }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Chart.Name }}
+                port:
+                  number: 8081
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Chart.Name }}-api
+  labels:
+    app: {{ .Chart.Name }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: ingress-redirect-to-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - {{ .Values.server.domain_api }}
+      secretName: {{ .Chart.Name }}-api-tls-secret
+  rules:
+    - host: {{ .Values.server.domain_api }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Chart.Name }}
+                port:
+                  number: 8082
+
+---
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Chart.Name }}-admin-cert
+spec:
+  secretName: {{ .Chart.Name }}-admin-tls-secret
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-issuer
+  dnsNames:
+    - {{ .Values.server.domain_admin }}
+
+---
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Chart.Name }}-api-cert
+spec:
+  secretName: {{ .Chart.Name }}-api-tls-secret
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-issuer
+  dnsNames:
+    - {{ .Values.server.domain_api }}

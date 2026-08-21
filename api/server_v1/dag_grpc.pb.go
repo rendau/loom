@@ -20,12 +20,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DagService_RegisterDag_FullMethodName     = "/server_v1.DagService/RegisterDag"
-	DagService_ListDag_FullMethodName         = "/server_v1.DagService/ListDag"
-	DagService_GetDag_FullMethodName          = "/server_v1.DagService/GetDag"
-	DagService_SetDagPaused_FullMethodName    = "/server_v1.DagService/SetDagPaused"
-	DagService_DeleteDag_FullMethodName       = "/server_v1.DagService/DeleteDag"
-	DagService_PushDagManifest_FullMethodName = "/server_v1.DagService/PushDagManifest"
+	DagService_RegisterDag_FullMethodName      = "/server_v1.DagService/RegisterDag"
+	DagService_ListDag_FullMethodName          = "/server_v1.DagService/ListDag"
+	DagService_GetDag_FullMethodName           = "/server_v1.DagService/GetDag"
+	DagService_SetDagPaused_FullMethodName     = "/server_v1.DagService/SetDagPaused"
+	DagService_SetDagAutoUpdate_FullMethodName = "/server_v1.DagService/SetDagAutoUpdate"
+	DagService_DeleteDag_FullMethodName        = "/server_v1.DagService/DeleteDag"
+	DagService_PushDagManifest_FullMethodName  = "/server_v1.DagService/PushDagManifest"
 )
 
 // DagServiceClient is the client API for DagService service.
@@ -46,6 +47,10 @@ type DagServiceClient interface {
 	// SetDagPaused ставит даг на паузу / снимает с паузы. Пауза останавливает
 	// только запуски по расписанию; ручной триггер работает.
 	SetDagPaused(ctx context.Context, in *DagSetPausedReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// SetDagAutoUpdate включает/выключает авто-обновление дага (решение №30):
+	// control plane периодически сверяет digest тега образа с registry и при
+	// изменении перерегистрирует даг автоматически.
+	SetDagAutoUpdate(ctx context.Context, in *DagSetAutoUpdateReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	DeleteDag(ctx context.Context, in *DagDeleteReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// PushDagManifest — внутренний вызов describe-Job'а (решение №29): при
 	// регистрации через k8s Job сам отправляет манифест (или ошибку валидации
@@ -103,6 +108,16 @@ func (c *dagServiceClient) SetDagPaused(ctx context.Context, in *DagSetPausedReq
 	return out, nil
 }
 
+func (c *dagServiceClient) SetDagAutoUpdate(ctx context.Context, in *DagSetAutoUpdateReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, DagService_SetDagAutoUpdate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *dagServiceClient) DeleteDag(ctx context.Context, in *DagDeleteReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(emptypb.Empty)
@@ -141,6 +156,10 @@ type DagServiceServer interface {
 	// SetDagPaused ставит даг на паузу / снимает с паузы. Пауза останавливает
 	// только запуски по расписанию; ручной триггер работает.
 	SetDagPaused(context.Context, *DagSetPausedReq) (*emptypb.Empty, error)
+	// SetDagAutoUpdate включает/выключает авто-обновление дага (решение №30):
+	// control plane периодически сверяет digest тега образа с registry и при
+	// изменении перерегистрирует даг автоматически.
+	SetDagAutoUpdate(context.Context, *DagSetAutoUpdateReq) (*emptypb.Empty, error)
 	DeleteDag(context.Context, *DagDeleteReq) (*emptypb.Empty, error)
 	// PushDagManifest — внутренний вызов describe-Job'а (решение №29): при
 	// регистрации через k8s Job сам отправляет манифест (или ошибку валидации
@@ -169,6 +188,9 @@ func (UnimplementedDagServiceServer) GetDag(context.Context, *DagGetReq) (*DagMa
 }
 func (UnimplementedDagServiceServer) SetDagPaused(context.Context, *DagSetPausedReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetDagPaused not implemented")
+}
+func (UnimplementedDagServiceServer) SetDagAutoUpdate(context.Context, *DagSetAutoUpdateReq) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetDagAutoUpdate not implemented")
 }
 func (UnimplementedDagServiceServer) DeleteDag(context.Context, *DagDeleteReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteDag not implemented")
@@ -269,6 +291,24 @@ func _DagService_SetDagPaused_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DagService_SetDagAutoUpdate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DagSetAutoUpdateReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DagServiceServer).SetDagAutoUpdate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DagService_SetDagAutoUpdate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DagServiceServer).SetDagAutoUpdate(ctx, req.(*DagSetAutoUpdateReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DagService_DeleteDag_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DagDeleteReq)
 	if err := dec(in); err != nil {
@@ -327,6 +367,10 @@ var DagService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetDagPaused",
 			Handler:    _DagService_SetDagPaused_Handler,
+		},
+		{
+			MethodName: "SetDagAutoUpdate",
+			Handler:    _DagService_SetDagAutoUpdate_Handler,
 		},
 		{
 			MethodName: "DeleteDag",

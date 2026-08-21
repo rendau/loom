@@ -22,14 +22,15 @@ import (
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
 	dagDb "github.com/rendau/loom/server/internal/domain/dag/repo/db"
 	dagService "github.com/rendau/loom/server/internal/domain/dag/service"
+	domainDagSync "github.com/rendau/loom/server/internal/domain/dagsync"
 	poolDb "github.com/rendau/loom/server/internal/domain/pool/repo/db"
 	poolService "github.com/rendau/loom/server/internal/domain/pool/service"
 	domainRetention "github.com/rendau/loom/server/internal/domain/retention"
-	secretDb "github.com/rendau/loom/server/internal/domain/secret/repo/db"
-	secretService "github.com/rendau/loom/server/internal/domain/secret/service"
 	runDb "github.com/rendau/loom/server/internal/domain/run/repo/db"
 	runService "github.com/rendau/loom/server/internal/domain/run/service"
 	domainScheduler "github.com/rendau/loom/server/internal/domain/scheduler"
+	secretDb "github.com/rendau/loom/server/internal/domain/secret/repo/db"
+	secretService "github.com/rendau/loom/server/internal/domain/secret/service"
 	domainTasklog "github.com/rendau/loom/server/internal/domain/tasklog"
 	grpcHandler "github.com/rendau/loom/server/internal/handler/grpc"
 	"github.com/rendau/loom/server/internal/service/artifactcli"
@@ -38,6 +39,7 @@ import (
 	"github.com/rendau/loom/server/internal/service/k8sclient"
 	"github.com/rendau/loom/server/internal/service/k8sdescriber"
 	"github.com/rendau/loom/server/internal/service/k8sexecutor"
+	"github.com/rendau/loom/server/internal/service/registrycli"
 	dagUsc "github.com/rendau/loom/server/internal/usecase/dag"
 	poolUsc "github.com/rendau/loom/server/internal/usecase/pool"
 	runUsc "github.com/rendau/loom/server/internal/usecase/run"
@@ -59,6 +61,7 @@ type App struct {
 	executor    executorI
 	scheduler   *domainScheduler.Scheduler
 	retention   *domainRetention.Service
+	dagSync     *domainDagSync.Service
 
 	grpcServer       *GrpcServer
 	httpServer       *http.Server
@@ -123,10 +126,11 @@ func (a *App) Init() {
 	case "k8s":
 		clientset, cErr := k8sclient.New(config.Conf.K8sKubeconfig)
 		errCheck(cErr, "k8s client init")
-		a.executor = k8sexecutor.New(clientset, config.Conf.K8sNamespace, config.Conf.K8sJobTTL)
+		a.executor = k8sexecutor.New(clientset, config.Conf.K8sNamespace, config.Conf.K8sJobTTL,
+			config.Conf.K8sImagePullSecret)
 
 		describer := k8sdescriber.New(clientset, config.Conf.K8sNamespace,
-			config.Conf.TaskServerAddr, config.Conf.K8sDescribeTimeout)
+			config.Conf.TaskServerAddr, config.Conf.K8sDescribeTimeout, config.Conf.K8sImagePullSecret)
 		imageInspector = describer
 		manifestSink = describer
 	case "docker":
@@ -163,6 +167,12 @@ func (a *App) Init() {
 
 	// usecases
 	dagUsecase := dagUsc.New(dagSvc, imageInspector, poolSvc, manifestSink)
+
+	// авто-обновление дагов (решение №30): digest-чек registry + авто-
+	// перерегистрация через обычный Register-флоу usecase'а
+	a.dagSync = domainDagSync.New(dagSvc, registrycli.New(config.Conf.RegistryAuthFile),
+		dagUsecase, config.Conf.DagSyncTick)
+
 	runUsecase := runUsc.New(runSvc, dagSvc, schedulerNudger)
 	tasklogUsecase := tasklogUsc.New(tasklogSvc, runSvc)
 	poolUsecase := poolUsc.New(poolSvc)
@@ -297,6 +307,7 @@ func (a *App) Start() {
 	}
 
 	a.retention.Start()
+	a.dagSync.Start()
 }
 
 func (a *App) Listen() {
@@ -318,6 +329,7 @@ func (a *App) Stop() {
 		a.executor.Stop()
 	}
 	a.retention.Stop()
+	a.dagSync.Stop()
 
 	// http-gw server
 	{

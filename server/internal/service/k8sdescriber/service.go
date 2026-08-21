@@ -78,6 +78,9 @@ type Service struct {
 	// (TASK_SERVER_ADDR); уходит в env LOOM_SERVER_ADDR.
 	serverAddr string
 	timeout    time.Duration
+	// pullSecret — imagePullSecrets describe-пода (приватные образы дагов);
+	// пусто — без секрета.
+	pullSecret string
 
 	// поля вместо констант — тесты укорачивают ожидания
 	exitGrace  time.Duration
@@ -87,12 +90,13 @@ type Service struct {
 	waiters map[string]chan pushResult
 }
 
-func New(clientset kubernetes.Interface, namespace, serverAddr string, timeout time.Duration) *Service {
+func New(clientset kubernetes.Interface, namespace, serverAddr string, timeout time.Duration, pullSecret string) *Service {
 	return &Service{
 		clientset:  clientset,
 		namespace:  namespace,
 		serverAddr: serverAddr,
 		timeout:    timeout,
+		pullSecret: pullSecret,
 		exitGrace:  exitGrace,
 		digestWait: digestWait,
 		waiters:    map[string]chan pushResult{},
@@ -187,7 +191,8 @@ func (s *Service) buildJob(name, image, id string) *batchv1.Job {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
+					RestartPolicy:    corev1.RestartPolicyNever,
+					ImagePullSecrets: pullSecretRefs(s.pullSecret),
 					Containers: []corev1.Container{{
 						Name:  containerName,
 						Image: image,
@@ -371,4 +376,12 @@ func describeID() (string, error) {
 		return "", fmt.Errorf("rand: %w", err)
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+// pullSecretRefs — imagePullSecrets из имени секрета; пусто — без секрета.
+func pullSecretRefs(name string) []corev1.LocalObjectReference {
+	if name == "" {
+		return nil
+	}
+	return []corev1.LocalObjectReference{{Name: name}}
 }

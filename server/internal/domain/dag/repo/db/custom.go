@@ -25,6 +25,9 @@ func (r *Repo) getConditions(pars *model.ListReq) (map[string]any, map[string][]
 	if pars.Paused != nil {
 		conditions["paused"] = *pars.Paused
 	}
+	if pars.AutoUpdate != nil {
+		conditions["auto_update"] = *pars.AutoUpdate
+	}
 
 	return conditions, conditionExps
 }

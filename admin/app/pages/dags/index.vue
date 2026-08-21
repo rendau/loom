@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import { listDags, registerDag, setDagPaused, deleteDag } from '~/api/dag.api'
+import { listDags, registerDag, setDagAutoUpdate, setDagPaused, deleteDag } from '~/api/dag.api'
 import { backfillRuns, triggerRun } from '~/api/run.api'
 import type { Dag } from '~/types/dag'
 
@@ -24,15 +24,17 @@ onMounted(load)
 // регистрация дага по образу
 const registerOpen = ref(false)
 const registerImage = ref('')
+const registerAutoUpdate = ref(false)
 
 async function submitRegister() {
   const image = registerImage.value.trim()
   if (!image)
     return
-  const rep = await action.run(() => registerDag(image), { success: 'Даг зарегистрирован' })
+  const rep = await action.run(() => registerDag(image, registerAutoUpdate.value), { success: 'Даг зарегистрирован' })
   if (rep) {
     registerOpen.value = false
     registerImage.value = ''
+    registerAutoUpdate.value = false
     await load()
   }
 }
@@ -122,6 +124,15 @@ async function togglePaused(dag: Dag) {
     await load()
 }
 
+async function toggleAutoUpdate(dag: Dag) {
+  const ok = await action.run(
+    () => setDagAutoUpdate(dag.name, !dag.auto_update),
+    { success: dag.auto_update ? 'Авто-обновление выключено' : 'Авто-обновление включено' },
+  )
+  if (ok !== undefined)
+    await load()
+}
+
 const deleteTarget = ref<Dag | null>(null)
 
 async function confirmDelete() {
@@ -184,7 +195,12 @@ const columns: TableColumn<Dag>[] = [
         </template>
 
         <template #image-cell="{ row }">
-          <span class="font-mono text-xs">{{ row.original.image }}</span>
+          <div class="flex items-center gap-1.5">
+            <span class="font-mono text-xs">{{ row.original.image }}</span>
+            <UTooltip v-if="row.original.auto_update" text="Авто-обновление: digest тега отслеживается в registry">
+              <UBadge color="info" variant="subtle" size="sm">auto</UBadge>
+            </UTooltip>
+          </div>
         </template>
 
         <template #created_at-cell="{ row }">
@@ -198,6 +214,15 @@ const columns: TableColumn<Dag>[] = [
             </UTooltip>
             <UTooltip v-if="row.original.schedule" text="Backfill за период">
               <UButton icon="i-lucide-calendar-clock" size="sm" color="secondary" variant="ghost" @click="backfillTarget = row.original" />
+            </UTooltip>
+            <UTooltip :text="row.original.auto_update ? 'Выключить авто-обновление образа' : 'Включить авто-обновление образа'">
+              <UButton
+                icon="i-lucide-refresh-ccw-dot"
+                size="sm"
+                :color="row.original.auto_update ? 'info' : 'neutral'"
+                variant="ghost"
+                @click="toggleAutoUpdate(row.original)"
+              />
             </UTooltip>
             <UTooltip :text="row.original.paused ? 'Снять с паузы' : 'Поставить на паузу'">
               <UButton
@@ -222,15 +247,22 @@ const columns: TableColumn<Dag>[] = [
       <!-- регистрация дага -->
       <UModal v-model:open="registerOpen" title="Регистрация дага" description="Server сделает pull образа, запустит describe и сохранит манифест.">
         <template #body>
-          <UFormField label="Docker-образ" hint="например registry/my-dag:latest">
-            <UInput
-              v-model="registerImage"
-              class="w-full"
-              placeholder="registry/my-dag:latest"
-              autofocus
-              @keyup.enter="submitRegister"
+          <div class="space-y-4">
+            <UFormField label="Docker-образ" hint="например registry/my-dag:latest">
+              <UInput
+                v-model="registerImage"
+                class="w-full"
+                placeholder="registry/my-dag:latest"
+                autofocus
+                @keyup.enter="submitRegister"
+              />
+            </UFormField>
+            <UCheckbox
+              v-model="registerAutoUpdate"
+              label="Авто-обновление образа"
+              description="Server будет следить за digest'ом тега в registry и перерегистрировать даг при изменении."
             />
-          </UFormField>
+          </div>
         </template>
         <template #footer>
           <div class="flex w-full justify-end gap-2">

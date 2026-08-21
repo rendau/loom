@@ -1,0 +1,29 @@
+# PVC под логи тасков server'а (streamstore) и данные artifact-сервера.
+# Оба RWO — по одной реплике каждого plane'а.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Chart.Name }}-logs
+  labels:
+    app: {{ .Chart.Name }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.server.logs_size }}
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Chart.Name }}-artifact-data
+  labels:
+    app: {{ .Chart.Name }}-artifact
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.artifact.data_size }}

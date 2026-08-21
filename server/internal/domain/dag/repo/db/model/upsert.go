@@ -13,6 +13,7 @@ type Upsert struct {
 	ImageDigest *string
 	Schedule    *string
 	Paused      *bool
+	AutoUpdate  *bool
 	Manifest    *[]byte
 	ModifiedAt  *time.Time
 }
@@ -30,6 +31,9 @@ func (m *Upsert) CreateColumnMap() map[string]any {
 	}
 	if m.Paused != nil {
 		result["paused"] = *m.Paused
+	}
+	if m.AutoUpdate != nil {
+		result["auto_update"] = *m.AutoUpdate
 	}
 	if m.Manifest != nil {
 		result["manifest"] = *m.Manifest
@@ -62,6 +66,7 @@ func DecodeUpsert(v *domainModel.Edit) *Upsert {
 		ImageDigest: v.ImageDigest,
 		Schedule:    v.Schedule,
 		Paused:      v.Paused,
+		AutoUpdate:  v.AutoUpdate,
 		Manifest:    v.Manifest,
 		ModifiedAt:  v.ModifiedAt,
 	}

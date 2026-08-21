@@ -45,6 +45,16 @@ service DagService {
     };
   }
 
+  // SetDagAutoUpdate включает/выключает авто-обновление дага (решение №30):
+  // control plane периодически сверяет digest тега образа с registry и при
+  // изменении перерегистрирует даг автоматически.
+  rpc SetDagAutoUpdate(DagSetAutoUpdateReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      put: "/dag/{name}/auto_update"
+      body: "*"
+    };
+  }
+
   rpc DeleteDag(DagDeleteReq) returns (google.protobuf.Empty) {
     option (google.api.http) = {
       delete: "/dag/{name}"
@@ -82,6 +92,8 @@ message DagMain {
   bool catchup = 11;
   // Лимит одновременно выполняющихся ранов; 0 — без лимита (решение №26).
   int32 max_active_runs = 12;
+  // Авто-обновление: poll-синк digest'а тега образа (решение №30).
+  bool auto_update = 13;
 }
 
 message DagTaskMain {
@@ -112,6 +124,9 @@ message DagTaskResources {
 
 message DagRegisterReq {
   string image = 1;
+  // Авто-обновление (решение №30); отсутствует — сохранить текущее значение
+  // (перерегистрация не сбрасывает флаг), у нового дага — false.
+  optional bool auto_update = 2;
 }
 
 message DagRegisterRep {
@@ -141,6 +156,13 @@ message DagGetReq {
 message DagSetPausedReq {
   string name = 1;
   bool paused = 2;
+}
+
+// SetAutoUpdate
+
+message DagSetAutoUpdateReq {
+  string name = 1;
+  bool auto_update = 2;
 }
 
 // Delete

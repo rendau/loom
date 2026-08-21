@@ -259,7 +259,7 @@ func (e *env) registerDag(t *testing.T, rawManifest string) string {
 	require.NoError(t, err)
 
 	dag, err := e.dagSvc.Register(context.Background(), "registry/"+m.Name+":latest",
-		"registry/"+m.Name+"@sha256:deadbeef", []byte(rawManifest), m)
+		"registry/"+m.Name+"@sha256:deadbeef", []byte(rawManifest), m, nil)
 	require.NoError(t, err)
 
 	return dag.Name

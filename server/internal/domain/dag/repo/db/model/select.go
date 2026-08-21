@@ -13,6 +13,7 @@ type Select struct {
 	ImageDigest string
 	Schedule    string
 	Paused      bool
+	AutoUpdate  bool
 	Manifest    []byte
 	NextRunAt   sql.NullTime
 	CreatedAt   time.Time
@@ -26,6 +27,7 @@ func (m *Select) ListColumnMap() map[string]any {
 		"image_digest": &m.ImageDigest,
 		"schedule":     &m.Schedule,
 		"paused":       &m.Paused,
+		"auto_update":  &m.AutoUpdate,
 		"manifest":     &m.Manifest,
 		"next_run_at":  &m.NextRunAt,
 		"created_at":   &m.CreatedAt,
@@ -54,6 +56,7 @@ func EncodeSelect(v *Select, _ int) *domainModel.Main {
 		Catchup:       m.Catchup,
 		MaxActiveRuns: m.MaxActiveRuns,
 		Paused:        v.Paused,
+		AutoUpdate:    v.AutoUpdate,
 		SdkVersion:    m.SdkVersion,
 		Tasks:         m.Tasks,
 		Manifest:      v.Manifest,

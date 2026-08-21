@@ -21,6 +21,7 @@ func EncodeDagMain(v *domainModel.Main, _ int) *pb.DagMain {
 		ImageDigest:   v.ImageDigest,
 		Schedule:      v.Schedule,
 		Paused:        v.Paused,
+		AutoUpdate:    v.AutoUpdate,
 		SdkVersion:    v.SdkVersion,
 		Catchup:       v.Catchup,
 		MaxActiveRuns: int32(v.MaxActiveRuns),

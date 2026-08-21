@@ -18,7 +18,10 @@ type Main struct {
 	// (решение №26).
 	MaxActiveRuns int
 	Paused        bool
-	SdkVersion    string
+	// AutoUpdate — poll-синк новой версии образа (решение №30): свойство
+	// деплоя, не манифеста; хранится в БД.
+	AutoUpdate bool
+	SdkVersion string
 	Tasks         []Task
 	Manifest      []byte
 	NextRunAt     time.Time // zero — без расписания / не инициализировано
@@ -75,6 +78,7 @@ type Edit struct {
 	ImageDigest *string
 	Schedule    *string
 	Paused      *bool
+	AutoUpdate  *bool
 	Manifest    *[]byte
 	ModifiedAt  *time.Time
 }
@@ -83,5 +87,6 @@ type Edit struct {
 type ListReq struct {
 	commonModel.ListParams
 
-	Paused *bool
+	Paused     *bool
+	AutoUpdate *bool
 }

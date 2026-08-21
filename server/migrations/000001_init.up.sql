@@ -7,6 +7,7 @@ create table dag (
     image_digest text        not null, -- закреплённый digest (repo@sha256:...)
     schedule     text        not null default '',
     paused       boolean     not null default false,
+    auto_update  boolean     not null default false, -- poll-синк новой версии образа (решение №30)
     manifest     jsonb       not null, -- манифест `describe` как есть
     next_run_at  timestamptz,          -- следующий запуск по cron; null — без расписания
     created_at   timestamptz not null default now(),

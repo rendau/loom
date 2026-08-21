@@ -47,8 +47,9 @@ func (u *Usecase) Get(ctx context.Context, name string) (*model.Main, error) {
 
 // Register регистрирует даг по url docker-образа: инспекция (пиннинг digest
 // + `describe`) → валидация манифеста → сохранение. Имя дага берётся из
-// манифеста; повторная регистрация обновляет образ и манифест.
-func (u *Usecase) Register(ctx context.Context, image string) (*model.Main, error) {
+// манифеста; повторная регистрация обновляет образ и манифест. autoUpdate
+// nil — сохранить текущее значение флага (решение №30).
+func (u *Usecase) Register(ctx context.Context, image string, autoUpdate *bool) (*model.Main, error) {
 	if image == "" {
 		return nil, errs.ImageRequired
 	}
@@ -72,7 +73,7 @@ func (u *Usecase) Register(ctx context.Context, image string) (*model.Main, erro
 		return nil, err
 	}
 
-	result, err := u.svc.Register(ctx, image, digest, raw, m)
+	result, err := u.svc.Register(ctx, image, digest, raw, m, autoUpdate)
 	if err != nil {
 		return nil, fmt.Errorf("svc.Register: %w", err)
 	}
@@ -101,6 +102,16 @@ func (u *Usecase) SetPaused(ctx context.Context, name string, paused bool) error
 	}
 	if err := u.svc.SetPaused(ctx, name, paused); err != nil {
 		return fmt.Errorf("svc.SetPaused: %w", err)
+	}
+	return nil
+}
+
+func (u *Usecase) SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error {
+	if name == "" {
+		return errs.IdRequired
+	}
+	if err := u.svc.SetAutoUpdate(ctx, name, autoUpdate); err != nil {
+		return fmt.Errorf("svc.SetAutoUpdate: %w", err)
 	}
 	return nil
 }

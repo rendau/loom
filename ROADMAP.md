@@ -214,6 +214,21 @@
     на docker-desktop k8s 2026-08-21: describe-Job, push манифеста,
     digest из imageID.)
 
+30. **Авто-обновление дагов — poll-синк в control plane** (аналог keel
+    poll): у дага флаг `auto_update` (поле регистрации/админки, хранится в
+    БД, НЕ в манифесте — свойство деплоя, выключается без пересборки;
+    перерегистрация без явного значения его сохраняет — в API поле
+    optional). Цикл `dagsync` (`DAG_SYNC_TICK`, дефолт 5m, 0 — выключен):
+    для auto_update-дагов дешёвый digest-чек тега в registry (HEAD
+    `/v2/<repo>/manifests/<tag>`, заголовок Docker-Content-Digest; token-
+    и basic-auth, creds — docker config.json по `REGISTRY_AUTH_FILE`,
+    localhost — по http) и при изменении — обычная полная перерегистрация
+    (describe → валидация → сохранение). Сломанный новый образ запись не
+    трогает (warning + метрика, повтор следующим тиком). Даг, чей ref
+    задан digest'ом или не пиннился при регистрации, не синкается
+    (warning). Семантика ранов не меняется: активные раны и RetryTask —
+    на своих пиннутых digest'ах, новые — на свежем.
+
 ## Состояние: сделано
 
 - [x] SDK: DAG/Task, рёбра After/AfterStreamed, Validate, JSON-манифест (`describe`)
@@ -456,15 +471,29 @@ auth админки, публикация SDK, CI с unit-тестами). По�
       `go get github.com/rendau/loom/sdk@v0.1.0` → сборка минимального
       дага, describe (sdk_version 0.1.0 в манифесте) и локальный ран
 - [ ] Первый деплой и обкатка:
-      - Dockerfile server'а (бинарь + миграции + статика админки
-        `make build-admin`; у artifact уже есть)
+      - ~~Dockerfile server'а~~ — есть (бинарь + миграции + статика
+        админки), CI собирает и пушит оба образа
       - ~~решить регистрацию дагов без docker-демона рядом с server'ом~~ —
         решено и реализовано (решение №29): describe одноразовым k8s
         Job'ом (`k8sdescriber` при `EXECUTOR=k8s`), docker-CLI при
         docker/none
-      - `deploy/`: k8s-манифесты (server + artifact, PVC под данные
-        artifact и логи, Service/Ingress, env-примеры) и docker-compose
-        для одного хоста (`EXECUTOR=docker` + Postgres + artifact)
+      - ~~helm-чарт~~ — `deploy/helm/loom` (2026-08-21), по конвенциям
+        helm-zeon (копируется в charts/ helm-репо): server + artifact
+        одним чартом в namespace релиза, реплики = 1 (RWO PVC под
+        artifact-данные и логи), RBAC Role на Jobs/pods/pods-log для
+        executor'а и describe, секреты словарём (плейсхолдеры в чарте,
+        реальные — в приватных values), traefik-ингрессы админки и API
+        (CORS включён — хосты разные), ServiceMonitor'ы на system-порты,
+        keel/reloader-аннотации; `helm lint`/`template` зелёные.
+        Обновление 2026-08-21 (loom публичный, даги приватные с
+        отдельными кредами): `pull_secret` самого loom опционален (пусто —
+        образы публичные), а креды дагов — одним dockerconfigjson-секретом
+        `server.dag_registry_secret` на оба применения: imagePullSecrets
+        подов тасков/describe (`K8S_IMAGE_PULL_SECRET` → k8sexecutor и
+        k8sdescriber подставляют в спеки) и digest-чек авто-обновления
+        (`REGISTRY_AUTH_FILE`); обход через default SA больше не нужен
+      - docker-compose для одного хоста (`EXECUTOR=docker` + Postgres +
+        artifact) — не делали
       - ~~обкатка~~ — выполнена 2026-08-21 на docker-desktop (демон +
         его k8s), пометки «не гонялся» с №8, №28 и №29 сняты. Стенд:
         локальный registry (127.0.0.1:5001, digest-пиннинг настоящий),
@@ -476,8 +505,31 @@ auth админки, публикация SDK, CI с unit-тестами). По�
         секрет env-инъекцией, params/logical_date, Push/PullValue,
         чтение логов (task + server-строки). Второй даг обкатки —
         внешний потребитель sdk v0.1.0 (secret+flaky+values)
-      - документация по развёртыванию (README раздел или deploy/README)
-      - документация по развёртыванию (README раздел или deploy/README)
+      - ~~документация по развёртыванию~~ — `deploy/README.md`: установка
+        чарта в helm-zeon/-test (приватные values, helmfile-релиз),
+        pull-секреты для образов дагов, жизненный цикл дага — деплой и
+        обновление (перерегистрация, пиннинг активных ранов)
+      - остаётся: docker-compose (выше) и сам первый деплой в кластер —
+        копирование чарта в helm-репо и установка за пользователем
+- [x] Авто-обновление дагов (решение №30, 2026-08-21): колонка
+      `dag.auto_update` (+ в init-миграции), `registrycli` (digest-чек
+      Docker Registry API v2: HEAD manifests → Docker-Content-Digest,
+      GET-fallback c sha256 тела, Bearer token-flow и Basic, креды —
+      docker config.json `REGISTRY_AUTH_FILE`, localhost — http; юнит-
+      тесты на httptest-registry), компонент `domain/dagsync`
+      (`DAG_SYNC_TICK` 5m, метрики `loom_dagsync_*`; перерегистрация —
+      через обычный Register-флоу usecase'а, флаг не трогает), API:
+      `auto_update` в DagMain/RegisterDag (optional — не сбрасывается) +
+      `SetDagAutoUpdate` (PUT /dag/{name}/auto_update); админка — чекбокс
+      в регистрации, бейдж «auto» и переключатель в списке; чарт
+      монтирует dockerconfigjson-секрет (`server.registry_auth_secret`).
+      Проверено вживую на docker-стенде: push нового образа тем же тегом
+      → авто-перерегистрация за один тик → новый ран исполнился на новой
+      версии (`done v2`), активные раны не тронуты. Дополнение (даги
+      приватные): `K8S_IMAGE_PULL_SECRET` — имя dockerconfigjson-секрета,
+      который k8sexecutor/k8sdescriber подставляют в imagePullSecrets
+      подов попыток и describe-Job'ов (пусто — без секрета); в чарте оба
+      механизма включает одно значение `server.dag_registry_secret`
 
 ## Команды
 

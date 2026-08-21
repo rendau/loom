@@ -36,4 +36,5 @@ export interface Dag {
   next_run_at?: string
   catchup: boolean
   max_active_runs: number // 0 — без лимита
+  auto_update: boolean // poll-синк новой версии образа (решение №30)
 }

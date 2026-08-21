@@ -210,8 +210,9 @@
     старым SDK». digest — из `status.containerStatuses[].imageID`
     (пустой/без digest — warning, ран не пиннится). Ошибки pull
     (ErrImagePull / ImagePullBackOff / InvalidImageName) детектятся по
-    waiting-статусу контейнера — fail-fast, таймаута не ждём. (k8s-путь
-    не гонялся на живом кластере)
+    waiting-статусу контейнера — fail-fast, таймаута не ждём. (Обкатано
+    на docker-desktop k8s 2026-08-21: describe-Job, push манифеста,
+    digest из imageID.)
 
 ## Состояние: сделано
 
@@ -269,7 +270,8 @@
     значения ограничены 63 символами), informer по подам с лейблом
     `app.kubernetes.io/managed-by=loom`, exit code/OOMKilled из
     containerStatuses; дубли событий гасятся идемпотентной финализацией.
-    ⚠ против живого кластера ещё не гонялся — прогнать при первом деплое
+    Обкатан на docker-desktop k8s (2026-08-21): Jobs, informer-события,
+    exit code/reason, ретраи, секреты, логи из подов
   - финализация попытки: статусы в БД (идемпотентно) → страховочный
     `FinishAttempt` на artifact-сервере → строка об исходе (source=server,
     exit code / OOMKilled) в лог + commit лог-стрима
@@ -389,8 +391,8 @@
       детерминированным именем контейнера, started сразу после запуска,
       finished поллингом `ps`/`inspect` (exit code, OOMKilled) с удалением
       контейнера, ListAlive по лейблу, лимиты cpu/mem через `--cpus`/
-      `--memory`. ⚠ против живого docker-демона ещё не гонялся — прогнать
-      при первом использовании
+      `--memory`. Обкатан на живом демоне (2026-08-21): полный цикл
+      demo-etl, стримовое ребро, ретраи, RetryTask, секреты, логи
 
 Отложено по решению пользователя (2026-08-21, не делаем без явного запроса):
 
@@ -459,13 +461,22 @@ auth админки, публикация SDK, CI с unit-тестами). По�
       - ~~решить регистрацию дагов без docker-демона рядом с server'ом~~ —
         решено и реализовано (решение №29): describe одноразовым k8s
         Job'ом (`k8sdescriber` при `EXECUTOR=k8s`), docker-CLI при
-        docker/none; обкатка на живом кластере — вместе с первым деплоем
+        docker/none
       - `deploy/`: k8s-манифесты (server + artifact, PVC под данные
         artifact и логи, Service/Ingress, env-примеры) и docker-compose
         для одного хоста (`EXECUTOR=docker` + Postgres + artifact)
-      - обкатка: e2e прогон demo-etl под `EXECUTOR=docker` на живом
-        демоне и в k8s-кластере (снять пометки «не гонялся» с №8, №28
-        и №29), ретрай/логи/секреты проверить руками
+      - ~~обкатка~~ — выполнена 2026-08-21 на docker-desktop (демон +
+        его k8s), пометки «не гонялся» с №8, №28 и №29 сняты. Стенд:
+        локальный registry (127.0.0.1:5001, digest-пиннинг настоящий),
+        artifact+server на хосте, поды/контейнеры ходят на
+        `host.docker.internal`, `AUTH_SECRET` включён. Прогнано в обоих
+        режимах: полный цикл demo-etl (стримовое ребро ко-стартует),
+        регистрация через describe-Job (№29), ретраи
+        (up_for_retry → backoff → attempt 2), RetryTask подграфа,
+        секрет env-инъекцией, params/logical_date, Push/PullValue,
+        чтение логов (task + server-строки). Второй даг обкатки —
+        внешний потребитель sdk v0.1.0 (secret+flaky+values)
+      - документация по развёртыванию (README раздел или deploy/README)
       - документация по развёртыванию (README раздел или deploy/README)
 
 ## Команды

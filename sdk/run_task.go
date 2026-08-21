@@ -149,7 +149,7 @@ func newLogSink(spec TaskRunSpec, dup io.Writer) logSink {
 		return &writerSink{w: dup}
 	}
 
-	sink, err := newGrpcLogSink(spec.ServerAddr, dup, spec.RunID, spec.Task, spec.Attempt)
+	sink, err := newGrpcLogSink(spec.ServerAddr, spec.Token, dup, spec.RunID, spec.Task, spec.Attempt)
 	if err != nil {
 		fmt.Fprintf(dup, "loom: task log stream disabled: %v\n", err)
 		return &writerSink{w: dup}

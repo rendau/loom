@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/rendau/loom/api/artifact_v1"
+	"github.com/rendau/loom/api/attempttoken"
 	"github.com/rendau/loom/sdk/streamstore"
 )
 
@@ -24,9 +25,9 @@ import (
 // выход в bufio.Writer.
 const writeChunkSize = 256 * 1024
 
-// tokenMetadataKey — ключ metadata с attempt-токеном. Проверять его
-// artifact-сервер начнёт вместе с выдачей токенов (фаза 5).
-const tokenMetadataKey = "loom-token"
+// tokenMetadataKey — ключ metadata с attempt-токеном; общий контракт с
+// artifact-сервером и лог-приёмником (api/attempttoken).
+const tokenMetadataKey = attempttoken.MetadataKey
 
 // grpcStore — remote-реализация artifactStore: gRPC-клиент artifact-сервера.
 // Стейт-машина стримов живёт на сервере (общий sdk/streamstore), поэтому

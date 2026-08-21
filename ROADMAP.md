@@ -114,6 +114,22 @@
     попыткой). tasklog при старте резюмит все свои writing-стримы: запись
     продолжается с места обрыва, commit сделает обычная финализация (попытку,
     умершую вместе с сервером, дофинализирует зомби-детект №19).
+21. **Retention — единый TTL завершённых ранов** (`RUN_TTL`, 0 = выключено;
+    период — `RETENTION_TICK`): отдельный компонент
+    `server/internal/domain/retention` чистит просроченные раны батчами по
+    100 в порядке артефакты → логи → запись БД (упавшая на данных очистка
+    оставляет ран и повторяется следующим проходом; сами удаления
+    идемпотентны). Работает и при `EXECUTOR=none`.
+22. **Attempt-токены — stateless HMAC по общему секрету** (`AUTH_SECRET` на
+    control plane и artifact-сервере; пусто — проверка выключена, dev-режим).
+    Пакет `api/attempttoken`: claims `{run, task, attempt, admin, exp}`,
+    подпись HMAC-SHA256, metadata-ключ `loom-token`. Планировщик выдаёт токен
+    попытки в `LOOM_TOKEN` (`TOKEN_TTL`, дефолт 24h — должен покрывать самый
+    долгий таск). Scope: запись/abort/finish — только свой attempt; чтение и
+    stat — свой ран (таски читают выходы зависимостей); DeleteRunArtifacts —
+    только admin-токен (control plane подписывает свои вызовы минутным
+    admin-токеном). Лог-приёмник PushTaskLog требует токен своего attempt'а;
+    ReadTaskLog — админский API, токеном не защищается (сеть/ingress).
 
 ## Состояние: сделано
 
@@ -208,16 +224,37 @@
 - [x] Восстановление лог-стримов после рестарта server (решение №20):
       `ResumeWrite`/`ListWriting` в streamstore, tasklog резюмит свои
       writing-стримы при старте; тесты streamstore и tasklog
-- [ ] Retention: TTL ранов, крон-джоб `DeleteRunArtifacts` + чистка логов
-- [ ] Attempt-токены: выдача при Launch, проверка на artifact-сервере и
-      лог-приёмнике (запись только в свой attempt)
+- [x] Retention (решение №21): `RUN_TTL`/`RETENTION_TICK`, компонент
+      retention с проходами Sweep (артефакты → логи → БД), партиальный
+      индекс по finished_at; интеграционный тест
+- [x] Attempt-токены (решение №22): `api/attempttoken` (HMAC, claims,
+      metadata `loom-token`), выдача в Launch-env, проверка scope на
+      artifact-сервере и лог-приёмнике, admin-токены control plane; SDK
+      прикладывает токен и к лог-стриму; тесты всех уровней
+
+Фаза 5 закрыта.
 
 ### Фаза 6 — админка (`admin/`)
 
-- [ ] Vue 3 + Naive UI + Pinia (стек как в kusec; скилл `vue-naive-admin` —
-      только по явному вызову) поверх gateway API
-- [ ] Журнал ранов, граф дага со статусами тасков, live-логи (follow)
-- [ ] Триггер рана, ретрай таска/подграфа, pause дага
+Решено (вместо Naive UI из первоначального плана): **Nuxt 4 SPA
+(`ssr: false`) + Nuxt UI v4**, по образцу проекта caravaneer. Раздаётся
+самим control plane server'ом на отдельном порту (`ADMIN_PORT` 8081,
+статика из `ADMIN_DIR`, дефолт `./admin-ui`, `make build-admin`);
+рантайм-конфиг — `/config.js` (`window.__APP_CONFIG__` из env
+`ADMIN_API_BASE_URL`, задаётся после билда — один билд на все окружения);
+дев-режим — `pnpm dev` + `.env` (`NUXT_PUBLIC_API_BASE_URL`) + `HTTP_CORS=true`
+на gateway. Подробности — `admin/README.md`.
+
+- [x] Каркас: Nuxt 4 + Nuxt UI v4, api-клиент (flattenQuery под
+      grpc-gateway), типы-зеркала proto, раздача от server + dev-режим
+- [x] Даги: список (schedule/next_run_at, пауза), регистрация по образу,
+      pause/unpause, удаление, триггер рана
+- [x] Журнал ранов (фильтры по дагу/статусу, пагинация), страница рана
+      (таски и попытки со статусами, exit-инфо, авто-poll пока running)
+- [x] Логи попытки: слайдовер со стримом ReadTaskLog (follow — live-логи),
+      подсветка источников (log/stdout/stderr/server)
+- [ ] Граф дага со статусами тасков (визуализация; пока таблица)
+- [ ] Ретрай таска/подграфа (нужен новый RPC на server)
 
 ### Фаза 7 — зрелость (по мере надобности)
 
@@ -235,11 +272,14 @@
 ```bash
 make generate-proto   # protoc: api/proto → api/common, api/artifact_v1, api/server_v1 (+gateway)
 make build            # artifact и server → <модуль>/cmd/build/svc
+make build-admin      # SPA админки: pnpm generate → server/admin-ui (ADMIN_DIR)
 make test             # тесты sdk, artifact и server (в CI гонять с -race);
                       # интеграционные server/test требуют TEST_PG_DSN=postgres://...
 cd examples && go run ./demo-etl run   # локальный прогон примера
 
-# распределённый запуск таска против локального artifact-сервера:
+# распределённый запуск таска против локального artifact-сервера
+# (AUTH_SECRET не задан — токены выключены, для прода задать одинаковый
+# секрет на server и artifact):
 DATA_DIR=/tmp/loom-data ./artifact/cmd/build/svc &
 cd examples && go build -o /tmp/demo-etl ./demo-etl
 LOOM_ARTIFACT_ADDR=127.0.0.1:5051 LOOM_RUN_ID=r1 /tmp/demo-etl run --task=extract

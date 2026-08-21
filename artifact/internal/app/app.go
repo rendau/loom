@@ -37,7 +37,10 @@ func (a *App) Init() {
 
 	// grpc server
 	{
-		artifactHandler := grpcHandler.NewArtifact(artifactSvc)
+		if config.Conf.AuthSecret == "" {
+			slog.Warn("attempt token auth disabled (AUTH_SECRET is empty)")
+		}
+		artifactHandler := grpcHandler.NewArtifact(artifactSvc, config.Conf.AuthSecret)
 
 		a.grpcServer = NewGrpcServer("main", func(server *grpc.Server) {
 			pb.RegisterArtifactServiceServer(server, artifactHandler)

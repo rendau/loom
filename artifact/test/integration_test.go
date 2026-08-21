@@ -12,12 +12,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	artifactpb "github.com/rendau/loom/api/artifact_v1"
+	"github.com/rendau/loom/api/attempttoken"
 	serverpb "github.com/rendau/loom/api/server_v1"
 	domain "github.com/rendau/loom/artifact/internal/domain/artifact"
 	handler "github.com/rendau/loom/artifact/internal/handler/grpc"
@@ -41,13 +47,19 @@ func startGrpcServer(t *testing.T, register func(*grpc.Server)) string {
 }
 
 func startArtifactServer(t *testing.T) string {
+	return startArtifactServerAuth(t, "")
+}
+
+// startArtifactServerAuth поднимает artifact-сервер; непустой secret включает
+// проверку attempt-токенов.
+func startArtifactServerAuth(t *testing.T, secret string) string {
 	t.Helper()
 
 	svc, err := domain.New(t.TempDir())
 	require.NoError(t, err)
 
 	return startGrpcServer(t, func(srv *grpc.Server) {
-		artifactpb.RegisterArtifactServiceServer(srv, handler.NewArtifact(svc))
+		artifactpb.RegisterArtifactServiceServer(srv, handler.NewArtifact(svc, secret))
 	})
 }
 
@@ -296,4 +308,88 @@ func TestRunTaskLogStream(t *testing.T) {
 		}
 	}
 	require.True(t, found, "log line not delivered: %v", lines)
+}
+
+// TestAttemptTokenAuth — проверка attempt-токенов: запись только в свой
+// attempt, чтение — в своём ране, служебные операции — только admin-токеном,
+// просроченный токен отклоняется.
+func TestAttemptTokenAuth(t *testing.T) {
+	const secret = "itest-secret"
+	addr := startArtifactServerAuth(t, secret)
+
+	sign := func(c attempttoken.Claims) string {
+		c.ExpiresAt = time.Now().Add(time.Minute).Unix()
+		token, err := attempttoken.Sign([]byte(secret), c)
+		require.NoError(t, err)
+		return token
+	}
+
+	d := loom.New("auth_dag")
+	producer := d.Task("producer", func(_ context.Context, rt *loom.Runtime) error {
+		out, err := rt.Output("data")
+		if err != nil {
+			return err
+		}
+		_, err = out.Write([]byte("payload"))
+		return err
+	})
+	var got []byte
+	d.Task("consumer", func(_ context.Context, rt *loom.Runtime) error {
+		in, err := rt.Input("producer", "data")
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		got, err = io.ReadAll(in)
+		return err
+	}, loom.After(producer))
+
+	// запись со своим токеном
+	spec := taskSpec(addr, "producer")
+	spec.Token = sign(attempttoken.Claims{RunID: spec.RunID, Task: "producer", Attempt: 1})
+	require.NoError(t, d.RunTask(context.Background(), spec))
+
+	// чтение выхода зависимости — токеном своего таска того же рана
+	consumerSpec := taskSpec(addr, "consumer")
+	consumerSpec.Token = sign(attempttoken.Claims{RunID: consumerSpec.RunID, Task: "consumer", Attempt: 1})
+	require.NoError(t, d.RunTask(context.Background(), consumerSpec))
+	require.Equal(t, "payload", string(got))
+
+	// без токена — отказ
+	noToken := taskSpec(addr, "producer")
+	noToken.Attempt = 2
+	require.Error(t, d.RunTask(context.Background(), noToken))
+
+	// токен чужого рана — отказ на запись
+	foreign := taskSpec(addr, "producer")
+	foreign.Attempt = 3
+	foreign.Token = sign(attempttoken.Claims{RunID: "run-2", Task: "producer", Attempt: 3})
+	require.Error(t, d.RunTask(context.Background(), foreign))
+
+	// unary-операции точным статусом: attempt-токен не может чистить ран
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	client := artifactpb.NewArtifactServiceClient(conn)
+
+	writerCtx := metadata.AppendToOutgoingContext(context.Background(), attempttoken.MetadataKey, spec.Token)
+	_, err = client.DeleteRunArtifacts(writerCtx, &artifactpb.DeleteRunArtifactsRequest{RunId: spec.RunID})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+
+	adminCtx := metadata.AppendToOutgoingContext(context.Background(), attempttoken.MetadataKey,
+		sign(attempttoken.Claims{Admin: true}))
+	_, err = client.DeleteRunArtifacts(adminCtx, &artifactpb.DeleteRunArtifactsRequest{RunId: spec.RunID})
+	require.NoError(t, err)
+
+	// просроченный токен — Unauthenticated
+	expired, err := attempttoken.Sign([]byte(secret), attempttoken.Claims{
+		RunID: spec.RunID, Task: "producer", Attempt: 4,
+		ExpiresAt: time.Now().Add(-time.Minute).Unix(),
+	})
+	require.NoError(t, err)
+	expiredCtx := metadata.AppendToOutgoingContext(context.Background(), attempttoken.MetadataKey, expired)
+	_, err = client.FinishAttempt(expiredCtx, &artifactpb.FinishAttemptRequest{
+		RunId: spec.RunID, Task: "producer", Attempt: 4,
+	})
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
 }

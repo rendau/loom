@@ -22,6 +22,7 @@ import (
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
 	dagDb "github.com/rendau/loom/server/internal/domain/dag/repo/db"
 	dagService "github.com/rendau/loom/server/internal/domain/dag/service"
+	domainRetention "github.com/rendau/loom/server/internal/domain/retention"
 	runDb "github.com/rendau/loom/server/internal/domain/run/repo/db"
 	runService "github.com/rendau/loom/server/internal/domain/run/service"
 	domainScheduler "github.com/rendau/loom/server/internal/domain/scheduler"
@@ -40,9 +41,11 @@ type App struct {
 	artifactCli *artifactcli.Service
 	executor    *k8sexecutor.Service
 	scheduler   *domainScheduler.Scheduler
+	retention   *domainRetention.Service
 
 	grpcServer       *GrpcServer
 	httpServer       *http.Server
+	adminHttpServer  *http.Server
 	systemHttpServer *http.Server
 
 	exitCode int
@@ -76,7 +79,10 @@ func (a *App) Init() {
 	slog.Info("task log dir: " + config.Conf.LogDir)
 
 	// services
-	a.artifactCli, err = artifactcli.New(config.Conf.ArtifactAddr)
+	if config.Conf.AuthSecret == "" {
+		slog.Warn("attempt token auth disabled (AUTH_SECRET is empty)")
+	}
+	a.artifactCli, err = artifactcli.New(config.Conf.ArtifactAddr, config.Conf.AuthSecret)
 	errCheck(err, "artifact client init")
 
 	dockerCli := dockercli.New(config.Conf.DockerBin)
@@ -100,6 +106,8 @@ func (a *App) Init() {
 					ArtifactAddr: config.Conf.TaskArtifactAddr,
 					ServerAddr:   config.Conf.TaskServerAddr,
 				},
+				TokenSecret: config.Conf.AuthSecret,
+				TokenTTL:    config.Conf.TokenTTL,
 			},
 		)
 		schedulerNudger = a.scheduler
@@ -108,6 +116,10 @@ func (a *App) Init() {
 	default:
 		errCheck(fmt.Errorf("unknown executor %q", config.Conf.Executor), "executor init")
 	}
+
+	// retention
+	a.retention = domainRetention.New(runSvc, a.artifactCli, tasklogSvc,
+		config.Conf.RunTTL, config.Conf.RetentionTick)
 
 	// usecases
 	dagUsecase := dagUsc.New(dagSvc, dockerCli)
@@ -118,7 +130,7 @@ func (a *App) Init() {
 	{
 		dagHandler := grpcHandler.NewDag(dagUsecase)
 		runHandler := grpcHandler.NewRun(runUsecase)
-		tasklogHandler := grpcHandler.NewTaskLog(tasklogUsecase)
+		tasklogHandler := grpcHandler.NewTaskLog(tasklogUsecase, config.Conf.AuthSecret)
 
 		a.grpcServer = NewGrpcServer("main", func(server *grpc.Server) {
 			pb.RegisterDagServiceServer(server, dagHandler)
@@ -162,6 +174,14 @@ func (a *App) Init() {
 		}
 	}
 
+	// admin SPA server (отдельный порт; nil — статика не собрана)
+	{
+		a.adminHttpServer = AdminHttpServerCreate()
+		if a.adminHttpServer == nil {
+			slog.Warn("admin ui disabled: static dir not found", "dir", config.Conf.AdminDir)
+		}
+	}
+
 	// system http server (healthcheck)
 	{
 		a.systemHttpServer = SystemHttpServerCreate()
@@ -192,6 +212,17 @@ func (a *App) Start() {
 		slog.Info("http-server started " + a.httpServer.Addr)
 	}
 
+	// admin SPA server
+	if a.adminHttpServer != nil {
+		go func() {
+			err := a.adminHttpServer.ListenAndServe()
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("admin-http-server stopped", "error", err)
+			}
+		}()
+		slog.Info("admin-http-server started " + a.adminHttpServer.Addr)
+	}
+
 	// system http server
 	{
 		go func() {
@@ -213,6 +244,8 @@ func (a *App) Start() {
 		a.scheduler.Start()
 		slog.Info("scheduler started")
 	}
+
+	a.retention.Start()
 }
 
 func (a *App) Listen() {
@@ -233,6 +266,7 @@ func (a *App) Stop() {
 	if a.executor != nil {
 		a.executor.Stop()
 	}
+	a.retention.Stop()
 
 	// http-gw server
 	{
@@ -241,6 +275,17 @@ func (a *App) Stop() {
 
 		if err := a.httpServer.Shutdown(ctx); err != nil {
 			slog.Error("http-server shutdown error", "error", err)
+			a.exitCode = 1
+		}
+	}
+
+	// admin SPA server
+	if a.adminHttpServer != nil {
+		ctx, ctxCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer ctxCancel()
+
+		if err := a.adminHttpServer.Shutdown(ctx); err != nil {
+			slog.Error("admin-http-server shutdown error", "error", err)
 			a.exitCode = 1
 		}
 	}

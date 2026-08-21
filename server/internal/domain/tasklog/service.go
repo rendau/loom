@@ -181,6 +181,23 @@ func writeEntries(w *streamstore.Writer, entries []model.Entry) error {
 	return nil
 }
 
+// DeleteRun удаляет все логи рана (retention). Активные писатели рана
+// закрываются: их стримы abort'ит streamstore.DeleteRun.
+func (s *Service) DeleteRun(runId string) error {
+	s.mu.Lock()
+	for key := range s.writers {
+		if key.RunId == runId {
+			delete(s.writers, key)
+		}
+	}
+	s.mu.Unlock()
+
+	if err := s.store.DeleteRun(runId); err != nil {
+		return fmt.Errorf("store.DeleteRun: %w", err)
+	}
+	return nil
+}
+
 // Read читает лог попытки с начала, отдавая строки батчами в fn; при
 // follow=true блокируется до завершения попытки, отдавая новые строки по
 // мере поступления.

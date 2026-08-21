@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	pb "github.com/rendau/loom/api/server_v1"
 )
@@ -40,14 +41,18 @@ type grpcLogSink struct {
 }
 
 // newGrpcLogSink открывает лог-стрим и отправщик. dup — настоящий stdout
-// (до перехвата fd), туда синхронно дублируется каждая строка.
-func newGrpcLogSink(addr string, dup io.Writer, runID, task string, attempt int) (*grpcLogSink, error) {
+// (до перехвата fd), туда синхронно дублируется каждая строка; token —
+// attempt-токен для лог-приёмника (пусто — без metadata).
+func newGrpcLogSink(addr, token string, dup io.Writer, runID, task string, attempt int) (*grpcLogSink, error) {
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("dial control plane %q: %w", addr, err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	if token != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, tokenMetadataKey, token)
+	}
 
 	stream, err := pb.NewTaskLogServiceClient(conn).PushTaskLog(ctx)
 	if err == nil {

@@ -18,10 +18,15 @@ docker-образ = один даг, таски запускаются экзе�
 - `server/` — control plane: Postgres (mobone) + gRPC/gateway, регистрация
   дагов через docker `describe`, планировщик (очередь `FOR UPDATE SKIP
   LOCKED`, чистый planner + executor-порт, cron-триггер по `next_run_at`,
-  ретраи `up_for_retry` с backoff, таймаут-watchdog), k8s-executor,
-  приём/чтение логов (streamstore)
+  ретраи `up_for_retry` с backoff, таймаут-watchdog, зомби-reconcile),
+  k8s-executor, приём/чтение логов (streamstore), retention (`RUN_TTL`),
+  attempt-токены (`AUTH_SECRET`, пакет `api/attempttoken`)
 - `examples/` — примеры дагов
-- `admin/` — админка (ещё не создана)
+- `admin/` — админка: Nuxt 4 SPA (`ssr: false`) + Nuxt UI v4 (НЕ Naive UI;
+  образец — проект caravaneer). Раздаётся server'ом на `ADMIN_PORT` (8081)
+  из `ADMIN_DIR` (`make build-admin`), рантайм-конфиг — `/config.js` из env
+  `ADMIN_API_BASE_URL`; дев — `pnpm dev` + `.env` (+ `HTTP_CORS=true` на
+  gateway). После правок: `pnpm typecheck` → `pnpm lint`. См. `admin/README.md`
 
 ## Ключевая семантика (кратко)
 

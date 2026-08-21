@@ -5,6 +5,9 @@
 # бинарники make build (<модуль>/cmd/build/svc)
 **/cmd/build/
 
+# собранная статика админки (make build-admin)
+server/admin-ui/
+
 # данные локальных запусков
 data/
 .loom/

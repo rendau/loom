@@ -27,6 +27,8 @@ create table run (
 
 create index run_dag_name_idx on run (dag_name, created_at desc);
 create index run_status_idx on run (status) where status = 'running';
+-- retention: выборка завершённых ранов с истёкшим TTL
+create index run_finished_idx on run (finished_at) where finished_at is not null;
 
 create table task_instance (
     run_id      text not null references run (id) on delete cascade,

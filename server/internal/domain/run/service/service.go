@@ -215,6 +215,25 @@ func (s *Service) ListStaleAttempts(ctx context.Context, olderThan time.Time) ([
 	return items, nil
 }
 
+// ── retention ───────────────────────────────────────────
+
+// ListExpired возвращает id завершённых ранов с истёкшим TTL.
+func (s *Service) ListExpired(ctx context.Context, before time.Time, limit int64) ([]string, error) {
+	ids, err := s.repoDb.ListExpiredRuns(ctx, before, limit)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.ListExpiredRuns: %w", err)
+	}
+	return ids, nil
+}
+
+// DeleteRun удаляет ран со всеми тасками и попытками.
+func (s *Service) DeleteRun(ctx context.Context, runId string) error {
+	if err := s.repoDb.DeleteRun(ctx, runId); err != nil {
+		return fmt.Errorf("repoDb.DeleteRun: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) FinishRun(ctx context.Context, runId, status string) error {
 	if err := s.repoDb.FinishRun(ctx, runId, status); err != nil {
 		return fmt.Errorf("repoDb.FinishRun: %w", err)

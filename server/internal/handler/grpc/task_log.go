@@ -18,10 +18,13 @@ type TaskLog struct {
 	pb.UnsafeTaskLogServiceServer
 
 	usecase *tasklogUsc.Usecase
+	auth    *tokenAuth
 }
 
-func NewTaskLog(uc *tasklogUsc.Usecase) *TaskLog {
-	return &TaskLog{usecase: uc}
+// NewTaskLog создаёт handler; непустой authSecret включает проверку
+// attempt-токенов на пуше лога (запись только в свой attempt).
+func NewTaskLog(uc *tasklogUsc.Usecase, authSecret string) *TaskLog {
+	return &TaskLog{usecase: uc, auth: newTokenAuth(authSecret)}
 }
 
 // PushTaskLog — приём лог-стрима от SDK: первое сообщение — header
@@ -43,6 +46,9 @@ func (h *TaskLog) PushTaskLog(stream pb.TaskLogService_PushTaskLogServer) error 
 		RunId:   header.GetRunId(),
 		Task:    header.GetTask(),
 		Attempt: header.GetAttempt(),
+	}
+	if err = h.auth.checkAttempt(stream.Context(), key.RunId, key.Task, key.Attempt); err != nil {
+		return err
 	}
 	if err = h.usecase.ValidateAttempt(stream.Context(), key); err != nil {
 		return encodeErr(err)

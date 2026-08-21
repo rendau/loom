@@ -10,8 +10,14 @@ build-artifact:
 build-server:
 	cd server && mkdir -p cmd/build && CGO_ENABLED=0 go build -o cmd/build/svc cmd/main.go
 
+# SPA админки: статика кладётся в server/admin-ui (дефолт ADMIN_DIR сервера;
+# server/Dockerfile копирует её в образ)
+build-admin:
+	cd admin && pnpm install && pnpm generate
+	rm -rf server/admin-ui && cp -R admin/.output/public server/admin-ui
+
 clean:
-	rm -rf artifact/cmd/build server/cmd/build
+	rm -rf artifact/cmd/build server/cmd/build server/admin-ui admin/.output
 
 # интеграционные тесты server/test требуют Postgres: TEST_PG_DSN=postgres://...
 test:

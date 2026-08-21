@@ -16,6 +16,7 @@ import (
 	json "github.com/goccy/go-json"
 	"github.com/samber/lo"
 
+	"github.com/rendau/loom/api/attempttoken"
 	loom "github.com/rendau/loom/sdk"
 	"github.com/rendau/loom/server/internal/domain/dag/manifest"
 	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
@@ -52,6 +53,8 @@ type Config struct {
 	ZombieGrace   time.Duration // возраст попытки, до которого её не сверяем
 	ClaimLimit    int64         // сколько queued-тасков забирать за проход
 	TaskEnv       TaskEnv
+	TokenSecret   string        // секрет attempt-токенов; пусто — без токенов
+	TokenTTL      time.Duration // срок действия attempt-токена
 }
 
 type Scheduler struct {
@@ -432,6 +435,21 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 			loom.EnvServerAddr:   s.cfg.TaskEnv.ServerAddr,
 		},
 		Resources: task.Resources,
+	}
+
+	// attempt-токен: запись только в свой attempt, чтение — в своём ране
+	// (решение №8); проверяют artifact-сервер и лог-приёмник
+	if s.cfg.TokenSecret != "" {
+		token, err := attempttoken.Sign([]byte(s.cfg.TokenSecret), attempttoken.Claims{
+			RunID:     c.RunId,
+			Task:      c.Task,
+			Attempt:   c.Attempt,
+			ExpiresAt: time.Now().Add(s.cfg.TokenTTL).Unix(),
+		})
+		if err != nil {
+			return fmt.Errorf("sign attempt token: %w", err)
+		}
+		spec.Env[loom.EnvToken] = token
 	}
 
 	if err = s.executor.Launch(ctx, spec); err != nil {

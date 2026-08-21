@@ -24,21 +24,27 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rendau/loom/api/attempttoken"
 	loom "github.com/rendau/loom/sdk"
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
 	"github.com/rendau/loom/server/internal/domain/dag/manifest"
 	dagDb "github.com/rendau/loom/server/internal/domain/dag/repo/db"
 	dagService "github.com/rendau/loom/server/internal/domain/dag/service"
+	domainRetention "github.com/rendau/loom/server/internal/domain/retention"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
 	runDb "github.com/rendau/loom/server/internal/domain/run/repo/db"
 	runService "github.com/rendau/loom/server/internal/domain/run/service"
 	domainScheduler "github.com/rendau/loom/server/internal/domain/scheduler"
 	domainTasklog "github.com/rendau/loom/server/internal/domain/tasklog"
 	tasklogModel "github.com/rendau/loom/server/internal/domain/tasklog/model"
+	"github.com/rendau/loom/server/internal/errs"
 	runUsc "github.com/rendau/loom/server/internal/usecase/run"
 )
 
 const waitTimeout = 5 * time.Second
+
+// testAuthSecret — секрет attempt-токенов тестового планировщика.
+const testAuthSecret = "test-auth-secret"
 
 // ── фейки ───────────────────────────────────────────────
 
@@ -119,8 +125,9 @@ func (e *fakeExecutor) finished(ref runModel.AttemptRef, success bool, exitCode 
 }
 
 type fakeArtifact struct {
-	mu       sync.Mutex
-	finished []runModel.AttemptRef
+	mu          sync.Mutex
+	finished    []runModel.AttemptRef
+	deletedRuns []string
 }
 
 func (a *fakeArtifact) FinishAttempt(_ context.Context, ref runModel.AttemptRef) error {
@@ -130,10 +137,23 @@ func (a *fakeArtifact) FinishAttempt(_ context.Context, ref runModel.AttemptRef)
 	return nil
 }
 
+func (a *fakeArtifact) DeleteRunArtifacts(_ context.Context, runId string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.deletedRuns = append(a.deletedRuns, runId)
+	return nil
+}
+
 func (a *fakeArtifact) finishedRefs() []runModel.AttemptRef {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return slices.Clone(a.finished)
+}
+
+func (a *fakeArtifact) deleted() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.deletedRuns)
 }
 
 // ── окружение ───────────────────────────────────────────
@@ -190,6 +210,8 @@ func newEnv(t *testing.T) *env {
 			ZombieGrace:   50 * time.Millisecond,
 			ClaimLimit:    10,
 			TaskEnv:       domainScheduler.TaskEnv{ArtifactAddr: "artifact:5051", ServerAddr: "server:5052"},
+			TokenSecret:   testAuthSecret,
+			TokenTTL:      time.Minute,
 		})
 	scheduler.Start()
 	t.Cleanup(scheduler.Stop)
@@ -308,6 +330,14 @@ func TestSchedulerHappyPathWithStreamedEdge(t *testing.T) {
 	assert.Equal(t, "{}", extract.Env[loom.EnvDepAttempts])
 	assert.Equal(t, "artifact:5051", extract.Env[loom.EnvArtifactAddr])
 	assert.Equal(t, "server:5052", extract.Env[loom.EnvServerAddr])
+
+	// attempt-токен выдан и скоуплен ровно на эту попытку
+	claims, err := attempttoken.Verify([]byte(testAuthSecret), extract.Env[loom.EnvToken], time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, runId, claims.RunID)
+	assert.Equal(t, "extract", claims.Task)
+	assert.Equal(t, int32(1), claims.Attempt)
+	assert.False(t, claims.Admin)
 
 	// стримовый получатель ко-стартует со стартом отправителя
 	e.executor.started(extract.Ref)
@@ -687,4 +717,58 @@ func TestSchedulerCronTrigger(t *testing.T) {
 	dag, _, err = e.dagSvc.Get(context.Background(), dagName, true)
 	require.NoError(t, err)
 	assert.True(t, dag.NextRunAt.After(time.Now()))
+}
+
+// Retention: завершённый ран с истёкшим TTL удаляется целиком — артефакты
+// (вызов на artifact-сервер), логи и записи БД; свежие раны не трогаются.
+func TestRetentionSweep(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "retention-dag",
+		"tasks": [{"name": "a"}]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	require.NoError(t, err)
+
+	a := e.waitLaunched(t, "a")
+	e.executor.started(a.Ref)
+	e.executor.finished(a.Ref, true, 0, "")
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+
+	retention := domainRetention.New(e.runSvc, e.artifact, e.tasklogSvc, time.Hour, time.Hour)
+
+	// ран моложе TTL — не удаляется
+	deleted, err := retention.Sweep(context.Background())
+	require.NoError(t, err)
+	assert.Zero(t, deleted)
+
+	// состариваем ран и чистим
+	_, err = e.pool.Exec(context.Background(),
+		`UPDATE run SET finished_at = now() - interval '2 hours' WHERE id = $1`, runId)
+	require.NoError(t, err)
+
+	deleted, err = retention.Sweep(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, deleted)
+
+	// запись БД удалена (каскадом — таски и попытки)
+	_, found, err := e.runSvc.Get(context.Background(), runId, false)
+	require.NoError(t, err)
+	assert.False(t, found)
+
+	// artifact-сервер получил DeleteRunArtifacts
+	assert.Equal(t, []string{runId}, e.artifact.deleted())
+
+	// лог попытки удалён
+	err = e.tasklogSvc.Read(context.Background(),
+		tasklogModel.AttemptKey{RunId: runId, Task: "a", Attempt: 1}, false,
+		func([]tasklogModel.Entry) error { return nil })
+	assert.ErrorIs(t, err, errs.ObjectNotFound)
+
+	// повторный проход — пусто
+	deleted, err = retention.Sweep(context.Background())
+	require.NoError(t, err)
+	assert.Zero(t, deleted)
 }

@@ -16,6 +16,15 @@ var Conf = struct {
 	HttpCors       bool   `env:"HTTP_CORS" envDefault:"false"`
 	SystemHttpPort string `env:"SYSTEM_HTTP_PORT" envDefault:"3004"`
 
+	// SPA админки: AdminDir — каталог собранной статики (nuxt generate;
+	// каталога нет — админка не раздаётся), AdminPort — её отдельный порт.
+	// AdminApiBaseUrl — базовый URL gateway API, каким его видит браузер;
+	// уходит в /config.js (window.__APP_CONFIG__) — задаётся после билда
+	// SPA, один образ на все окружения.
+	AdminPort       string `env:"ADMIN_PORT" envDefault:"8081"`
+	AdminDir        string `env:"ADMIN_DIR" envDefault:"./admin-ui"`
+	AdminApiBaseUrl string `env:"ADMIN_API_BASE_URL" envDefault:"http://localhost:8082"`
+
 	PgDsn string `env:"PG_DSN"`
 
 	// LogDir — каталог streamstore для логов тасков.
@@ -54,6 +63,19 @@ var Conf = struct {
 	SchedZombieGrace time.Duration `env:"SCHED_ZOMBIE_GRACE" envDefault:"60s"`
 	// SchedClaimLimit — сколько queued-тасков забирать за один проход.
 	SchedClaimLimit int64 `env:"SCHED_CLAIM_LIMIT" envDefault:"10"`
+
+	// RunTTL — сколько хранить завершённые раны (артефакты, логи, записи
+	// БД); 0 — retention выключен.
+	RunTTL time.Duration `env:"RUN_TTL" envDefault:"720h"`
+	// RetentionTick — период проходов очистки.
+	RetentionTick time.Duration `env:"RETENTION_TICK" envDefault:"1h"`
+
+	// AuthSecret — общий секрет attempt-токенов (control plane, artifact-
+	// сервер, лог-приёмник); пусто — проверка токенов выключена (dev).
+	AuthSecret string `env:"AUTH_SECRET"`
+	// TokenTTL — срок действия attempt-токена; должен покрывать максимальную
+	// длительность таска.
+	TokenTTL time.Duration `env:"TOKEN_TTL" envDefault:"24h"`
 }{}
 
 func init() {

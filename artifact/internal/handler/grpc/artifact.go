@@ -17,11 +17,14 @@ const readChunkSize = 256 * 1024
 type Artifact struct {
 	pb.UnsafeArtifactServiceServer
 
-	svc *domain.Service
+	svc  *domain.Service
+	auth *authorizer
 }
 
-func NewArtifact(svc *domain.Service) *Artifact {
-	return &Artifact{svc: svc}
+// NewArtifact создаёт handler; непустой authSecret включает проверку
+// attempt-токенов (metadata loom-token).
+func NewArtifact(svc *domain.Service, authSecret string) *Artifact {
+	return &Artifact{svc: svc, auth: newAuthorizer(authSecret)}
 }
 
 func (h *Artifact) WriteArtifact(stream pb.ArtifactService_WriteArtifactServer) error {
@@ -33,6 +36,9 @@ func (h *Artifact) WriteArtifact(stream pb.ArtifactService_WriteArtifactServer) 
 	header := first.GetHeader()
 	if header == nil {
 		return status.Error(codes.InvalidArgument, "first message must be header")
+	}
+	if err = h.auth.checkAttempt(stream.Context(), header.GetRunId(), header.GetTask(), header.GetAttempt()); err != nil {
+		return err
 	}
 
 	w, err := h.svc.BeginWrite(decodeRef(header))
@@ -72,6 +78,10 @@ func (h *Artifact) WriteArtifact(stream pb.ArtifactService_WriteArtifactServer) 
 }
 
 func (h *Artifact) ReadArtifact(req *pb.ReadArtifactRequest, stream pb.ArtifactService_ReadArtifactServer) error {
+	if err := h.auth.checkRun(stream.Context(), req.GetRef().GetRunId()); err != nil {
+		return err
+	}
+
 	r, err := h.svc.OpenRead(stream.Context(), decodeRef(req.GetRef()), req.GetOffset(), req.GetFollow())
 	if err != nil {
 		return encodeErr(err)
@@ -95,7 +105,11 @@ func (h *Artifact) ReadArtifact(req *pb.ReadArtifactRequest, stream pb.ArtifactS
 	}
 }
 
-func (h *Artifact) StatArtifact(_ context.Context, req *pb.StatArtifactRequest) (*pb.StatArtifactResponse, error) {
+func (h *Artifact) StatArtifact(ctx context.Context, req *pb.StatArtifactRequest) (*pb.StatArtifactResponse, error) {
+	if err := h.auth.checkRun(ctx, req.GetRef().GetRunId()); err != nil {
+		return nil, err
+	}
+
 	state, size, err := h.svc.Stat(decodeRef(req.GetRef()))
 	if err != nil {
 		return nil, encodeErr(err)
@@ -104,15 +118,24 @@ func (h *Artifact) StatArtifact(_ context.Context, req *pb.StatArtifactRequest) 
 	return &pb.StatArtifactResponse{State: encodeState(state), Size: size}, nil
 }
 
-func (h *Artifact) AbortArtifact(_ context.Context, req *pb.AbortArtifactRequest) (*pb.AbortArtifactResponse, error) {
-	if err := h.svc.AbortRef(decodeRef(req.GetRef())); err != nil {
+func (h *Artifact) AbortArtifact(ctx context.Context, req *pb.AbortArtifactRequest) (*pb.AbortArtifactResponse, error) {
+	ref := req.GetRef()
+	if err := h.auth.checkAttempt(ctx, ref.GetRunId(), ref.GetTask(), ref.GetAttempt()); err != nil {
+		return nil, err
+	}
+
+	if err := h.svc.AbortRef(decodeRef(ref)); err != nil {
 		return nil, encodeErr(err)
 	}
 
 	return &pb.AbortArtifactResponse{}, nil
 }
 
-func (h *Artifact) FinishAttempt(_ context.Context, req *pb.FinishAttemptRequest) (*pb.FinishAttemptResponse, error) {
+func (h *Artifact) FinishAttempt(ctx context.Context, req *pb.FinishAttemptRequest) (*pb.FinishAttemptResponse, error) {
+	if err := h.auth.checkAttempt(ctx, req.GetRunId(), req.GetTask(), req.GetAttempt()); err != nil {
+		return nil, err
+	}
+
 	key := domain.AttemptKey{RunID: req.GetRunId(), Task: req.GetTask(), Attempt: req.GetAttempt()}
 	if err := h.svc.FinishAttempt(key); err != nil {
 		return nil, encodeErr(err)
@@ -121,7 +144,11 @@ func (h *Artifact) FinishAttempt(_ context.Context, req *pb.FinishAttemptRequest
 	return &pb.FinishAttemptResponse{}, nil
 }
 
-func (h *Artifact) DeleteRunArtifacts(_ context.Context, req *pb.DeleteRunArtifactsRequest) (*pb.DeleteRunArtifactsResponse, error) {
+func (h *Artifact) DeleteRunArtifacts(ctx context.Context, req *pb.DeleteRunArtifactsRequest) (*pb.DeleteRunArtifactsResponse, error) {
+	if err := h.auth.checkAdmin(ctx); err != nil {
+		return nil, err
+	}
+
 	if err := h.svc.DeleteRun(req.GetRunId()); err != nil {
 		return nil, encodeErr(err)
 	}

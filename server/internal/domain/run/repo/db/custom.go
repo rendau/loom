@@ -223,3 +223,39 @@ func (r *Repo) FinishRun(ctx context.Context, runId, status string) error {
 	}
 	return nil
 }
+
+// ListExpiredRuns возвращает id завершённых ранов с finished_at раньше
+// before — кандидатов retention-очистки (старые первыми).
+func (r *Repo) ListExpiredRuns(ctx context.Context, before time.Time, limit int64) ([]string, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
+		SELECT id FROM run
+		WHERE finished_at IS NOT NULL AND finished_at < $1
+		ORDER BY finished_at
+		LIMIT $2`, before, limit)
+	if err != nil {
+		return nil, fmt.Errorf("ListExpiredRuns: %w", err)
+	}
+	defer rows.Close()
+
+	var result []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("ListExpiredRuns scan: %w", err)
+		}
+		result = append(result, id)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListExpiredRuns rows: %w", err)
+	}
+	return result, nil
+}
+
+// DeleteRun удаляет ран из БД; task_instance и attempt уходят каскадом.
+func (r *Repo) DeleteRun(ctx context.Context, runId string) error {
+	_, err := r.TxM.GetConnection(ctx).Exec(ctx, `DELETE FROM run WHERE id = $1`, runId)
+	if err != nil {
+		return fmt.Errorf("DeleteRun: %w", err)
+	}
+	return nil
+}

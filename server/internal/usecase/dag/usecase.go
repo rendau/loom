@@ -12,14 +12,18 @@ import (
 	"github.com/rendau/loom/server/internal/util"
 )
 
+// maxManifestSize — предохранитель на манифест из PushDagManifest.
+const maxManifestSize = 1 << 20
+
 type Usecase struct {
 	svc       ServiceI
 	inspector ImageInspectorI
 	pools     PoolCheckerI
+	sink      ManifestSinkI // nil — регистрация не через describe-Job (EXECUTOR != k8s)
 }
 
-func New(svc ServiceI, inspector ImageInspectorI, pools PoolCheckerI) *Usecase {
-	return &Usecase{svc: svc, inspector: inspector, pools: pools}
+func New(svc ServiceI, inspector ImageInspectorI, pools PoolCheckerI, sink ManifestSinkI) *Usecase {
+	return &Usecase{svc: svc, inspector: inspector, pools: pools, sink: sink}
 }
 
 func (u *Usecase) List(ctx context.Context, pars *model.ListReq) ([]*model.Main, int64, error) {
@@ -41,24 +45,15 @@ func (u *Usecase) Get(ctx context.Context, name string) (*model.Main, error) {
 	return result, nil
 }
 
-// Register регистрирует даг по url docker-образа: pull → пиннинг digest →
-// `describe` → валидация манифеста → сохранение. Имя дага берётся из
+// Register регистрирует даг по url docker-образа: инспекция (пиннинг digest
+// + `describe`) → валидация манифеста → сохранение. Имя дага берётся из
 // манифеста; повторная регистрация обновляет образ и манифест.
 func (u *Usecase) Register(ctx context.Context, image string) (*model.Main, error) {
 	if image == "" {
 		return nil, errs.ImageRequired
 	}
 
-	if err := u.inspector.Pull(ctx, image); err != nil {
-		return nil, errs.ErrFull{Err: errs.InvalidRequest, Desc: err.Error()}
-	}
-
-	digest, err := u.inspector.ResolveDigest(ctx, image)
-	if err != nil {
-		return nil, errs.ErrFull{Err: errs.InvalidRequest, Desc: err.Error()}
-	}
-
-	raw, err := u.inspector.Describe(ctx, digest)
+	digest, raw, err := u.inspector.Inspect(ctx, image)
 	if err != nil {
 		return nil, errs.ErrFull{Err: errs.InvalidRequest, Desc: err.Error()}
 	}
@@ -82,6 +77,22 @@ func (u *Usecase) Register(ctx context.Context, image string) (*model.Main, erro
 		return nil, fmt.Errorf("svc.Register: %w", err)
 	}
 	return result, nil
+}
+
+// PushManifest — приём манифеста от describe-Job'а (решение №29): доставка
+// ожидающей регистрации по одноразовому describe_id.
+func (u *Usecase) PushManifest(_ context.Context, id string, manifest []byte, errMsg string) error {
+	if id == "" {
+		return errs.IdRequired
+	}
+	if len(manifest) > maxManifestSize {
+		return errs.ErrFull{Err: errs.InvalidRequest, Desc: fmt.Sprintf("manifest too large: %d bytes", len(manifest))}
+	}
+
+	if u.sink == nil || !u.sink.Deliver(id, manifest, errMsg) {
+		return errs.ErrFull{Err: errs.ObjectNotFound, Desc: "unknown describe id"}
+	}
+	return nil
 }
 
 func (u *Usecase) SetPaused(ctx context.Context, name string, paused bool) error {

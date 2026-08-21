@@ -35,6 +35,8 @@ import (
 	"github.com/rendau/loom/server/internal/service/artifactcli"
 	"github.com/rendau/loom/server/internal/service/dockercli"
 	"github.com/rendau/loom/server/internal/service/dockerexecutor"
+	"github.com/rendau/loom/server/internal/service/k8sclient"
+	"github.com/rendau/loom/server/internal/service/k8sdescriber"
 	"github.com/rendau/loom/server/internal/service/k8sexecutor"
 	dagUsc "github.com/rendau/loom/server/internal/usecase/dag"
 	poolUsc "github.com/rendau/loom/server/internal/usecase/pool"
@@ -107,14 +109,26 @@ func (a *App) Init() {
 	a.artifactCli, err = artifactcli.New(config.Conf.ArtifactAddr, config.Conf.AuthSecret)
 	errCheck(err, "artifact client init")
 
-	dockerCli := dockercli.New(config.Conf.DockerBin)
+	// инспектор образов регистрации следует executor'у: в k8s — одноразовый
+	// describe-Job, который push'ит манифест на control plane (решение №29),
+	// иначе — docker-CLI (без sink'а)
+	var (
+		imageInspector dagUsc.ImageInspectorI = dockercli.New(config.Conf.DockerBin)
+		manifestSink   dagUsc.ManifestSinkI
+	)
 
 	// executor + scheduler
 	var schedulerNudger runUsc.SchedulerI = nopScheduler{}
 	switch config.Conf.Executor {
 	case "k8s":
-		a.executor, err = k8sexecutor.New(config.Conf.K8sNamespace, config.Conf.K8sKubeconfig, config.Conf.K8sJobTTL)
-		errCheck(err, "k8s executor init")
+		clientset, cErr := k8sclient.New(config.Conf.K8sKubeconfig)
+		errCheck(cErr, "k8s client init")
+		a.executor = k8sexecutor.New(clientset, config.Conf.K8sNamespace, config.Conf.K8sJobTTL)
+
+		describer := k8sdescriber.New(clientset, config.Conf.K8sNamespace,
+			config.Conf.TaskServerAddr, config.Conf.K8sDescribeTimeout)
+		imageInspector = describer
+		manifestSink = describer
 	case "docker":
 		a.executor = dockerexecutor.New(config.Conf.DockerBin, config.Conf.DockerNetwork, config.Conf.DockerPollTick)
 	case "none":
@@ -148,7 +162,7 @@ func (a *App) Init() {
 		config.Conf.RunTTL, config.Conf.RetentionTick)
 
 	// usecases
-	dagUsecase := dagUsc.New(dagSvc, dockerCli, poolSvc)
+	dagUsecase := dagUsc.New(dagSvc, imageInspector, poolSvc, manifestSink)
 	runUsecase := runUsc.New(runSvc, dagSvc, schedulerNudger)
 	tasklogUsecase := tasklogUsc.New(tasklogSvc, runSvc)
 	poolUsecase := poolUsc.New(poolSvc)

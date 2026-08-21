@@ -60,6 +60,9 @@ var Conf = struct {
 	K8sKubeconfig string `env:"K8S_KUBECONFIG"` // пусто — in-cluster, иначе путь к kubeconfig
 	// K8sJobTTL — ttlSecondsAfterFinished завершённых Job'ов.
 	K8sJobTTL time.Duration `env:"K8S_JOB_TTL" envDefault:"1h"`
+	// K8sDescribeTimeout — таймаут describe-Job'а регистрации дага (решение
+	// №29); должен покрывать и pull образа.
+	K8sDescribeTimeout time.Duration `env:"K8S_DESCRIBE_TIMEOUT" envDefault:"5m"`
 
 	// SchedTick — период планировщика; события executor'а будят его раньше.
 	SchedTick time.Duration `env:"SCHED_TICK" envDefault:"2s"`

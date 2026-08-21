@@ -22,9 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/clientcmd"
 
 	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
@@ -54,32 +52,14 @@ type Service struct {
 	stopCh  chan struct{}
 }
 
-func New(namespace, kubeconfig string, jobTTL time.Duration) (*Service, error) {
-	var (
-		conf *rest.Config
-		err  error
-	)
-	if kubeconfig != "" {
-		conf, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	} else {
-		conf, err = rest.InClusterConfig()
-	}
-	if err != nil {
-		return nil, fmt.Errorf("k8s config: %w", err)
-	}
-
-	clientset, err := kubernetes.NewForConfig(conf)
-	if err != nil {
-		return nil, fmt.Errorf("kubernetes.NewForConfig: %w", err)
-	}
-
+func New(clientset kubernetes.Interface, namespace string, jobTTL time.Duration) *Service {
 	return &Service{
 		clientset: clientset,
 		namespace: namespace,
 		jobTTL:    jobTTL,
 		events:    make(chan runModel.ExecEvent, eventsBuffer),
 		stopCh:    make(chan struct{}),
-	}, nil
+	}
 }
 
 // Start поднимает informer по подам loom-попыток и начинает публиковать

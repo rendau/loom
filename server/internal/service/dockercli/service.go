@@ -1,6 +1,7 @@
-// Package dockercli — работа с docker-образами дагов через container-CLI
+// Package dockercli — инспекция docker-образов дагов через container-CLI
 // (docker или совместимый бинарь): pull, резолв digest, запуск `describe`
-// для получения манифеста при регистрации дага.
+// для получения манифеста при регистрации дага. Используется при
+// EXECUTOR=docker/none; в k8s — k8sdescriber (решение №29).
 package dockercli
 
 import (
@@ -30,8 +31,26 @@ func New(bin string) *Service {
 	return &Service{bin: bin}
 }
 
-// Pull скачивает образ.
-func (s *Service) Pull(ctx context.Context, image string) error {
+// Inspect — регистрационная инспекция образа: pull → пиннутый digest →
+// запуск контейнера в режиме `describe` → JSON-манифест дага.
+func (s *Service) Inspect(ctx context.Context, image string) (string, []byte, error) {
+	if err := s.pull(ctx, image); err != nil {
+		return "", nil, err
+	}
+
+	digest, err := s.resolveDigest(ctx, image)
+	if err != nil {
+		return "", nil, err
+	}
+
+	manifest, err := s.describe(ctx, digest)
+	if err != nil {
+		return "", nil, err
+	}
+	return digest, manifest, nil
+}
+
+func (s *Service) pull(ctx context.Context, image string) error {
 	ctx, cancel := context.WithTimeout(ctx, pullTimeout)
 	defer cancel()
 
@@ -41,10 +60,10 @@ func (s *Service) Pull(ctx context.Context, image string) error {
 	return nil
 }
 
-// ResolveDigest возвращает пиннутый ref образа (repo@sha256:...) — им
+// resolveDigest возвращает пиннутый ref образа (repo@sha256:...) — им
 // пиннятся раны. Для образа без RepoDigests (собран локально, не пушился)
 // возвращает исходный ref с предупреждением: пиннинга не будет.
-func (s *Service) ResolveDigest(ctx context.Context, image string) (string, error) {
+func (s *Service) resolveDigest(ctx context.Context, image string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, inspectTimeout)
 	defer cancel()
 
@@ -61,9 +80,9 @@ func (s *Service) ResolveDigest(ctx context.Context, image string) (string, erro
 	return digest, nil
 }
 
-// Describe запускает контейнер образа в режиме `describe` и возвращает
+// describe запускает контейнер образа в режиме `describe` и возвращает
 // JSON-манифест дага.
-func (s *Service) Describe(ctx context.Context, image string) ([]byte, error) {
+func (s *Service) describe(ctx context.Context, image string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, describeTimeout)
 	defer cancel()
 

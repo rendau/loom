@@ -186,6 +186,32 @@
     контейнер удаляется; Kill — `rm -f`; ListAlive — `ps` по лейблу.
     Сеть — `DOCKER_NETWORK`; адреса planes для контейнеров — те же
     `TASK_ARTIFACT_ADDR`/`TASK_SERVER_ADDR` (напр. host.docker.internal).
+29. **Регистрация дагов без docker-демона (k8s)** — describe одноразовым
+    k8s Job'ом, образ тянет kubelet; не DinD-sidecar и не сокет хоста.
+    Порт регистрации сужен до `Inspect(image) → (digest, manifest)` —
+    pull/запуск контейнера стали деталью реализации. Выбор реализации
+    следует `EXECUTOR`: k8s — `internal/service/k8sdescriber`
+    (Job backoffLimit=0, activeDeadline = `K8S_DESCRIBE_TIMEOUT`, дефолт
+    5m — покрывает и pull; `ttlSecondsAfterFinished` — страховка
+    самоочистки при падении server'а, обычно Job удаляется сразу после
+    чтения результата; лейбл `managed-by=loom-describe`, чтобы informer
+    executor'а такие поды не видел); docker/none — docker-CLI
+    (`dockercli`, как раньше). Манифест Job **отправляет сам** — RPC
+    `DagService.PushDagManifest` с одноразовым `describe_id` (случайный
+    128-бит секрет; env-контракт describe-Job'а: `LOOM_DESCRIBE_ID` +
+    `LOOM_SERVER_ADDR`) — а не через логи пода: логи как канал данных
+    ломаются любой печатью дага в stdout при инициализации. SDK шлёт
+    манифест или ошибку валидации дага (печать манифеста в stdout
+    сохраняется — диагностика через kubectl logs); id живёт, пока ждёт
+    регистрация, повторная доставка отвергается, будущий админ-токен на
+    PushDagManifest не распространяется (авторизация — сам id, как у
+    attempt-токенов). Логи пода — только диагностика падений (хвост в
+    ошибке регистрации); успешный выход пода без push — ошибка «образ со
+    старым SDK». digest — из `status.containerStatuses[].imageID`
+    (пустой/без digest — warning, ран не пиннится). Ошибки pull
+    (ErrImagePull / ImagePullBackOff / InvalidImageName) детектятся по
+    waiting-статусу контейнера — fail-fast, таймаута не ждём. (k8s-путь
+    не гонялся на живом кластере)
 
 ## Состояние: сделано
 
@@ -226,9 +252,11 @@
     `run` (снапшот манифеста, пиннинг digest), `task_instance` (PK run+task,
     статусы pending→queued→starting→running→терминал), `attempt`
     (PK run+task+attempt, exit_code/exit_reason)
-  - регистрация дага (`POST /dag`): `internal/service/dockercli` — pull →
-    резолв digest (`RepoDigests`; без digest — warning и без пиннинга) →
-    `docker run --rm <image> describe`; серверная валидация манифеста
+  - регистрация дага (`POST /dag`): порт `Inspect(image) → (digest,
+    manifest)`; реализации — `internal/service/dockercli` (pull → резолв
+    digest по `RepoDigests`; без digest — warning и без пиннинга →
+    `docker run --rm <image> describe`) и `internal/service/k8sdescriber`
+    (одноразовый Job, решение №29); серверная валидация манифеста
     (имена, рёбра, ацикличность) — манифесту образа не доверяем
   - триггер (`POST /run`) + планировщик `internal/domain/scheduler`:
     чистый planner (`buildPlan` — promotions, каскад upstream_failed,
@@ -392,7 +420,8 @@ auth админки, публикация SDK, CI с unit-тестами). По�
       server; пусто — выключено, dev): интерцептор требует
       `Authorization: Bearer` на админских RPC (Dag/Run/Pool/Secret,
       ReadTaskLog, ListTaskValues), task-facing RPC (PushTaskLog,
-      Push/PullTaskValue) остаются на attempt-токенах; в админке —
+      Push/PullTaskValue) остаются на attempt-токенах, PushDagManifest —
+      на одноразовом describe_id (решение №29); в админке —
       экран ввода токена (localStorage) + заголовок в api-клиенте,
       обработка 401
 - [ ] Публикация SDK (механика — решение №15): теги `api/v0.1.0` и
@@ -403,16 +432,16 @@ auth админки, публикация SDK, CI с unit-тестами). По�
 - [ ] Первый деплой и обкатка:
       - Dockerfile server'а (бинарь + миграции + статика админки
         `make build-admin`; у artifact уже есть)
-      - решить регистрацию дагов без docker-демона рядом с server'ом —
-        в k8s `docker pull/run describe` изнутри пода не работает
-        (кандидаты: DinD-sidecar, сокет хоста, describe отдельным
-        Job'ом через executor; зафиксировать решением при реализации)
+      - ~~решить регистрацию дагов без docker-демона рядом с server'ом~~ —
+        решено и реализовано (решение №29): describe одноразовым k8s
+        Job'ом (`k8sdescriber` при `EXECUTOR=k8s`), docker-CLI при
+        docker/none; обкатка на живом кластере — вместе с первым деплоем
       - `deploy/`: k8s-манифесты (server + artifact, PVC под данные
         artifact и логи, Service/Ingress, env-примеры) и docker-compose
         для одного хоста (`EXECUTOR=docker` + Postgres + artifact)
       - обкатка: e2e прогон demo-etl под `EXECUTOR=docker` на живом
-        демоне и в k8s-кластере (снять пометки «не гонялся» с №8 и №28),
-        ретрай/логи/секреты проверить руками
+        демоне и в k8s-кластере (снять пометки «не гонялся» с №8, №28
+        и №29), ретрай/логи/секреты проверить руками
       - документация по развёртыванию (README раздел или deploy/README)
 
 ## Команды

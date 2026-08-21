@@ -16,7 +16,8 @@ docker-образ = один даг, таски запускаются экзе�
 - `api/` — proto-контракты (`api/proto/`) и сгенерированный код (коммитится)
 - `artifact/` — artifact-сервер (data plane), каркас по gotemplate
 - `server/` — control plane: Postgres (mobone) + gRPC/gateway, регистрация
-  дагов через docker `describe`, планировщик (очередь `FOR UPDATE SKIP
+  дагов через `describe` (docker-CLI, а при `EXECUTOR=k8s` — одноразовый
+  k8s Job, `k8sdescriber`), планировщик (очередь `FOR UPDATE SKIP
   LOCKED`, чистый planner + executor-порт, cron-триггер по `next_run_at`
   с catchup-режимом, ретраи `up_for_retry` с backoff, таймаут-watchdog,
   зомби-reconcile), executor'ы k8s и docker (`EXECUTOR=k8s|docker|none`),

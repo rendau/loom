@@ -14,12 +14,19 @@ type ServiceI interface {
 	Delete(ctx context.Context, name string) error
 }
 
-// ImageInspectorI — container-CLI: pull образа, резолв digest и получение
-// манифеста запуском контейнера в режиме `describe`.
+// ImageInspectorI — инспекция образа дага при регистрации: пиннутый digest
+// и JSON-манифест (`describe`). Реализации: docker-CLI (dockercli) и
+// одноразовый k8s Job (k8sdescriber, решение №29) — pull и запуск
+// контейнера являются деталью реализации.
 type ImageInspectorI interface {
-	Pull(ctx context.Context, image string) error
-	ResolveDigest(ctx context.Context, image string) (string, error)
-	Describe(ctx context.Context, image string) ([]byte, error)
+	Inspect(ctx context.Context, image string) (digest string, manifest []byte, err error)
+}
+
+// ManifestSinkI — приём манифеста от describe-Job'а (PushDagManifest,
+// решение №29): доставка ожидающей регистрации по одноразовому describe_id.
+// false — id неизвестен (регистрация не ждёт: опоздал, повтор или подбор).
+type ManifestSinkI interface {
+	Deliver(id string, manifest []byte, errMsg string) bool
 }
 
 // PoolCheckerI — проверка существования пулов из манифеста при регистрации:

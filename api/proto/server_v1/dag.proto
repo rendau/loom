@@ -50,6 +50,18 @@ service DagService {
       delete: "/dag/{name}"
     };
   }
+
+  // PushDagManifest — внутренний вызов describe-Job'а (решение №29): при
+  // регистрации через k8s Job сам отправляет манифест (или ошибку валидации
+  // дага) на control plane, вместо передачи через логи пода. describe_id —
+  // одноразовый секрет, выданный Job'у в env при создании; ожидающая
+  // регистрация забирает манифест по нему.
+  rpc PushDagManifest(DagPushManifestReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/dag/manifest"
+      body: "*"
+    };
+  }
 }
 
 // ── Messages ────────────────────────────────────────────
@@ -135,4 +147,12 @@ message DagSetPausedReq {
 
 message DagDeleteReq {
   string name = 1;
+}
+
+// PushManifest
+
+message DagPushManifestReq {
+  string describe_id = 1;
+  bytes manifest = 2; // JSON-манифест дага
+  string error = 3;   // непустая — describe упал (например, невалидный даг)
 }

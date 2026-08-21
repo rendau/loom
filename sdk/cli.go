@@ -8,18 +8,36 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	json "github.com/goccy/go-json"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	pb "github.com/rendau/loom/api/server_v1"
 )
 
 // Version — версия SDK. Попадает в манифест; server проверяет по ней
 // совместимость при регистрации дага.
 const Version = "0.1.0"
 
+// EnvDescribeID — env-контракт describe-Job'а (регистрация дага через k8s,
+// решение №29): непустой id включает отправку манифеста (или ошибки
+// валидации дага) на control plane по адресу EnvServerAddr — describe_id
+// одноразовый, им регистрация сопоставляет ответ Job'а. Печать манифеста в
+// stdout при этом сохраняется (диагностика через kubectl logs).
+const EnvDescribeID = "LOOM_DESCRIBE_ID"
+
+// pushManifestTimeout — на дозвон до control plane из describe-Job'а.
+const pushManifestTimeout = 30 * time.Second
+
 const usage = `usage: <dag-binary> <command>
 
 commands:
-  describe   напечатать JSON-манифест дага (регистрация и валидация на server)
+  describe   напечатать JSON-манифест дага (регистрация и валидация на
+             server); с env LOOM_DESCRIBE_ID + LOOM_SERVER_ADDR манифест
+             дополнительно отправляется на control plane (describe-Job
+             регистрации через kubernetes)
   run        выполнить даг целиком в локальном режиме (in-process)
   run --task=<name> --run-id=<id> --attempt=<n>
              выполнить один таск в распределённом режиме (вызывает executor);
@@ -43,22 +61,17 @@ func runCLI(d *DAG, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	if err := d.Validate(); err != nil {
-		fmt.Fprintf(stderr, "invalid dag: %v\n", err)
-		return 2
-	}
+	validateErr := d.Validate()
 
 	switch args[0] {
 	case "describe":
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(d.Manifest()); err != nil {
-			fmt.Fprintf(stderr, "encode manifest: %v\n", err)
-			return 1
-		}
-		return 0
+		return runDescribe(d, validateErr, stdout, stderr)
 
 	case "run":
+		if validateErr != nil {
+			fmt.Fprintf(stderr, "invalid dag: %v\n", validateErr)
+			return 2
+		}
 		fs := flag.NewFlagSet("run", flag.ContinueOnError)
 		fs.SetOutput(stderr)
 		task := fs.String("task", "", "имя таска (распределённый режим)")
@@ -96,6 +109,68 @@ func runCLI(d *DAG, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
+}
+
+// runDescribe печатает манифест в stdout, а при непустом EnvDescribeID ещё
+// и отправляет его на control plane (push-режим describe-Job'а, решение
+// №29). Ошибка валидации дага в push-режиме тоже уходит на server — иначе
+// регистрация ждала бы таймаута и разбирала логи пода.
+func runDescribe(d *DAG, validateErr error, stdout, stderr io.Writer) int {
+	describeID := os.Getenv(EnvDescribeID)
+
+	if validateErr != nil {
+		if describeID != "" {
+			if err := pushManifest(describeID, nil, validateErr.Error()); err != nil {
+				fmt.Fprintf(stderr, "push manifest: %v\n", err)
+			}
+		}
+		fmt.Fprintf(stderr, "invalid dag: %v\n", validateErr)
+		return 2
+	}
+
+	manifest, err := json.MarshalIndent(d.Manifest(), "", "  ")
+	if err != nil {
+		fmt.Fprintf(stderr, "encode manifest: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, string(manifest))
+
+	if describeID == "" {
+		return 0
+	}
+	if err = pushManifest(describeID, manifest, ""); err != nil {
+		fmt.Fprintf(stderr, "push manifest: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// pushManifest отправляет манифест (или ошибку валидации) на control plane
+// вызовом DagService.PushDagManifest.
+func pushManifest(describeID string, manifest []byte, errMsg string) error {
+	addr := os.Getenv(EnvServerAddr)
+	if addr == "" {
+		return fmt.Errorf("%s is required when %s is set", EnvServerAddr, EnvDescribeID)
+	}
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("dial control plane %q: %w", addr, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), pushManifestTimeout)
+	defer cancel()
+
+	_, err = pb.NewDagServiceClient(conn).PushDagManifest(ctx, &pb.DagPushManifestReq{
+		DescribeId: describeID,
+		Manifest:   manifest,
+		Error:      errMsg,
+	})
+	if err != nil {
+		return fmt.Errorf("push dag manifest: %w", err)
+	}
+	return nil
 }
 
 // runDistributedTask собирает спеку из env-контракта executor'а (флаги

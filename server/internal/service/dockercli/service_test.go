@@ -21,7 +21,7 @@ func stubDocker(t *testing.T, script string) *Service {
 	return New(bin)
 }
 
-func TestPullResolveDescribe(t *testing.T) {
+func TestInspect(t *testing.T) {
 	svc := stubDocker(t, `
 case "$1" in
   pull) echo "pulled $2" ;;
@@ -30,16 +30,9 @@ case "$1" in
   *) echo "unexpected: $@" >&2; exit 1 ;;
 esac`)
 
-	ctx := context.Background()
-
-	require.NoError(t, svc.Pull(ctx, "registry/demo:latest"))
-
-	digest, err := svc.ResolveDigest(ctx, "registry/demo:latest")
+	digest, raw, err := svc.Inspect(context.Background(), "registry/demo:latest")
 	require.NoError(t, err)
 	assert.Equal(t, "registry/demo@sha256:abc", digest)
-
-	raw, err := svc.Describe(ctx, digest)
-	require.NoError(t, err)
 	assert.Contains(t, string(raw), `"name":"demo"`)
 }
 
@@ -48,7 +41,7 @@ func TestResolveDigestFallbackToImage(t *testing.T) {
 	// исходный ref
 	svc := stubDocker(t, `echo ""`)
 
-	digest, err := svc.ResolveDigest(context.Background(), "local/demo:dev")
+	digest, err := svc.resolveDigest(context.Background(), "local/demo:dev")
 	require.NoError(t, err)
 	assert.Equal(t, "local/demo:dev", digest)
 }
@@ -56,7 +49,7 @@ func TestResolveDigestFallbackToImage(t *testing.T) {
 func TestErrorIncludesStderr(t *testing.T) {
 	svc := stubDocker(t, `echo "manifest unknown" >&2; exit 1`)
 
-	err := svc.Pull(context.Background(), "registry/ghost:latest")
+	_, _, err := svc.Inspect(context.Background(), "registry/ghost:latest")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "manifest unknown")
 }

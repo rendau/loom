@@ -20,11 +20,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DagService_RegisterDag_FullMethodName  = "/server_v1.DagService/RegisterDag"
-	DagService_ListDag_FullMethodName      = "/server_v1.DagService/ListDag"
-	DagService_GetDag_FullMethodName       = "/server_v1.DagService/GetDag"
-	DagService_SetDagPaused_FullMethodName = "/server_v1.DagService/SetDagPaused"
-	DagService_DeleteDag_FullMethodName    = "/server_v1.DagService/DeleteDag"
+	DagService_RegisterDag_FullMethodName     = "/server_v1.DagService/RegisterDag"
+	DagService_ListDag_FullMethodName         = "/server_v1.DagService/ListDag"
+	DagService_GetDag_FullMethodName          = "/server_v1.DagService/GetDag"
+	DagService_SetDagPaused_FullMethodName    = "/server_v1.DagService/SetDagPaused"
+	DagService_DeleteDag_FullMethodName       = "/server_v1.DagService/DeleteDag"
+	DagService_PushDagManifest_FullMethodName = "/server_v1.DagService/PushDagManifest"
 )
 
 // DagServiceClient is the client API for DagService service.
@@ -46,6 +47,12 @@ type DagServiceClient interface {
 	// только запуски по расписанию; ручной триггер работает.
 	SetDagPaused(ctx context.Context, in *DagSetPausedReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	DeleteDag(ctx context.Context, in *DagDeleteReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// PushDagManifest — внутренний вызов describe-Job'а (решение №29): при
+	// регистрации через k8s Job сам отправляет манифест (или ошибку валидации
+	// дага) на control plane, вместо передачи через логи пода. describe_id —
+	// одноразовый секрет, выданный Job'у в env при создании; ожидающая
+	// регистрация забирает манифест по нему.
+	PushDagManifest(ctx context.Context, in *DagPushManifestReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type dagServiceClient struct {
@@ -106,6 +113,16 @@ func (c *dagServiceClient) DeleteDag(ctx context.Context, in *DagDeleteReq, opts
 	return out, nil
 }
 
+func (c *dagServiceClient) PushDagManifest(ctx context.Context, in *DagPushManifestReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, DagService_PushDagManifest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DagServiceServer is the server API for DagService service.
 // All implementations must embed UnimplementedDagServiceServer
 // for forward compatibility.
@@ -125,6 +142,12 @@ type DagServiceServer interface {
 	// только запуски по расписанию; ручной триггер работает.
 	SetDagPaused(context.Context, *DagSetPausedReq) (*emptypb.Empty, error)
 	DeleteDag(context.Context, *DagDeleteReq) (*emptypb.Empty, error)
+	// PushDagManifest — внутренний вызов describe-Job'а (решение №29): при
+	// регистрации через k8s Job сам отправляет манифест (или ошибку валидации
+	// дага) на control plane, вместо передачи через логи пода. describe_id —
+	// одноразовый секрет, выданный Job'у в env при создании; ожидающая
+	// регистрация забирает манифест по нему.
+	PushDagManifest(context.Context, *DagPushManifestReq) (*emptypb.Empty, error)
 	mustEmbedUnimplementedDagServiceServer()
 }
 
@@ -149,6 +172,9 @@ func (UnimplementedDagServiceServer) SetDagPaused(context.Context, *DagSetPaused
 }
 func (UnimplementedDagServiceServer) DeleteDag(context.Context, *DagDeleteReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteDag not implemented")
+}
+func (UnimplementedDagServiceServer) PushDagManifest(context.Context, *DagPushManifestReq) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PushDagManifest not implemented")
 }
 func (UnimplementedDagServiceServer) mustEmbedUnimplementedDagServiceServer() {}
 func (UnimplementedDagServiceServer) testEmbeddedByValue()                    {}
@@ -261,6 +287,24 @@ func _DagService_DeleteDag_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DagService_PushDagManifest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DagPushManifestReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DagServiceServer).PushDagManifest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DagService_PushDagManifest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DagServiceServer).PushDagManifest(ctx, req.(*DagPushManifestReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DagService_ServiceDesc is the grpc.ServiceDesc for DagService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -287,6 +331,10 @@ var DagService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteDag",
 			Handler:    _DagService_DeleteDag_Handler,
+		},
+		{
+			MethodName: "PushDagManifest",
+			Handler:    _DagService_PushDagManifest_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

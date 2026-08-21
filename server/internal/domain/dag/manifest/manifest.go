@@ -20,13 +20,24 @@ type manifestDTO struct {
 }
 
 type manifestTask struct {
-	Name      string        `json:"name"`
-	DependsOn []manifestDep `json:"depends_on"`
+	Name          string             `json:"name"`
+	DependsOn     []manifestDep      `json:"depends_on"`
+	Retries       int                `json:"retries"`
+	RetryDelaySec int                `json:"retry_delay_sec"`
+	TimeoutSec    int                `json:"timeout_sec"`
+	Resources     *manifestResources `json:"resources"`
 }
 
 type manifestDep struct {
 	Task     string `json:"task"`
 	Streamed bool   `json:"streamed"`
+}
+
+type manifestResources struct {
+	CPURequest    string `json:"cpu_request"`
+	CPULimit      string `json:"cpu_limit"`
+	MemoryRequest string `json:"memory_request"`
+	MemoryLimit   string `json:"memory_limit"`
 }
 
 func Parse(raw []byte) (*dagModel.Manifest, error) {
@@ -44,10 +55,22 @@ func Parse(raw []byte) (*dagModel.Manifest, error) {
 }
 
 func encodeManifestTask(v manifestTask, _ int) dagModel.Task {
-	return dagModel.Task{
-		Name:      v.Name,
-		DependsOn: lo.Map(v.DependsOn, encodeManifestDep),
+	result := dagModel.Task{
+		Name:          v.Name,
+		DependsOn:     lo.Map(v.DependsOn, encodeManifestDep),
+		Retries:       v.Retries,
+		RetryDelaySec: v.RetryDelaySec,
+		TimeoutSec:    v.TimeoutSec,
 	}
+	if v.Resources != nil {
+		result.Resources = &dagModel.TaskResources{
+			CPURequest:    v.Resources.CPURequest,
+			CPULimit:      v.Resources.CPULimit,
+			MemoryRequest: v.Resources.MemoryRequest,
+			MemoryLimit:   v.Resources.MemoryLimit,
+		}
+	}
+	return result
 }
 
 func encodeManifestDep(v manifestDep, _ int) dagModel.Dep {

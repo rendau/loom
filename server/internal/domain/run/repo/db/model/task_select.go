@@ -13,6 +13,7 @@ type TaskSelect struct {
 	Attempt    int32
 	QueuedAt   sql.NullTime
 	StartedAt  sql.NullTime
+	RetryAt    sql.NullTime
 	FinishedAt sql.NullTime
 }
 
@@ -24,6 +25,7 @@ func (m *TaskSelect) ListColumnMap() map[string]any {
 		"attempt":     &m.Attempt,
 		"queued_at":   &m.QueuedAt,
 		"started_at":  &m.StartedAt,
+		"retry_at":    &m.RetryAt,
 		"finished_at": &m.FinishedAt,
 	}
 }
@@ -46,6 +48,7 @@ func EncodeTaskSelect(v *TaskSelect, _ int) *domainModel.TaskInstance {
 		Attempt:    v.Attempt,
 		QueuedAt:   v.QueuedAt.Time,
 		StartedAt:  v.StartedAt.Time,
+		RetryAt:    v.RetryAt.Time,
 		FinishedAt: v.FinishedAt.Time,
 	}
 }

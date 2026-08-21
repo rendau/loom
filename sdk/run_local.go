@@ -81,12 +81,16 @@ func (d *DAG) RunLocal(ctx context.Context, opts ...LocalOption) error {
 			close(started[t.name])
 
 			taskLog := log.With("task", t.name)
-			rt := newRuntime(ctx, t, runID, 1, taskLog, store, nil)
+
+			taskCtx, taskCancel := taskContext(ctx, t)
+			defer taskCancel()
+
+			rt := newRuntime(taskCtx, t, runID, 1, taskLog, store, nil)
 
 			taskLog.Info("task started")
 			startedAt := time.Now()
 
-			err := runTaskFn(ctx, t, rt)
+			err := runTaskFn(taskCtx, t, rt)
 			finErr := rt.finish(err)
 			faErr := store.finishAttempt(runID, t.name, 1)
 			if err == nil {
@@ -109,6 +113,16 @@ func (d *DAG) RunLocal(ctx context.Context, opts ...LocalOption) error {
 	log.Info("local run finished", "success", err == nil, "artifacts_dir", runDir)
 
 	return err
+}
+
+// taskContext навешивает Timeout таска на контекст попытки; без таймаута —
+// контекст как есть.
+func taskContext(ctx context.Context, t *Task) (context.Context, context.CancelFunc) {
+	if t.timeout > 0 {
+		return context.WithTimeoutCause(ctx, t.timeout,
+			fmt.Errorf("task %q timeout after %s", t.name, t.timeout))
+	}
+	return ctx, func() {}
 }
 
 // runTaskFn выполняет тело таска, конвертируя panic в ошибку.

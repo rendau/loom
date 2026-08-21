@@ -353,6 +353,74 @@ func TestStaleWritingAfterRestart(t *testing.T) {
 	assert.Equal(t, StateAborted, state)
 }
 
+func TestResumeWriteAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+
+	s, err := New(dir)
+	require.NoError(t, err)
+	ref := testRef()
+
+	w, err := s.BeginWrite(ref)
+	require.NoError(t, err)
+	_, err = w.Write([]byte("first|"))
+	require.NoError(t, err)
+
+	// процесс «упал»: новый Store на том же каталоге; владелец стрима
+	// возобновляет запись вместо ленивого лечения в aborted
+	s2, err := New(dir)
+	require.NoError(t, err)
+
+	writing, err := s2.ListWriting()
+	require.NoError(t, err)
+	assert.Equal(t, []Ref{ref}, writing)
+
+	w2, err := s2.ResumeWrite(ref)
+	require.NoError(t, err)
+	_, err = w2.Write([]byte("second"))
+	require.NoError(t, err)
+	_, err = w2.Commit()
+	require.NoError(t, err)
+
+	r, err := s2.OpenRead(context.Background(), ref, 0, false)
+	require.NoError(t, err)
+	defer r.Close()
+	data, err := readAll(t, r)
+	require.NoError(t, err)
+	assert.Equal(t, "first|second", string(data))
+
+	// возобновлённый стрим больше не числится оборванным
+	writing, err = s2.ListWriting()
+	require.NoError(t, err)
+	assert.Empty(t, writing)
+}
+
+func TestResumeWriteRejectsFinished(t *testing.T) {
+	dir := t.TempDir()
+
+	s, err := New(dir)
+	require.NoError(t, err)
+	ref := testRef()
+
+	w, err := s.BeginWrite(ref)
+	require.NoError(t, err)
+	_, err = w.Commit()
+	require.NoError(t, err)
+
+	s2, err := New(dir)
+	require.NoError(t, err)
+
+	// закоммиченный стрим не резюмится
+	_, err = s2.ResumeWrite(ref)
+	assert.ErrorIs(t, err, ErrAlreadyExists)
+
+	// активная запись (тот же процесс) — тоже
+	ref2 := Ref{RunID: "run1", Task: "task1", Attempt: 2, Name: "out1"}
+	_, err = s2.BeginWrite(ref2)
+	require.NoError(t, err)
+	_, err = s2.ResumeWrite(ref2)
+	assert.ErrorIs(t, err, ErrAlreadyExists)
+}
+
 func TestAbortRef(t *testing.T) {
 	s, err := New(t.TempDir())
 	require.NoError(t, err)

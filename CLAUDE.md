@@ -17,8 +17,9 @@ docker-образ = один даг, таски запускаются экзе�
 - `artifact/` — artifact-сервер (data plane), каркас по gotemplate
 - `server/` — control plane: Postgres (mobone) + gRPC/gateway, регистрация
   дагов через docker `describe`, планировщик (очередь `FOR UPDATE SKIP
-  LOCKED`, чистый planner + executor-порт), k8s-executor, приём/чтение логов
-  (streamstore)
+  LOCKED`, чистый planner + executor-порт, cron-триггер по `next_run_at`,
+  ретраи `up_for_retry` с backoff, таймаут-watchdog), k8s-executor,
+  приём/чтение логов (streamstore)
 - `examples/` — примеры дагов
 - `admin/` — админка (ещё не создана)
 

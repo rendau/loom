@@ -89,6 +89,16 @@ func (d *DAG) Validate() error {
 				errs = append(errs, fmt.Errorf("task %q: depends on itself", name))
 			}
 		}
+
+		if t.retries < 0 {
+			errs = append(errs, fmt.Errorf("task %q: negative retries %d", name, t.retries))
+		}
+		if t.retryDelay < 0 {
+			errs = append(errs, fmt.Errorf("task %q: negative retry delay %s", name, t.retryDelay))
+		}
+		if t.timeout < 0 {
+			errs = append(errs, fmt.Errorf("task %q: negative timeout %s", name, t.timeout))
+		}
 	}
 
 	return errors.Join(errs...)

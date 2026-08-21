@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/rendau/loom/server/internal/domain/run/model"
 )
@@ -17,12 +18,14 @@ type RepoDbI interface {
 	ListTaskInstances(ctx context.Context, runId string) ([]*model.TaskInstance, error)
 	PromoteTaskInstances(ctx context.Context, runId string, tasks []string, fromStatus, toStatus string) error
 	ClaimQueuedTasks(ctx context.Context, limit int64) ([]model.ClaimedTask, error)
+	PromoteRetries(ctx context.Context) (int64, error)
 
 	CreateAttempt(ctx context.Context, ref model.AttemptRef) error
 	GetAttempt(ctx context.Context, ref model.AttemptRef) (*model.Attempt, bool, error)
 	ListAttempts(ctx context.Context, runId string) ([]*model.Attempt, error)
+	ListStaleAttempts(ctx context.Context, olderThan time.Time) ([]model.StaleAttempt, error)
 	MarkAttemptRunning(ctx context.Context, ref model.AttemptRef) (bool, error)
-	FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo) (bool, error)
+	FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo, retryAt *time.Time) (bool, error)
 }
 
 type TxManagerI interface {

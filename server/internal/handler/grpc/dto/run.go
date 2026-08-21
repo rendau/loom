@@ -45,6 +45,9 @@ func EncodeTaskInstanceMain(v *domainModel.TaskInstance, _ int) *pb.TaskInstance
 	if !v.StartedAt.IsZero() {
 		result.StartedAt = timestamppb.New(v.StartedAt)
 	}
+	if !v.RetryAt.IsZero() {
+		result.RetryAt = timestamppb.New(v.RetryAt)
+	}
 	if !v.FinishedAt.IsZero() {
 		result.FinishedAt = timestamppb.New(v.FinishedAt)
 	}

@@ -89,11 +89,17 @@ func (a *App) Init() {
 		errCheck(err, "k8s executor init")
 
 		a.scheduler = domainScheduler.New(
-			runSvc, a.executor, a.artifactCli, tasklogSvc,
-			config.Conf.SchedTick, config.Conf.SchedClaimLimit,
-			domainScheduler.TaskEnv{
-				ArtifactAddr: config.Conf.TaskArtifactAddr,
-				ServerAddr:   config.Conf.TaskServerAddr,
+			runSvc, dagSvc, a.executor, a.artifactCli, tasklogSvc,
+			domainScheduler.Config{
+				Tick:          config.Conf.SchedTick,
+				CronTick:      config.Conf.SchedCronTick,
+				ReconcileTick: config.Conf.SchedReconcileTick,
+				ZombieGrace:   config.Conf.SchedZombieGrace,
+				ClaimLimit:    config.Conf.SchedClaimLimit,
+				TaskEnv: domainScheduler.TaskEnv{
+					ArtifactAddr: config.Conf.TaskArtifactAddr,
+					ServerAddr:   config.Conf.TaskServerAddr,
+				},
 			},
 		)
 		schedulerNudger = a.scheduler

@@ -8,6 +8,7 @@ import (
 	"io"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -257,4 +258,19 @@ func TestRunLocalMissingArtifactResolves(t *testing.T) {
 	err := d.RunLocal(context.Background(), LocalDir(t.TempDir()))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, streamstore.ErrNotFound)
+}
+
+func TestRunLocalTaskTimeout(t *testing.T) {
+	// Timeout отменяет контекст таска: кооперативный таск завершается с
+	// ошибкой дедлайна, ран падает
+	d := New("test_dag")
+
+	d.Task("slow", func(ctx context.Context, _ *Runtime) error {
+		<-ctx.Done()
+		return context.Cause(ctx)
+	}, Timeout(50*time.Millisecond))
+
+	err := d.RunLocal(context.Background(), LocalDir(t.TempDir()))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "timeout")
 }

@@ -2,7 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"time"
 
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
 	tasklogModel "github.com/rendau/loom/server/internal/domain/tasklog/model"
 )
@@ -13,16 +15,29 @@ type RunServiceI interface {
 	ListTaskInstances(ctx context.Context, runId string) ([]*runModel.TaskInstance, error)
 	PromoteTasks(ctx context.Context, runId string, tasks []string, fromStatus, toStatus string) error
 	ClaimQueued(ctx context.Context, limit int64) ([]runModel.ClaimedTask, error)
+	PromoteRetries(ctx context.Context) (int64, error)
+	ListStaleAttempts(ctx context.Context, olderThan time.Time) ([]runModel.StaleAttempt, error)
 	MarkAttemptRunning(ctx context.Context, ref runModel.AttemptRef) (bool, error)
-	FinalizeAttempt(ctx context.Context, ref runModel.AttemptRef, exit runModel.ExitInfo) (bool, error)
+	FinalizeAttempt(ctx context.Context, ref runModel.AttemptRef, exit runModel.ExitInfo, retryAt *time.Time) (bool, error)
 	FinishRun(ctx context.Context, runId, status string) error
+	Trigger(ctx context.Context, dag *dagModel.Main, trigger string) (string, error)
+}
+
+// DagServiceI — cron-расписания: выборка дагов с наступившим next_run_at и
+// его сдвиг compare-and-swap'ом (защита от двойного триггера при нескольких
+// инстансах control plane).
+type DagServiceI interface {
+	ListDueSchedules(ctx context.Context) ([]*dagModel.Main, error)
+	AdvanceNextRun(ctx context.Context, name string, from, to time.Time) (bool, error)
 }
 
 // ExecutorI — порт executor'а (решение №8): запуск/остановка на уровне
-// attempt'а, события жизненного цикла — каналом.
+// attempt'а, события жизненного цикла — каналом. ListAlive — попытки, чьи
+// Job'ы ещё существуют (источник правды зомби-детекта).
 type ExecutorI interface {
 	Launch(ctx context.Context, spec runModel.LaunchSpec) error
 	Kill(ctx context.Context, ref runModel.AttemptRef) error
+	ListAlive(ctx context.Context) ([]runModel.AttemptRef, error)
 	Events() <-chan runModel.ExecEvent
 }
 

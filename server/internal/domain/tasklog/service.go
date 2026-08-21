@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 
 	json "github.com/goccy/go-json"
@@ -46,10 +47,45 @@ func New(dir string) (*Service, error) {
 		return nil, fmt.Errorf("streamstore.New: %w", err)
 	}
 
-	return &Service{
+	s := &Service{
 		store:   store,
 		writers: map[model.AttemptKey]*streamstore.Writer{},
-	}, nil
+	}
+	s.recoverWriters()
+
+	return s, nil
+}
+
+// recoverWriters переоткрывает лог-стримы, оборванные рестартом server:
+// иначе streamstore лениво пометил бы их aborted и лог живого attempt'а стал
+// бы нечитаемым. Запись продолжается с места обрыва; commit сделает обычная
+// финализация попытки (умершую вместе с сервером попытку дофинализирует
+// зомби-детект планировщика).
+func (s *Service) recoverWriters() {
+	refs, err := s.store.ListWriting()
+	if err != nil {
+		slog.Warn("task log recovery: list writing streams", "error", err)
+		return
+	}
+
+	resumed := 0
+	for _, r := range refs {
+		if r.Name != logArtifactName {
+			continue
+		}
+		w, err := s.store.ResumeWrite(r)
+		if err != nil {
+			slog.Warn("task log recovery: resume stream",
+				"run_id", r.RunID, "task", r.Task, "attempt", r.Attempt, "error", err)
+			continue
+		}
+		s.writers[model.AttemptKey{RunId: r.RunID, Task: r.Task, Attempt: r.Attempt}] = w
+		resumed++
+	}
+
+	if resumed > 0 {
+		slog.Info("task log streams resumed after restart", "count", resumed)
+	}
 }
 
 func ref(key model.AttemptKey) streamstore.Ref {

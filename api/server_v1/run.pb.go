@@ -125,13 +125,16 @@ func (x *RunMain) GetFinishedAt() *timestamppb.Timestamp {
 }
 
 type TaskInstanceMain struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Task          string                 `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
-	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`    // pending | queued | starting | running | success | failed | upstream_failed
-	Attempt       int32                  `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"` // номер текущей (последней) попытки; 0 — ещё не стартовала
-	QueuedAt      *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=queued_at,json=queuedAt,proto3,oneof" json:"queued_at,omitempty"`
-	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
-	FinishedAt    *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=finished_at,json=finishedAt,proto3,oneof" json:"finished_at,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Task  string                 `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
+	// pending | queued | starting | running | up_for_retry | success | failed | upstream_failed
+	Status     string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Attempt    int32                  `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"` // номер текущей (последней) попытки; 0 — ещё не стартовала
+	QueuedAt   *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=queued_at,json=queuedAt,proto3,oneof" json:"queued_at,omitempty"`
+	StartedAt  *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
+	FinishedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=finished_at,json=finishedAt,proto3,oneof" json:"finished_at,omitempty"`
+	// Для up_for_retry: когда таск вернётся в очередь.
+	RetryAt       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=retry_at,json=retryAt,proto3,oneof" json:"retry_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -204,6 +207,13 @@ func (x *TaskInstanceMain) GetStartedAt() *timestamppb.Timestamp {
 func (x *TaskInstanceMain) GetFinishedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.FinishedAt
+	}
+	return nil
+}
+
+func (x *TaskInstanceMain) GetRetryAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.RetryAt
 	}
 	return nil
 }
@@ -628,7 +638,7 @@ const file_server_v1_run_proto_rawDesc = "" +
 	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12@\n" +
 	"\vfinished_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampH\x00R\n" +
 	"finishedAt\x88\x01\x01B\x0e\n" +
-	"\f_finished_at\"\xc5\x02\n" +
+	"\f_finished_at\"\x8e\x03\n" +
 	"\x10TaskInstanceMain\x12\x12\n" +
 	"\x04task\x18\x01 \x01(\tR\x04task\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
@@ -637,11 +647,13 @@ const file_server_v1_run_proto_rawDesc = "" +
 	"\n" +
 	"started_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tstartedAt\x88\x01\x01\x12@\n" +
 	"\vfinished_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampH\x02R\n" +
-	"finishedAt\x88\x01\x01B\f\n" +
+	"finishedAt\x88\x01\x01\x12:\n" +
+	"\bretry_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampH\x03R\aretryAt\x88\x01\x01B\f\n" +
 	"\n" +
 	"_queued_atB\r\n" +
 	"\v_started_atB\x0e\n" +
-	"\f_finished_at\"\x80\x03\n" +
+	"\f_finished_atB\v\n" +
+	"\t_retry_at\"\x80\x03\n" +
 	"\vAttemptMain\x12\x12\n" +
 	"\x04task\x18\x01 \x01(\tR\x04task\x12\x18\n" +
 	"\aattempt\x18\x02 \x01(\x05R\aattempt\x12\x16\n" +
@@ -721,26 +733,27 @@ var file_server_v1_run_proto_depIdxs = []int32{
 	9,  // 2: server_v1.TaskInstanceMain.queued_at:type_name -> google.protobuf.Timestamp
 	9,  // 3: server_v1.TaskInstanceMain.started_at:type_name -> google.protobuf.Timestamp
 	9,  // 4: server_v1.TaskInstanceMain.finished_at:type_name -> google.protobuf.Timestamp
-	9,  // 5: server_v1.AttemptMain.created_at:type_name -> google.protobuf.Timestamp
-	9,  // 6: server_v1.AttemptMain.started_at:type_name -> google.protobuf.Timestamp
-	9,  // 7: server_v1.AttemptMain.finished_at:type_name -> google.protobuf.Timestamp
-	10, // 8: server_v1.RunListReq.list_params:type_name -> common.ListParamsSt
-	11, // 9: server_v1.RunListRep.pagination_info:type_name -> common.PaginationInfoSt
-	0,  // 10: server_v1.RunListRep.results:type_name -> server_v1.RunMain
-	0,  // 11: server_v1.RunGetRep.run:type_name -> server_v1.RunMain
-	1,  // 12: server_v1.RunGetRep.tasks:type_name -> server_v1.TaskInstanceMain
-	2,  // 13: server_v1.RunGetRep.attempts:type_name -> server_v1.AttemptMain
-	3,  // 14: server_v1.RunService.TriggerRun:input_type -> server_v1.RunTriggerReq
-	5,  // 15: server_v1.RunService.ListRun:input_type -> server_v1.RunListReq
-	7,  // 16: server_v1.RunService.GetRun:input_type -> server_v1.RunGetReq
-	4,  // 17: server_v1.RunService.TriggerRun:output_type -> server_v1.RunTriggerRep
-	6,  // 18: server_v1.RunService.ListRun:output_type -> server_v1.RunListRep
-	8,  // 19: server_v1.RunService.GetRun:output_type -> server_v1.RunGetRep
-	17, // [17:20] is the sub-list for method output_type
-	14, // [14:17] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	9,  // 5: server_v1.TaskInstanceMain.retry_at:type_name -> google.protobuf.Timestamp
+	9,  // 6: server_v1.AttemptMain.created_at:type_name -> google.protobuf.Timestamp
+	9,  // 7: server_v1.AttemptMain.started_at:type_name -> google.protobuf.Timestamp
+	9,  // 8: server_v1.AttemptMain.finished_at:type_name -> google.protobuf.Timestamp
+	10, // 9: server_v1.RunListReq.list_params:type_name -> common.ListParamsSt
+	11, // 10: server_v1.RunListRep.pagination_info:type_name -> common.PaginationInfoSt
+	0,  // 11: server_v1.RunListRep.results:type_name -> server_v1.RunMain
+	0,  // 12: server_v1.RunGetRep.run:type_name -> server_v1.RunMain
+	1,  // 13: server_v1.RunGetRep.tasks:type_name -> server_v1.TaskInstanceMain
+	2,  // 14: server_v1.RunGetRep.attempts:type_name -> server_v1.AttemptMain
+	3,  // 15: server_v1.RunService.TriggerRun:input_type -> server_v1.RunTriggerReq
+	5,  // 16: server_v1.RunService.ListRun:input_type -> server_v1.RunListReq
+	7,  // 17: server_v1.RunService.GetRun:input_type -> server_v1.RunGetReq
+	4,  // 18: server_v1.RunService.TriggerRun:output_type -> server_v1.RunTriggerRep
+	6,  // 19: server_v1.RunService.ListRun:output_type -> server_v1.RunListRep
+	8,  // 20: server_v1.RunService.GetRun:output_type -> server_v1.RunGetRep
+	18, // [18:21] is the sub-list for method output_type
+	15, // [15:18] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_run_proto_init() }

@@ -181,18 +181,38 @@ func (s *Service) MarkAttemptRunning(ctx context.Context, ref model.AttemptRef) 
 }
 
 // FinalizeAttempt фиксирует завершение попытки; false — попытка уже была
-// терминальна (дубль события или страховочный вызов).
-func (s *Service) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo) (bool, error) {
+// терминальна (дубль события или страховочный вызов). retryAt задаёт
+// отложенный ретрай неуспешной попытки (up_for_retry вместо failed).
+func (s *Service) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo, retryAt *time.Time) (bool, error) {
 	var applied bool
 	err := s.txm.TxFn(ctx, func(ctx context.Context) error {
 		var err error
-		applied, err = s.repoDb.FinalizeAttempt(ctx, ref, exit)
+		applied, err = s.repoDb.FinalizeAttempt(ctx, ref, exit, retryAt)
 		return err
 	})
 	if err != nil {
 		return false, fmt.Errorf("repoDb.FinalizeAttempt: %w", err)
 	}
 	return applied, nil
+}
+
+// PromoteRetries возвращает в очередь up_for_retry-таски с истёкшим backoff.
+func (s *Service) PromoteRetries(ctx context.Context) (int64, error) {
+	n, err := s.repoDb.PromoteRetries(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("repoDb.PromoteRetries: %w", err)
+	}
+	return n, nil
+}
+
+// ListStaleAttempts возвращает незавершённые попытки старше olderThan —
+// кандидатов на зомби-детект.
+func (s *Service) ListStaleAttempts(ctx context.Context, olderThan time.Time) ([]model.StaleAttempt, error) {
+	items, err := s.repoDb.ListStaleAttempts(ctx, olderThan)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.ListStaleAttempts: %w", err)
+	}
+	return items, nil
 }
 
 func (s *Service) FinishRun(ctx context.Context, runId, status string) error {

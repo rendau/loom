@@ -14,6 +14,7 @@ type Select struct {
 	Schedule    string
 	Paused      bool
 	Manifest    []byte
+	NextRunAt   sql.NullTime
 	CreatedAt   time.Time
 	ModifiedAt  sql.NullTime
 }
@@ -26,6 +27,7 @@ func (m *Select) ListColumnMap() map[string]any {
 		"schedule":     &m.Schedule,
 		"paused":       &m.Paused,
 		"manifest":     &m.Manifest,
+		"next_run_at":  &m.NextRunAt,
 		"created_at":   &m.CreatedAt,
 		"modified_at":  &m.ModifiedAt,
 	}
@@ -53,6 +55,7 @@ func EncodeSelect(v *Select, _ int) *domainModel.Main {
 		SdkVersion:  sdkVersion,
 		Tasks:       tasks,
 		Manifest:    v.Manifest,
+		NextRunAt:   v.NextRunAt.Time,
 		CreatedAt:   v.CreatedAt,
 		ModifiedAt:  v.ModifiedAt.Time,
 	}

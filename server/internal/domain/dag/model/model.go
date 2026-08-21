@@ -17,6 +17,7 @@ type Main struct {
 	SdkVersion  string
 	Tasks       []Task
 	Manifest    []byte
+	NextRunAt   time.Time // zero — без расписания / не инициализировано
 	CreatedAt   time.Time
 	ModifiedAt  time.Time // zero — не изменялся
 }
@@ -24,6 +25,19 @@ type Main struct {
 type Task struct {
 	Name      string
 	DependsOn []Dep
+	// Политика ретраев и таймаут (гранулярность манифеста — секунды).
+	Retries       int
+	RetryDelaySec int
+	TimeoutSec    int
+	Resources     *TaskResources
+}
+
+// TaskResources — ресурсы контейнера попытки (kubernetes quantities).
+type TaskResources struct {
+	CPURequest    string
+	CPULimit      string
+	MemoryRequest string
+	MemoryLimit   string
 }
 
 type Dep struct {

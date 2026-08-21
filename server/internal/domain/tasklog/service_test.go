@@ -146,3 +146,25 @@ func TestReadUnknownLog(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errs.ObjectNotFound))
 }
+
+func TestLogRecoveryAfterRestart(t *testing.T) {
+	// рестарт server посреди попытки: новый Service на том же каталоге
+	// возобновляет оборванный лог-стрим — запись продолжается с места
+	// обрыва, а не отваливается в aborted (решение фазы 5)
+	dir := t.TempDir()
+
+	svc, err := New(dir)
+	require.NoError(t, err)
+	require.NoError(t, svc.Append(key(1), []model.Entry{entry("before restart")}))
+
+	svc2, err := New(dir)
+	require.NoError(t, err)
+	require.NoError(t, svc2.Append(key(1), []model.Entry{entry("after restart")}))
+	require.NoError(t, svc2.Finish(key(1), []model.Entry{entry("exit line")}))
+
+	got := readAll(t, svc2, key(1), false)
+	require.Len(t, got, 3)
+	assert.Equal(t, "before restart", got[0].Line)
+	assert.Equal(t, "after restart", got[1].Line)
+	assert.Equal(t, "exit line", got[2].Line)
+}

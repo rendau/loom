@@ -18,6 +18,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	k8sResource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -25,6 +26,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
 )
 
@@ -124,9 +126,12 @@ func (s *Service) Events() <-chan runModel.ExecEvent {
 // Launch создаёт Job попытки. Идемпотентен: уже существующий Job этой
 // попытки — не ошибка.
 func (s *Service) Launch(ctx context.Context, spec runModel.LaunchSpec) error {
-	job := s.buildJob(spec)
+	job, err := s.buildJob(spec)
+	if err != nil {
+		return err
+	}
 
-	_, err := s.clientset.BatchV1().Jobs(s.namespace).Create(ctx, job, metav1.CreateOptions{})
+	_, err = s.clientset.BatchV1().Jobs(s.namespace).Create(ctx, job, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("create job: %w", err)
 	}
@@ -146,7 +151,27 @@ func (s *Service) Kill(ctx context.Context, ref runModel.AttemptRef) error {
 	return nil
 }
 
-func (s *Service) buildJob(spec runModel.LaunchSpec) *batchv1.Job {
+// ListAlive возвращает попытки, чьи Job'ы существуют в кластере (включая
+// завершённые до TTL-очистки) — источник правды для зомби-детекта
+// планировщика.
+func (s *Service) ListAlive(ctx context.Context) ([]runModel.AttemptRef, error) {
+	list, err := s.clientset.BatchV1().Jobs(s.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: managedByLabelKey + "=" + managedByLabelValue,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list jobs: %w", err)
+	}
+
+	result := make([]runModel.AttemptRef, 0, len(list.Items))
+	for _, job := range list.Items {
+		if ref, ok := annotationsRef(job.Annotations); ok {
+			result = append(result, ref)
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) buildJob(spec runModel.LaunchSpec) (*batchv1.Job, error) {
 	labels := map[string]string{managedByLabelKey: managedByLabelValue}
 	annotations := map[string]string{
 		annRunId:   spec.Ref.RunId,
@@ -157,6 +182,11 @@ func (s *Service) buildJob(spec runModel.LaunchSpec) *batchv1.Job {
 	env := make([]corev1.EnvVar, 0, len(spec.Env))
 	for k, v := range spec.Env {
 		env = append(env, corev1.EnvVar{Name: k, Value: v})
+	}
+
+	resources, err := containerResources(spec.Resources)
+	if err != nil {
+		return nil, err
 	}
 
 	return &batchv1.Job{
@@ -177,15 +207,58 @@ func (s *Service) buildJob(spec runModel.LaunchSpec) *batchv1.Job {
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{{
-						Name:  containerName,
-						Image: spec.Image,
-						Args:  []string{"run"},
-						Env:   env,
+						Name:      containerName,
+						Image:     spec.Image,
+						Args:      []string{"run"},
+						Env:       env,
+						Resources: resources,
 					}},
 				},
 			},
 		},
+	}, nil
+}
+
+// containerResources — requests/limits контейнера из манифеста таска;
+// quantities валидируются при регистрации дага, ошибка здесь — только у
+// ранов, записанных до ужесточения валидации.
+func containerResources(r *dagModel.TaskResources) (corev1.ResourceRequirements, error) {
+	result := corev1.ResourceRequirements{}
+	if r == nil {
+		return result, nil
 	}
+
+	set := func(dst *corev1.ResourceList, name corev1.ResourceName, value string) error {
+		if value == "" {
+			return nil
+		}
+		q, err := k8sResource.ParseQuantity(value)
+		if err != nil {
+			return fmt.Errorf("parse resource %s=%q: %w", name, value, err)
+		}
+		if *dst == nil {
+			*dst = corev1.ResourceList{}
+		}
+		(*dst)[name] = q
+		return nil
+	}
+
+	for _, item := range []struct {
+		dst   *corev1.ResourceList
+		name  corev1.ResourceName
+		value string
+	}{
+		{&result.Requests, corev1.ResourceCPU, r.CPURequest},
+		{&result.Limits, corev1.ResourceCPU, r.CPULimit},
+		{&result.Requests, corev1.ResourceMemory, r.MemoryRequest},
+		{&result.Limits, corev1.ResourceMemory, r.MemoryLimit},
+	} {
+		if err := set(item.dst, item.name, item.value); err != nil {
+			return result, err
+		}
+	}
+
+	return result, nil
 }
 
 // handlePod транслирует состояние пода в события попытки. Дубли (resync
@@ -258,9 +331,13 @@ func finishedEvent(ref runModel.AttemptRef, pod *corev1.Pod, success bool, fallb
 }
 
 func podRef(pod *corev1.Pod) (runModel.AttemptRef, bool) {
-	runId := pod.Annotations[annRunId]
-	task := pod.Annotations[annTask]
-	attempt, err := strconv.Atoi(pod.Annotations[annAttempt])
+	return annotationsRef(pod.Annotations)
+}
+
+func annotationsRef(annotations map[string]string) (runModel.AttemptRef, bool) {
+	runId := annotations[annRunId]
+	task := annotations[annTask]
+	attempt, err := strconv.Atoi(annotations[annAttempt])
 	if runId == "" || task == "" || err != nil {
 		return runModel.AttemptRef{}, false
 	}

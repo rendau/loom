@@ -4,6 +4,7 @@ import (
 	"time"
 
 	commonModel "github.com/rendau/loom/server/internal/domain/common/model"
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 )
 
 // Статусы рана.
@@ -17,11 +18,13 @@ const (
 //
 //	pending → queued → starting → running → success | failed
 //	pending → upstream_failed (зависимость упала)
+//	starting/running → up_for_retry → queued (остались ретраи, ждём backoff)
 const (
 	TaskStatusPending        = "pending"
 	TaskStatusQueued         = "queued"
 	TaskStatusStarting       = "starting"
 	TaskStatusRunning        = "running"
+	TaskStatusUpForRetry     = "up_for_retry"
 	TaskStatusSuccess        = "success"
 	TaskStatusFailed         = "failed"
 	TaskStatusUpstreamFailed = "upstream_failed"
@@ -87,6 +90,7 @@ type TaskInstance struct {
 	Attempt    int32
 	QueuedAt   time.Time
 	StartedAt  time.Time
+	RetryAt    time.Time // для up_for_retry: когда вернуть в очередь
 	FinishedAt time.Time
 }
 
@@ -117,6 +121,13 @@ type ClaimedTask struct {
 	Attempt int32 // номер новой попытки
 }
 
+// StaleAttempt — незавершённая попытка старше grace-периода: кандидат на
+// зомби-детект (сверку с живыми Job'ами executor'а).
+type StaleAttempt struct {
+	Ref    AttemptRef
+	Status string // starting | running
+}
+
 // ExitInfo — результат завершения попытки.
 type ExitInfo struct {
 	Success  bool
@@ -126,11 +137,12 @@ type ExitInfo struct {
 }
 
 // LaunchSpec — параметры запуска попытки executor'ом: образ рана (пиннутый
-// digest) и env-контракт LOOM_* для контейнера.
+// digest), env-контракт LOOM_* и ресурсы контейнера из манифеста.
 type LaunchSpec struct {
-	Ref   AttemptRef
-	Image string
-	Env   map[string]string
+	Ref       AttemptRef
+	Image     string
+	Env       map[string]string
+	Resources *dagModel.TaskResources
 }
 
 // Типы событий executor'а.

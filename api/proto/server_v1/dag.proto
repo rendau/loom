@@ -64,16 +64,30 @@ message DagMain {
   repeated DagTaskMain tasks = 7;
   google.protobuf.Timestamp created_at = 8;
   optional google.protobuf.Timestamp modified_at = 9;
+  // Ближайший запуск по cron-расписанию; отсутствует у дагов без расписания.
+  optional google.protobuf.Timestamp next_run_at = 10;
 }
 
 message DagTaskMain {
   string name = 1;
   repeated DagTaskDepMain depends_on = 2;
+  int32 retries = 3;         // ретраев после первой попытки
+  int32 retry_delay_sec = 4; // базовая пауза backoff'а; 0 — дефолт сервера
+  int32 timeout_sec = 5;     // 0 — без таймаута
+  optional DagTaskResources resources = 6;
 }
 
 message DagTaskDepMain {
   string task = 1;
   bool streamed = 2;
+}
+
+// Ресурсы контейнера попытки (kubernetes quantities: "500m", "256Mi").
+message DagTaskResources {
+  string cpu_request = 1;
+  string cpu_limit = 2;
+  string memory_request = 3;
+  string memory_limit = 4;
 }
 
 // Register

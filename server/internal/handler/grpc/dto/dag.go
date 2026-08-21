@@ -28,14 +28,29 @@ func EncodeDagMain(v *domainModel.Main, _ int) *pb.DagMain {
 	if !v.ModifiedAt.IsZero() {
 		result.ModifiedAt = timestamppb.New(v.ModifiedAt)
 	}
+	if !v.NextRunAt.IsZero() {
+		result.NextRunAt = timestamppb.New(v.NextRunAt)
+	}
 	return result
 }
 
 func EncodeDagTaskMain(v domainModel.Task, _ int) *pb.DagTaskMain {
-	return &pb.DagTaskMain{
-		Name:      v.Name,
-		DependsOn: lo.Map(v.DependsOn, EncodeDagTaskDepMain),
+	result := &pb.DagTaskMain{
+		Name:          v.Name,
+		DependsOn:     lo.Map(v.DependsOn, EncodeDagTaskDepMain),
+		Retries:       int32(v.Retries),
+		RetryDelaySec: int32(v.RetryDelaySec),
+		TimeoutSec:    int32(v.TimeoutSec),
 	}
+	if v.Resources != nil {
+		result.Resources = &pb.DagTaskResources{
+			CpuRequest:    v.Resources.CPURequest,
+			CpuLimit:      v.Resources.CPULimit,
+			MemoryRequest: v.Resources.MemoryRequest,
+			MemoryLimit:   v.Resources.MemoryLimit,
+		}
+	}
+	return result
 }
 
 func EncodeDagTaskDepMain(v domainModel.Dep, _ int) *pb.DagTaskDepMain {

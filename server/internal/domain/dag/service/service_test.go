@@ -35,6 +35,20 @@ func TestValidateManifest_Valid(t *testing.T) {
 	require.NoError(t, ValidateManifest(validManifest()))
 }
 
+func TestValidateManifest_ValidPolicyAndResources(t *testing.T) {
+	m := validManifest()
+	m.Tasks[0].Retries = 3
+	m.Tasks[0].RetryDelaySec = 60
+	m.Tasks[0].TimeoutSec = 3600
+	m.Tasks[0].Resources = &model.TaskResources{
+		CPURequest:    "250m",
+		CPULimit:      "1",
+		MemoryRequest: "128Mi",
+		MemoryLimit:   "512Mi",
+	}
+	require.NoError(t, ValidateManifest(m))
+}
+
 func TestValidateManifest_Invalid(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -57,6 +71,14 @@ func TestValidateManifest_Invalid(t *testing.T) {
 		}},
 		{"cycle", func(m *model.Manifest) {
 			m.Tasks[0].DependsOn = []model.Dep{{Task: "load"}}
+		}},
+		{"bad schedule", func(m *model.Manifest) { m.Schedule = "not-a-cron" }},
+		{"negative retries", func(m *model.Manifest) { m.Tasks[0].Retries = -1 }},
+		{"retries over limit", func(m *model.Manifest) { m.Tasks[0].Retries = maxTaskRetries + 1 }},
+		{"negative retry delay", func(m *model.Manifest) { m.Tasks[0].RetryDelaySec = -1 }},
+		{"negative timeout", func(m *model.Manifest) { m.Tasks[0].TimeoutSec = -1 }},
+		{"bad resource quantity", func(m *model.Manifest) {
+			m.Tasks[0].Resources = &model.TaskResources{MemoryLimit: "256Меб"}
 		}},
 	}
 

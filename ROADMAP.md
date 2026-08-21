@@ -79,6 +79,41 @@
 16. **Логи — best-effort**: недоступный лог-стрим не валит таск — отправка
     отключается, дубль в честный stdout продолжается. Без `LOOM_SERVER_ADDR`
     логи идут только в stdout.
+17. **Cron — без catchup, at-most-once**: у дага хранится `next_run_at`;
+    сдвиг — compare-and-swap (`IS NOT DISTINCT FROM`) ДО триггера: при гонке
+    инстансов ран создаёт победитель CAS, упавший после сдвига триггер теряет
+    тик. Регистрация и unpause пересчитывают `next_run_at` от «сейчас»
+    (пропущенные тики не навёрстываются). Валидация cron — при регистрации
+    (`robfig/cron/v3`, стандартные 5 полей + `@daily` и т.п.).
+18. **Ретраи и таймауты — политика в манифесте таска** (`retries`,
+    `retry_delay_sec`, `timeout_sec`; SDK-опции `Retries`/`RetryDelay`/
+    `Timeout`). Неуспешная попытка при остатке ретраев → task_instance
+    `up_for_retry` + `retry_at` (не терминальный: без finished_at, потомки
+    ждут); планировщик возвращает в `queued` по времени. Backoff: база (или
+    30s) × 2^(попытка−1), потолок 30m. Таймаут двухслойный: SDK отменяет
+    контекст таска (виден и Runtime-операциям), control plane добивает
+    зависшую running-попытку killTimedOut'ом (reason=timeout, ретраится по
+    общей политике). Ресурсы (`resources`: cpu/mem request/limit, SDK-опция
+    `Resources`) валидируются при регистрации как k8s quantities и уходят в
+    спеку контейнера Job'а.
+19. **Зомби-детект — reconcile по Job'ам, без heartbeat'а**: отдельный цикл
+    (`SCHED_RECONCILE_TICK`) сверяет незавершённые попытки старше
+    `SCHED_ZOMBIE_GRACE` (отсекает гонку claim → Launch) с `ListAlive`
+    executor'а (List Jobs по лейблу loom). Потерянная **до старта**
+    (starting без Job'а — упали между claim и Launch) → немедленный возврат
+    в очередь вне политики ретраев (таск не исполнялся — ретрай не
+    сжигается), reason=lost. Исчезнувшая **на бегу** (running без Job'а) →
+    финализация по обычной политике, reason=pod_lost. Heartbeat из SDK не
+    заводим: живой-но-зависший процесс ловит таймаут (№18), мёртвый
+    контейнер — события пода, пропавший под — этот reconcile.
+20. **Лог-стримы переживают рестарт server через ResumeWrite**: streamstore
+    получил `ResumeWrite`/`ListWriting` — возобновление writing-стрима без
+    активного писателя тем же процессом-владельцем (только для стримов,
+    которыми владеет сам процесс — лог-стримы control plane; артефакты
+    тасков по-прежнему лечатся lazy в aborted, их ретрай идёт новой
+    попыткой). tasklog при старте резюмит все свои writing-стримы: запись
+    продолжается с места обрыва, commit сделает обычная финализация (попытку,
+    умершую вместе с сервером, дофинализирует зомби-детект №19).
 
 ## Состояние: сделано
 
@@ -156,14 +191,23 @@
 
 ### Фаза 5 — надёжность планировщика
 
-- [ ] Cron-расписания (без catchup в первой версии), pause/resume дага
-- [ ] Ретраи с backoff (per-task политика в манифесте), таймауты таска
-- [ ] Зомби-детект: heartbeat attempt'а + watch подов; переотправка в очередь
-      (сейчас упавший между claim и Launch server оставляет attempt в starting)
-- [ ] Восстановление лог-стримов после рестарта server: streamstore помечает
-      осиротевшие writing-стримы aborted — лог живого attempt'а становится
-      нечитаемым; решить (переоткрытие / recovery-commit)
-- [ ] Ресурсы таска в манифесте (cpu/mem requests/limits) → в спеку пода
+- [x] Cron-расписания (без catchup, решение №17): `next_run_at` + CAS,
+      cronLoop в планировщике (`SCHED_CRON_TICK`), pause/resume останавливает
+      и возобновляет расписание; `next_run_at` в API дага
+- [x] Ретраи с backoff и таймауты таска (решение №18): статус `up_for_retry`
+      + `retry_at`, PromoteRetries в pass'е, killTimedOut-watchdog, SDK-опции
+      `Retries`/`RetryDelay`/`Timeout`, строка «retry scheduled at» в логе
+      попытки; интеграционные тесты (ретрай, исчерпание, таймаут, cron с
+      pause/unpause) — зелёные против Postgres
+- [x] Ресурсы таска в манифесте (`Resources`, cpu/mem requests/limits):
+      валидация quantities при регистрации → `resources` контейнера Job'а
+- [x] Зомби-детект (решение №19 — reconcile по Job'ам вместо heartbeat):
+      reconcileLoop + `ListStaleAttempts`/`ListAlive`, lost-before-start →
+      переотправка в очередь без сжигания ретрая, pod_lost на бегу → обычная
+      политика; интеграционные тесты обоих сценариев
+- [x] Восстановление лог-стримов после рестарта server (решение №20):
+      `ResumeWrite`/`ListWriting` в streamstore, tasklog резюмит свои
+      writing-стримы при старте; тесты streamstore и tasklog
 - [ ] Retention: TTL ранов, крон-джоб `DeleteRunArtifacts` + чистка логов
 - [ ] Attempt-токены: выдача при Launch, проверка на artifact-сервере и
       лог-приёмнике (запись только в свой attempt)

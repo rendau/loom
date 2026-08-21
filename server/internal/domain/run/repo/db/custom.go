@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 
@@ -128,14 +129,20 @@ func (r *Repo) MarkAttemptRunning(ctx context.Context, ref model.AttemptRef) (bo
 }
 
 // FinalizeAttempt переводит попытку в терминальный статус с exit-информацией;
-// task instance следует за ней. Идемпотентен: если попытка уже терминальна,
-// возвращает false и ничего не меняет (страховочные вызовы, дубли событий).
-func (r *Repo) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo) (bool, error) {
+// task instance следует за ней: success/failed, а при неуспехе с retryAt —
+// up_for_retry с отложенным возвратом в очередь. Идемпотентен: если попытка
+// уже терминальна, возвращает false и ничего не меняет (страховочные вызовы,
+// дубли событий).
+func (r *Repo) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo, retryAt *time.Time) (bool, error) {
 	attemptStatus := model.AttemptStatusFailed
 	taskStatus := model.TaskStatusFailed
 	if exit.Success {
 		attemptStatus = model.AttemptStatusSuccess
 		taskStatus = model.TaskStatusSuccess
+		retryAt = nil
+	}
+	if retryAt != nil {
+		taskStatus = model.TaskStatusUpForRetry
 	}
 
 	tag, err := r.TxM.GetConnection(ctx).Exec(ctx, `
@@ -151,15 +158,58 @@ func (r *Repo) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit m
 		return false, nil
 	}
 
+	// finished_at ставится только терминальному статусу: up_for_retry — таск
+	// ещё не завершён, он ждёт следующую попытку
 	_, err = r.TxM.GetConnection(ctx).Exec(ctx, `
-		UPDATE task_instance SET status = $1, finished_at = now()
-		WHERE run_id = $2 AND task = $3 AND attempt = $4 AND status = ANY($5)`,
-		taskStatus, ref.RunId, ref.Task, ref.Attempt,
+		UPDATE task_instance
+		SET status = $1, retry_at = $2,
+		    finished_at = CASE WHEN $2::timestamptz IS NULL THEN now() END
+		WHERE run_id = $3 AND task = $4 AND attempt = $5 AND status = ANY($6)`,
+		taskStatus, retryAt, ref.RunId, ref.Task, ref.Attempt,
 		[]string{model.TaskStatusStarting, model.TaskStatusRunning})
 	if err != nil {
 		return false, fmt.Errorf("FinalizeAttempt task_instance: %w", err)
 	}
 	return true, nil
+}
+
+// ListStaleAttempts возвращает незавершённые попытки, созданные раньше
+// olderThan — кандидатов на зомби-детект.
+func (r *Repo) ListStaleAttempts(ctx context.Context, olderThan time.Time) ([]model.StaleAttempt, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
+		SELECT run_id, task, attempt, status FROM attempt
+		WHERE status = ANY($1) AND created_at < $2`,
+		[]string{model.AttemptStatusStarting, model.AttemptStatusRunning}, olderThan)
+	if err != nil {
+		return nil, fmt.Errorf("ListStaleAttempts: %w", err)
+	}
+	defer rows.Close()
+
+	var result []model.StaleAttempt
+	for rows.Next() {
+		var a model.StaleAttempt
+		if err = rows.Scan(&a.Ref.RunId, &a.Ref.Task, &a.Ref.Attempt, &a.Status); err != nil {
+			return nil, fmt.Errorf("ListStaleAttempts scan: %w", err)
+		}
+		result = append(result, a)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListStaleAttempts rows: %w", err)
+	}
+	return result, nil
+}
+
+// PromoteRetries возвращает в очередь up_for_retry-таски, чей backoff истёк.
+func (r *Repo) PromoteRetries(ctx context.Context) (int64, error) {
+	tag, err := r.TxM.GetConnection(ctx).Exec(ctx, `
+		UPDATE task_instance
+		SET status = $1, queued_at = now(), retry_at = NULL
+		WHERE status = $2 AND retry_at <= now()`,
+		model.TaskStatusQueued, model.TaskStatusUpForRetry)
+	if err != nil {
+		return 0, fmt.Errorf("PromoteRetries: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // FinishRun закрывает ран терминальным статусом; идемпотентен.

@@ -168,12 +168,18 @@ func (d *DAG) runTaskWithSink(ctx context.Context, t *Task, spec TaskRunSpec, si
 	log := slog.New(slog.NewTextHandler(&sinkLineWriter{sink: sink, source: logSourceLog}, nil)).
 		With("dag", d.name, "run_id", spec.RunID, "task", spec.Task, "attempt", spec.Attempt)
 
-	rt := newRuntime(ctx, t, spec.RunID, spec.Attempt, log, store, spec.DepAttempts)
+	// таймаут таска: дедлайн видят и тело таска, и операции Runtime
+	// (блокирующее follow-чтение артефактов); страховочный kill зависшей
+	// попытки — на control plane
+	taskCtx, taskCancel := taskContext(ctx, t)
+	defer taskCancel()
+
+	rt := newRuntime(taskCtx, t, spec.RunID, spec.Attempt, log, store, spec.DepAttempts)
 
 	log.Info("task started")
 	startedAt := time.Now()
 
-	taskErr := runTaskFn(ctx, t, rt)
+	taskErr := runTaskFn(taskCtx, t, rt)
 	finErr := rt.finish(taskErr)
 
 	faCtx, faCancel := context.WithTimeout(context.WithoutCancel(ctx), finishAttemptTimeout)

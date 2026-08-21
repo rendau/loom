@@ -7,10 +7,16 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	k8sResource "k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/rendau/loom/server/internal/domain/dag/model"
 	"github.com/rendau/loom/server/internal/errs"
+	"github.com/rendau/loom/server/internal/util"
 )
+
+// maxTaskRetries — верхняя граница retries в манифесте: защита от опечаток
+// вида retries=100000, превращающих упавший таск в вечный цикл попыток.
+const maxTaskRetries = 100
 
 // nameRe — допустимые имена дагов и тасков; согласовано с ограничениями
 // artifact-сервера (streamstore ref) и лейблов kubernetes.
@@ -48,7 +54,8 @@ func (s *Service) Get(ctx context.Context, name string, errNE bool) (*model.Main
 
 // Register сохраняет даг по манифесту, полученному из образа: валидирует
 // манифест и создаёт/обновляет запись (перерегистрация = новая версия
-// образа). Paused при перерегистрации не трогается.
+// образа). Paused при перерегистрации не трогается; next_run_at
+// пересчитывается от текущего момента (catchup не делаем).
 func (s *Service) Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest) (*model.Main, error) {
 	if err := ValidateManifest(m); err != nil {
 		return nil, err
@@ -65,23 +72,88 @@ func (s *Service) Register(ctx context.Context, image, imageDigest string, rawMa
 		return nil, fmt.Errorf("repoDb.UpdateOrCreate: %w", err)
 	}
 
+	if err = s.resetNextRun(ctx, m.Name, m.Schedule); err != nil {
+		return nil, err
+	}
+
 	result, _, err := s.Get(ctx, m.Name, true)
 	return result, err
 }
 
 func (s *Service) SetPaused(ctx context.Context, name string, paused bool) error {
-	if _, _, err := s.Get(ctx, name, true); err != nil {
+	dag, _, err := s.Get(ctx, name, true)
+	if err != nil {
 		return err
 	}
 
-	err := s.repoDb.Update(ctx, name, &model.Edit{
+	err = s.repoDb.Update(ctx, name, &model.Edit{
 		Paused:     &paused,
 		ModifiedAt: new(time.Now()),
 	})
 	if err != nil {
 		return fmt.Errorf("repoDb.Update: %w", err)
 	}
+
+	// снятие с паузы: расписание продолжается со следующего срабатывания,
+	// пропущенные за время паузы запуски не навёрстываются
+	if !paused {
+		if err = s.resetNextRun(ctx, name, dag.Schedule); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// resetNextRun пересчитывает next_run_at дага от текущего момента; пустое
+// расписание сбрасывает его в null.
+func (s *Service) resetNextRun(ctx context.Context, name, schedule string) error {
+	var next *time.Time
+	if schedule != "" {
+		t, err := util.CronNext(schedule, time.Now())
+		if err != nil {
+			return errs.ErrFull{Err: errs.InvalidManifest, Desc: err.Error()}
+		}
+		next = &t
+	}
+
+	if err := s.repoDb.SetNextRun(ctx, name, next); err != nil {
+		return fmt.Errorf("repoDb.SetNextRun: %w", err)
+	}
+	return nil
+}
+
+// ── операции cron-планировщика ──────────────────────────
+
+// ListDueSchedules возвращает даги с расписанием, чей next_run_at наступил
+// или не инициализирован (null при непустом schedule).
+func (s *Service) ListDueSchedules(ctx context.Context) ([]*model.Main, error) {
+	names, err := s.repoDb.ListDueNames(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.ListDueNames: %w", err)
+	}
+
+	result := make([]*model.Main, 0, len(names))
+	for _, name := range names {
+		dag, found, err := s.Get(ctx, name, false)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			result = append(result, dag)
+		}
+	}
+	return result, nil
+}
+
+// AdvanceNextRun двигает next_run_at дага вперёд compare-and-swap'ом:
+// false — значение уже сдвинул кто-то другой (гонка инстансов), триггерить
+// этот тик не нужно.
+func (s *Service) AdvanceNextRun(ctx context.Context, name string, from, to time.Time) (bool, error) {
+	ok, err := s.repoDb.AdvanceNextRun(ctx, name, from, to)
+	if err != nil {
+		return false, fmt.Errorf("repoDb.AdvanceNextRun: %w", err)
+	}
+	return ok, nil
 }
 
 func (s *Service) Delete(ctx context.Context, name string) error {
@@ -112,6 +184,11 @@ func ValidateManifest(m *model.Manifest) error {
 	if !nameRe.MatchString(m.Name) {
 		return fail(fmt.Sprintf("недопустимое имя дага %q", m.Name))
 	}
+	if m.Schedule != "" {
+		if _, err := util.CronNext(m.Schedule, time.Now()); err != nil {
+			return fail(fmt.Sprintf("некорректное расписание %q: %v", m.Schedule, err))
+		}
+	}
 	if len(m.Tasks) == 0 {
 		return fail("в даге нет тасков")
 	}
@@ -123,6 +200,18 @@ func ValidateManifest(m *model.Manifest) error {
 		}
 		if _, ok := tasks[t.Name]; ok {
 			return fail(fmt.Sprintf("дубль таска %q", t.Name))
+		}
+		if t.Retries < 0 || t.Retries > maxTaskRetries {
+			return fail(fmt.Sprintf("таск %q: retries %d вне диапазона [0, %d]", t.Name, t.Retries, maxTaskRetries))
+		}
+		if t.RetryDelaySec < 0 {
+			return fail(fmt.Sprintf("таск %q: отрицательный retry_delay_sec", t.Name))
+		}
+		if t.TimeoutSec < 0 {
+			return fail(fmt.Sprintf("таск %q: отрицательный timeout_sec", t.Name))
+		}
+		if err := validateResources(t.Name, t.Resources); err != nil {
+			return err
 		}
 		tasks[t.Name] = t
 	}
@@ -166,5 +255,29 @@ func ValidateManifest(m *model.Manifest) error {
 		return fail("граф тасков содержит цикл")
 	}
 
+	return nil
+}
+
+// validateResources проверяет kubernetes quantities ресурсов таска —
+// некорректное значение обнаружится при регистрации, а не при запуске пода.
+func validateResources(task string, r *model.TaskResources) error {
+	if r == nil {
+		return nil
+	}
+
+	for _, q := range []struct{ name, value string }{
+		{"cpu_request", r.CPURequest},
+		{"cpu_limit", r.CPULimit},
+		{"memory_request", r.MemoryRequest},
+		{"memory_limit", r.MemoryLimit},
+	} {
+		if q.value == "" {
+			continue
+		}
+		if _, err := k8sResource.ParseQuantity(q.value); err != nil {
+			return errs.ErrFull{Err: errs.InvalidManifest,
+				Desc: fmt.Sprintf("таск %q: некорректное значение %s=%q", task, q.name, q.value)}
+		}
+	}
 	return nil
 }

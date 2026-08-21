@@ -130,3 +130,23 @@ func TestBuildPlan_FailedStreamedSenderFailsPendingReceiver(t *testing.T) {
 	require.True(t, p.RunDone)
 	assert.Equal(t, runModel.RunStatusFailed, p.RunStatus)
 }
+
+func TestBuildPlan_UpForRetryKeepsRunAlive(t *testing.T) {
+	tasks := []dagModel.Task{
+		task("a"),
+		task("b", dep("a")),
+		task("c", streamedDep("a")),
+	}
+
+	// ожидающий ретрая отправитель: потомки не каскадятся в upstream_failed,
+	// не промоутятся (ни обычное ребро, ни стримовое), ран не завершается
+	p := buildPlan(tasks, map[string]string{
+		"a": runModel.TaskStatusUpForRetry,
+		"b": runModel.TaskStatusPending,
+		"c": runModel.TaskStatusPending,
+	})
+
+	assert.Empty(t, p.Promote)
+	assert.Empty(t, p.UpstreamFailed)
+	assert.False(t, p.RunDone)
+}

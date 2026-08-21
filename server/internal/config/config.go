@@ -45,6 +45,13 @@ var Conf = struct {
 
 	// SchedTick — период планировщика; события executor'а будят его раньше.
 	SchedTick time.Duration `env:"SCHED_TICK" envDefault:"2s"`
+	// SchedCronTick — период проверки cron-расписаний дагов.
+	SchedCronTick time.Duration `env:"SCHED_CRON_TICK" envDefault:"15s"`
+	// SchedReconcileTick — период зомби-детекта (сверка попыток с Job'ами).
+	SchedReconcileTick time.Duration `env:"SCHED_RECONCILE_TICK" envDefault:"30s"`
+	// SchedZombieGrace — возраст попытки, до которого зомби-детект её не
+	// трогает (отсекает гонку claim → Launch).
+	SchedZombieGrace time.Duration `env:"SCHED_ZOMBIE_GRACE" envDefault:"60s"`
 	// SchedClaimLimit — сколько queued-тасков забирать за один проход.
 	SchedClaimLimit int64 `env:"SCHED_CLAIM_LIMIT" envDefault:"10"`
 }{}

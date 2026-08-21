@@ -3,6 +3,7 @@ package loom
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -60,11 +61,31 @@ func TestValidate(t *testing.T) {
 		d.Task("a", nopTask, After(nil))
 		assert.ErrorContains(t, d.Validate(), "nil dependency")
 	})
+
+	t.Run("negative retries", func(t *testing.T) {
+		d := New("dag")
+		d.Task("a", nopTask, Retries(-1))
+		assert.ErrorContains(t, d.Validate(), "negative retries")
+	})
+
+	t.Run("negative retry delay", func(t *testing.T) {
+		d := New("dag")
+		d.Task("a", nopTask, RetryDelay(-time.Second))
+		assert.ErrorContains(t, d.Validate(), "negative retry delay")
+	})
+
+	t.Run("negative timeout", func(t *testing.T) {
+		d := New("dag")
+		d.Task("a", nopTask, Timeout(-time.Second))
+		assert.ErrorContains(t, d.Validate(), "negative timeout")
+	})
 }
 
 func TestManifest(t *testing.T) {
 	d := New("etl", Schedule("0 3 * * *"))
-	a := d.Task("extract", nopTask)
+	a := d.Task("extract", nopTask,
+		Retries(2), RetryDelay(45*time.Second), Timeout(10*time.Minute),
+		Resources(ResourceSpec{CPURequest: "250m", MemoryLimit: "512Mi"}))
 	b := d.Task("transform", nopTask, AfterStreamed(a))
 	d.Task("load", nopTask, After(b))
 
@@ -75,7 +96,13 @@ func TestManifest(t *testing.T) {
 	assert.Equal(t, "0 3 * * *", m.Schedule)
 	require.Len(t, m.Tasks, 3)
 
-	assert.Equal(t, TaskManifest{Name: "extract"}, m.Tasks[0])
+	assert.Equal(t, TaskManifest{
+		Name:          "extract",
+		Retries:       2,
+		RetryDelaySec: 45,
+		TimeoutSec:    600,
+		Resources:     &ResourcesManifest{CPURequest: "250m", MemoryLimit: "512Mi"},
+	}, m.Tasks[0])
 	assert.Equal(t, TaskManifest{
 		Name:      "transform",
 		DependsOn: []DepManifest{{Task: "extract", Streamed: true}},

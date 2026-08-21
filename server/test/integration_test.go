@@ -46,12 +46,14 @@ type fakeExecutor struct {
 	mu         sync.Mutex
 	launches   []runModel.LaunchSpec
 	failLaunch map[string]bool // task → Launch возвращает ошибку
+	alive      map[runModel.AttemptRef]bool
 	events     chan runModel.ExecEvent
 }
 
 func newFakeExecutor() *fakeExecutor {
 	return &fakeExecutor{
 		failLaunch: map[string]bool{},
+		alive:      map[runModel.AttemptRef]bool{},
 		events:     make(chan runModel.ExecEvent, 100),
 	}
 }
@@ -63,10 +65,30 @@ func (e *fakeExecutor) Launch(_ context.Context, spec runModel.LaunchSpec) error
 		return fmt.Errorf("no capacity")
 	}
 	e.launches = append(e.launches, spec)
+	e.alive[spec.Ref] = true
 	return nil
 }
 
-func (e *fakeExecutor) Kill(context.Context, runModel.AttemptRef) error { return nil }
+func (e *fakeExecutor) Kill(_ context.Context, ref runModel.AttemptRef) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.alive, ref)
+	return nil
+}
+
+func (e *fakeExecutor) ListAlive(context.Context) ([]runModel.AttemptRef, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return lo.Keys(e.alive), nil
+}
+
+// vanish имитирует исчезновение Job'а попытки (рестарт server между claim и
+// Launch, TTL-очистка, ручное удаление) — зомби для reconcile-детекта.
+func (e *fakeExecutor) vanish(ref runModel.AttemptRef) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.alive, ref)
+}
 
 func (e *fakeExecutor) Events() <-chan runModel.ExecEvent { return e.events }
 
@@ -74,6 +96,14 @@ func (e *fakeExecutor) launched(task string) (runModel.LaunchSpec, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return lo.Find(e.launches, func(s runModel.LaunchSpec) bool { return s.Ref.Task == task })
+}
+
+func (e *fakeExecutor) launchedAttempt(task string, attempt int32) (runModel.LaunchSpec, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return lo.Find(e.launches, func(s runModel.LaunchSpec) bool {
+		return s.Ref.Task == task && s.Ref.Attempt == attempt
+	})
 }
 
 func (e *fakeExecutor) started(ref runModel.AttemptRef) {
@@ -152,9 +182,15 @@ func newEnv(t *testing.T) *env {
 	executor := newFakeExecutor()
 	artifact := &fakeArtifact{}
 
-	scheduler := domainScheduler.New(runSvc, executor, artifact, tasklogSvc,
-		30*time.Millisecond, 10,
-		domainScheduler.TaskEnv{ArtifactAddr: "artifact:5051", ServerAddr: "server:5052"})
+	scheduler := domainScheduler.New(runSvc, dagSvc, executor, artifact, tasklogSvc,
+		domainScheduler.Config{
+			Tick:          30 * time.Millisecond,
+			CronTick:      50 * time.Millisecond,
+			ReconcileTick: 30 * time.Millisecond,
+			ZombieGrace:   50 * time.Millisecond,
+			ClaimLimit:    10,
+			TaskEnv:       domainScheduler.TaskEnv{ArtifactAddr: "artifact:5051", ServerAddr: "server:5052"},
+		})
 	scheduler.Start()
 	t.Cleanup(scheduler.Stop)
 
@@ -206,6 +242,17 @@ func (e *env) waitLaunched(t *testing.T, task string) runModel.LaunchSpec {
 	}, waitTimeout, 10*time.Millisecond, "task %q was not launched", task)
 
 	spec, _ := e.executor.launched(task)
+	return spec
+}
+
+func (e *env) waitLaunchedAttempt(t *testing.T, task string, attempt int32) runModel.LaunchSpec {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		_, ok := e.executor.launchedAttempt(task, attempt)
+		return ok
+	}, waitTimeout, 10*time.Millisecond, "attempt %d of task %q was not launched", attempt, task)
+
+	spec, _ := e.executor.launchedAttempt(task, attempt)
 	return spec
 }
 
@@ -412,4 +459,232 @@ func TestSchedulerDuplicateEventsIdempotent(t *testing.T) {
 
 	// FinishAttempt на artifact-сервере ушёл ровно один раз
 	assert.Equal(t, []runModel.AttemptRef{a.Ref}, e.artifact.finishedRefs())
+}
+
+// Упавшая попытка таска с retries уходит в up_for_retry и после backoff'а
+// перезапускается новой попыткой; успех ретрая закрывает ран как success.
+func TestSchedulerRetrySucceeds(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "retry-ok",
+		"tasks": [{"name": "a", "retries": 1, "retry_delay_sec": 1}]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	require.NoError(t, err)
+
+	first := e.waitLaunchedAttempt(t, "a", 1)
+	e.executor.started(first.Ref)
+	e.executor.finished(first.Ref, false, 1, "Error")
+
+	// попытка провалена, но таск ждёт ретрая, ран продолжается
+	require.Eventually(t, func() bool {
+		return e.taskStatuses(t, runId)["a"] == runModel.TaskStatusUpForRetry
+	}, waitTimeout, 10*time.Millisecond)
+	assert.Equal(t, runModel.RunStatusRunning, e.runStatus(t, runId))
+
+	tis, err := e.runSvc.ListTaskInstances(context.Background(), runId)
+	require.NoError(t, err)
+	assert.False(t, tis[0].RetryAt.IsZero(), "retry_at должен быть назначен")
+	assert.True(t, tis[0].FinishedAt.IsZero(), "up_for_retry — не терминальный статус")
+
+	// в логе первой попытки — строка о запланированном ретрае
+	entries := readLog(t, e.tasklogSvc, first.Ref)
+	require.NotEmpty(t, entries)
+	assert.Contains(t, entries[len(entries)-1].Line, "retry scheduled at")
+
+	// после backoff'а стартует вторая попытка
+	second := e.waitLaunchedAttempt(t, "a", 2)
+	assert.Equal(t, "2", second.Env[loom.EnvAttempt])
+	e.executor.started(second.Ref)
+	e.executor.finished(second.Ref, true, 0, "")
+
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+
+	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	require.NoError(t, err)
+	require.Len(t, attempts, 2)
+}
+
+// Ретраи исчерпаны — таск и ран падают, попыток ровно retries+1.
+func TestSchedulerRetriesExhausted(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "retry-fail",
+		"tasks": [{"name": "a", "retries": 1, "retry_delay_sec": 1}]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	require.NoError(t, err)
+
+	for attempt := int32(1); attempt <= 2; attempt++ {
+		spec := e.waitLaunchedAttempt(t, "a", attempt)
+		e.executor.started(spec.Ref)
+		e.executor.finished(spec.Ref, false, 1, "Error")
+	}
+
+	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
+	assert.Equal(t, runModel.TaskStatusFailed, e.taskStatuses(t, runId)["a"])
+
+	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	require.NoError(t, err)
+	require.Len(t, attempts, 2)
+}
+
+// Попытка, работающая дольше timeout_sec, убивается сторожевым таймером
+// планировщика и финализируется с reason=timeout.
+func TestSchedulerTaskTimeout(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "timeout-dag",
+		"tasks": [{"name": "a", "timeout_sec": 1}]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	require.NoError(t, err)
+
+	a := e.waitLaunched(t, "a")
+	e.executor.started(a.Ref)
+	// finished-события нет — попытка «зависла», её добьёт watchdog
+
+	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
+
+	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	require.NoError(t, err)
+	require.Len(t, attempts, 1)
+	assert.Equal(t, runModel.AttemptStatusFailed, attempts[0].Status)
+	assert.Equal(t, "timeout", attempts[0].ExitReason)
+
+	entries := readLog(t, e.tasklogSvc, a.Ref)
+	require.NotEmpty(t, entries)
+	assert.Contains(t, entries[len(entries)-1].Line, "timeout")
+}
+
+// Зомби-детект: попытка, потерянная до старта (Job исчез, started-события
+// не было — например, server упал между claim и Launch), перезапускается
+// немедленно и не сжигает ретраи (у таска их нет вовсе).
+func TestSchedulerZombieLostBeforeStart(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "zombie-start",
+		"tasks": [{"name": "a"}]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	require.NoError(t, err)
+
+	first := e.waitLaunchedAttempt(t, "a", 1)
+	e.executor.vanish(first.Ref) // Job пропал, попытка так и висит в starting
+
+	// reconcile вернул таск в очередь: вторая попытка — при retries=0
+	second := e.waitLaunchedAttempt(t, "a", 2)
+	e.executor.started(second.Ref)
+	e.executor.finished(second.Ref, true, 0, "")
+
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+
+	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	require.NoError(t, err)
+	require.Len(t, attempts, 2)
+
+	lost, ok := lo.Find(attempts, func(a *runModel.Attempt) bool { return a.Attempt == 1 })
+	require.True(t, ok)
+	assert.Equal(t, runModel.AttemptStatusFailed, lost.Status)
+	assert.Equal(t, "lost", lost.ExitReason)
+}
+
+// Зомби-детект: под, исчезнувший на бегу без finished-события (нода умерла,
+// событие потеряно), финализируется по обычной политике ретраев — без них
+// таск и ран падают.
+func TestSchedulerZombieRunningPodLost(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "zombie-run",
+		"tasks": [{"name": "a"}]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName)
+	require.NoError(t, err)
+
+	a := e.waitLaunchedAttempt(t, "a", 1)
+	e.executor.started(a.Ref)
+	e.executor.vanish(a.Ref) // Job пропал на бегу
+
+	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
+
+	_, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	require.NoError(t, err)
+	require.Len(t, attempts, 1)
+	assert.Equal(t, "pod_lost", attempts[0].ExitReason)
+
+	// причина зафиксирована и в логе попытки
+	entries := readLog(t, e.tasklogSvc, a.Ref)
+	require.NotEmpty(t, entries)
+	assert.Contains(t, entries[len(entries)-1].Line, "pod_lost")
+}
+
+// Cron-триггер: у дага с расписанием наступивший next_run_at рождает ровно
+// один ран с trigger=schedule, а next_run_at сдвигается в будущее.
+func TestSchedulerCronTrigger(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "cron-dag",
+		"schedule": "* * * * *",
+		"tasks": [{"name": "a"}]
+	}`)
+
+	// регистрация назначила ближайшее срабатывание в будущем
+	dag, _, err := e.dagSvc.Get(context.Background(), dagName, true)
+	require.NoError(t, err)
+	require.False(t, dag.NextRunAt.IsZero())
+	assert.True(t, dag.NextRunAt.After(time.Now()))
+
+	// наступление срабатывания имитируем сдвигом next_run_at в прошлое
+	_, err = e.pool.Exec(context.Background(),
+		`UPDATE dag SET next_run_at = now() - interval '1 second' WHERE name = $1`, dagName)
+	require.NoError(t, err)
+
+	var runs []*runModel.Main
+	require.Eventually(t, func() bool {
+		runs, _, err = e.runSvc.List(context.Background(),
+			&runModel.ListReq{DagName: &dagName})
+		require.NoError(t, err)
+		return len(runs) > 0
+	}, waitTimeout, 10*time.Millisecond, "cron не создал ран")
+
+	require.Len(t, runs, 1)
+	assert.Equal(t, runModel.TriggerSchedule, runs[0].Trigger)
+
+	// next_run_at сдвинут вперёд — повторного триггера этого тика не будет
+	dag, _, err = e.dagSvc.Get(context.Background(), dagName, true)
+	require.NoError(t, err)
+	assert.True(t, dag.NextRunAt.After(time.Now()))
+
+	time.Sleep(200 * time.Millisecond) // несколько cron-проходов
+	runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{DagName: &dagName})
+	require.NoError(t, err)
+	assert.Len(t, runs, 1, "cron не должен дублировать ран")
+
+	// пауза дага останавливает расписание: наступивший next_run_at не триггерит
+	require.NoError(t, e.dagSvc.SetPaused(context.Background(), dagName, true))
+	_, err = e.pool.Exec(context.Background(),
+		`UPDATE dag SET next_run_at = now() - interval '1 second' WHERE name = $1`, dagName)
+	require.NoError(t, err)
+
+	time.Sleep(200 * time.Millisecond)
+	runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{DagName: &dagName})
+	require.NoError(t, err)
+	assert.Len(t, runs, 1, "пауза должна останавливать cron-запуски")
+
+	// снятие с паузы пересчитывает next_run_at от текущего момента (без catchup)
+	require.NoError(t, e.dagSvc.SetPaused(context.Background(), dagName, false))
+	dag, _, err = e.dagSvc.Get(context.Background(), dagName, true)
+	require.NoError(t, err)
+	assert.True(t, dag.NextRunAt.After(time.Now()))
 }

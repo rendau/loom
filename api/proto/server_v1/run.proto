@@ -49,11 +49,14 @@ message RunMain {
 
 message TaskInstanceMain {
   string task = 1;
-  string status = 2; // pending | queued | starting | running | success | failed | upstream_failed
+  // pending | queued | starting | running | up_for_retry | success | failed | upstream_failed
+  string status = 2;
   int32 attempt = 3; // номер текущей (последней) попытки; 0 — ещё не стартовала
   optional google.protobuf.Timestamp queued_at = 4;
   optional google.protobuf.Timestamp started_at = 5;
   optional google.protobuf.Timestamp finished_at = 6;
+  // Для up_for_retry: когда таск вернётся в очередь.
+  optional google.protobuf.Timestamp retry_at = 7;
 }
 
 message AttemptMain {

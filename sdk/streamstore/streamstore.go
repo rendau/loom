@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 
 	json "github.com/goccy/go-json"
@@ -315,6 +316,115 @@ func (s *Store) BeginWrite(ref Ref) (*Writer, error) {
 	s.createCond.Broadcast()
 
 	return &Writer{store: s, ref: ref, st: st}, nil
+}
+
+// ResumeWrite возобновляет запись стрима, оборванную рестартом процесса-
+// владельца: валиден только для writing-меты без активного писателя, запись
+// продолжается с текущего конца файла. Предназначен для стримов, которыми
+// владеет сам процесс хранилища (лог-стримы control plane); артефакты
+// тасков не резюмятся — их ретрай идёт новой попыткой.
+func (s *Store) ResumeWrite(ref Ref) (*Writer, error) {
+	if err := ref.validate(); err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.attemptFinishedLocked(ref.AttemptKey()) {
+		return nil, fmt.Errorf("%w: %+v", ErrAttemptFinished, ref)
+	}
+	if _, ok := s.active[ref]; ok {
+		return nil, fmt.Errorf("%w: write is in progress", ErrAlreadyExists)
+	}
+
+	// мету читаем без ленивого лечения stale-writing — writing здесь не
+	// сирота, а кандидат на возобновление
+	m, err := s.readMeta(ref)
+	if err != nil {
+		return nil, err
+	}
+	switch m.State {
+	case StateCommitted:
+		return nil, ErrAlreadyExists
+	case StateAborted:
+		return nil, ErrAborted
+	}
+
+	file, err := os.OpenFile(s.dataPath(ref), os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open data file: %w", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("stat data file: %w", err)
+	}
+
+	st := &stream{file: file, state: StateWriting, size: info.Size()}
+	st.cond = sync.NewCond(&st.mu)
+	s.active[ref] = st
+
+	return &Writer{store: s, ref: ref, st: st}, nil
+}
+
+// ListWriting возвращает refs стримов в состоянии writing без активного
+// писателя — оборванные рестартом кандидаты на ResumeWrite (или ленивое
+// лечение в aborted при первом чтении).
+func (s *Store) ListWriting() ([]Ref, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	const metaSuffix = ".meta.json"
+	var result []Ref
+
+	runs, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil, fmt.Errorf("read data dir: %w", err)
+	}
+	for _, run := range runs {
+		if !run.IsDir() {
+			continue
+		}
+		tasks, err := os.ReadDir(filepath.Join(s.dir, run.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("read run dir: %w", err)
+		}
+		for _, task := range tasks {
+			if !task.IsDir() {
+				continue
+			}
+			attempts, err := os.ReadDir(filepath.Join(s.dir, run.Name(), task.Name()))
+			if err != nil {
+				return nil, fmt.Errorf("read task dir: %w", err)
+			}
+			for _, attempt := range attempts {
+				n, atoiErr := strconv.Atoi(attempt.Name())
+				if !attempt.IsDir() || atoiErr != nil {
+					continue
+				}
+				files, err := os.ReadDir(filepath.Join(s.dir, run.Name(), task.Name(), attempt.Name()))
+				if err != nil {
+					return nil, fmt.Errorf("read attempt dir: %w", err)
+				}
+				for _, f := range files {
+					name, ok := strings.CutSuffix(f.Name(), metaSuffix)
+					if !ok {
+						continue
+					}
+					ref := Ref{RunID: run.Name(), Task: task.Name(), Attempt: int32(n), Name: name}
+					if s.active[ref] != nil {
+						continue
+					}
+					if m, err := s.readMeta(ref); err == nil && m.State == StateWriting {
+						result = append(result, ref)
+					}
+				}
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func (w *Writer) Write(p []byte) (int, error) {

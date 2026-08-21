@@ -125,7 +125,12 @@ func TestRunLocalCloseThenErrorAborts(t *testing.T) {
 	d := New("test_dag")
 	boom := errors.New("boom")
 
-	produce := d.Task("produce", func(_ context.Context, rt *Runtime) error {
+	// produce не падает, пока consume не открыл вход: иначе отмена контекста
+	// errgroup после boom может снять consume до старта, и consumeErr
+	// останется nil (select между started и ctx.Done недетерминирован)
+	opened := make(chan struct{})
+
+	produce := d.Task("produce", func(ctx context.Context, rt *Runtime) error {
 		out, err := rt.Output("data")
 		if err != nil {
 			return err
@@ -135,6 +140,10 @@ func TestRunLocalCloseThenErrorAborts(t *testing.T) {
 		}
 		if err = out.Close(); err != nil {
 			return err
+		}
+		select {
+		case <-opened:
+		case <-ctx.Done():
 		}
 		return boom
 	})
@@ -147,6 +156,7 @@ func TestRunLocalCloseThenErrorAborts(t *testing.T) {
 			return err
 		}
 		defer in.Close()
+		close(opened)
 
 		_, consumeErr = io.ReadAll(in)
 		return consumeErr

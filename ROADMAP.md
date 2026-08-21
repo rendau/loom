@@ -404,26 +404,47 @@
 auth админки, публикация SDK, CI с unit-тестами). Порядок — CI первым
 (дальше всё едет под его защитой), деплой последним (собирает остальное).
 
-- [ ] CI (GitHub Actions, без базы в тестах): job'ы — go по модулям
-      (`go vet` + `go test -race`; интеграционные `server/test` сами
-      скипаются без `TEST_PG_DSN` — БД в CI не поднимаем), админка
-      (`pnpm typecheck` + `pnpm lint`), сборка бинарей и docker-образов
-      server/artifact (build-only на PR, пуш образов в registry по
-      git-тегу)
-- [ ] Наблюдаемость — Prometheus-метрики на system-порту (`/metrics`,
-      3004/3003, рядом с healthcheck): планировщик (глубина очереди по
-      статусам, занятость пулов, длительность pass'а, лаг cron), раны и
-      попытки (счётчики завершений по статусам/reason, длительности),
-      executor (запуски, launch-ошибки), artifact-сервер (активные стримы,
-      принятые байты), стандартные gRPC-метрики интерцептором
-- [ ] Auth админского API — статический bearer-токен (`ADMIN_TOKEN` на
-      server; пусто — выключено, dev): интерцептор требует
-      `Authorization: Bearer` на админских RPC (Dag/Run/Pool/Secret,
-      ReadTaskLog, ListTaskValues), task-facing RPC (PushTaskLog,
-      Push/PullTaskValue) остаются на attempt-токенах, PushDagManifest —
-      на одноразовом describe_id (решение №29); в админке —
-      экран ввода токена (localStorage) + заголовок в api-клиенте,
-      обработка 401
+- [x] CI (GitHub Actions, без базы в тестах): `.github/workflows/ci.yml` —
+      матрица go по модулям (api/sdk/artifact/server/examples: `go vet` +
+      `go test -race`; интеграционные `server/test` сами скипаются без
+      `TEST_PG_DSN` — БД в CI не поднимаем), админка (`pnpm typecheck` +
+      `pnpm lint`), job `images` (после go+admin): `make build` +
+      `make build-admin` + docker-образы server/artifact — build-only на
+      PR/пуше, пуш в `ghcr.io/rendau/loom/{server,artifact}` по тегу `v*`
+      (semver-тег + latest; теги модулей `api/v*`, `sdk/v*` образы не
+      триггерят)
+- [x] Наблюдаемость — Prometheus-метрики на system-порту (`/metrics`,
+      3004/3003, рядом с healthcheck): `internal/infra/metrics` (Registry +
+      Factory по gotemplate, go/process-коллекторы) в обоих сервисах;
+      планировщик — `loom_scheduler_*` (task_instances по нетерминальным
+      статусам, pool_slots/pool_busy, pass_duration_seconds,
+      cron_lag_seconds; выборка гейджей — в pass, best-effort), раны и
+      попытки — `loom_run_finished_total`/`loom_run_duration_seconds`
+      (только applied FinishRun — без двойного счёта при гонке) и
+      `loom_attempt_finished_total{success,reason}`/
+      `loom_attempt_duration_seconds` (started_at — из RETURNING
+      FinalizeAttempt), executor — `loom_executor_launches_total`/
+      `launch_errors_total`, artifact — `loom_artifact_active_{write,read}_
+      streams`/`received_bytes_total`; стандартные `grpc_server_*` —
+      интерцептор go-grpc-middleware providers/prometheus +
+      InitializeMetrics. При `EXECUTOR=none` метрик планировщика нет
+      (он не создаётся). Интеграционные тесты зелёные, /metrics обоих
+      сервисов проверен смоуком
+- [x] Auth админского API — статический bearer-токен (`ADMIN_TOKEN` на
+      server; пусто — выключено, dev): интерцепторы (`app/auth.go`,
+      unary+stream, constant-time сравнение) требуют `Authorization:
+      Bearer` на всех RPC, кроме исключений — task-facing PushTaskLog и
+      Push/PullTaskValue (attempt-токены), PushDagManifest (describe_id,
+      решение №29) и reflection; новые RPC защищены по умолчанию. 401 —
+      телом `ErrorRep{code: not_authorized}` через gateway (Authorization
+      пробрасывается дефолтным header matcher'ом, CORS его уже разрешал).
+      В админке — модалка ввода токена (`AuthTokenModal`, открывается по
+      401 через флаг `authNeeded` и кнопкой в футере сайдбара), токен в
+      localStorage, заголовок в api-клиенте (`authHeaders`, включая
+      стриминговое чтение логов), сохранение — reload SPA. Юнит-тесты
+      интерцептора; вручную проверено curl'ом (401/200/dev-режим) и в
+      превью (модалка по 401). Нюанс Nuxt: auto-импортированному ref
+      нельзя присваивать прямо в шаблоне — в модалке writable computed
 - [ ] Публикация SDK (механика — решение №15): теги `api/v0.1.0` и
       `sdk/v0.1.0`, после публикации api — `go mod tidy` в sdk (убрать
       резолв через go.work), README для sdk с минимальным дагом,

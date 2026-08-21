@@ -11,6 +11,7 @@ func (e Err) Error() string {
 // common errors
 const (
 	ServiceNA         = Err("service_not_available")
+	NotAuthorized     = Err("not_authorized")
 	ObjectNotFound    = Err("object_not_found")
 	InvalidRequest    = Err("invalid_request")
 	IncorrectPageSize = Err("incorrect_page_size")

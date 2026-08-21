@@ -5,8 +5,9 @@ import type { ErrorRep } from '~/types/common'
 // - query-параметры: вложенные объекты — через точку
 //   (list_params.page_size=50), массивы — повторением ключа, undefined не
 //   сериализуется; page — 0-based;
-// - ошибки — телом common.ErrorRep { code, message, fields }.
-// Авторизации у админки пока нет.
+// - ошибки — телом common.ErrorRep { code, message, fields };
+// - auth — статический admin-токен заголовком Authorization: Bearer
+//   (utils/auth.ts); 401 поднимает модалку ввода токена (authNeeded).
 
 export type QueryValue = string | number | boolean | undefined | null
 export type QueryParams = Record<string, QueryValue | QueryValue[] | Record<string, QueryValue | QueryValue[]>>
@@ -66,13 +67,30 @@ export function apiErrorMessage(error: unknown): string {
   return String(error)
 }
 
+// authHeaders — общие заголовки запроса с admin-токеном (если задан);
+// используется и стриминговым чтением логов (log.api.ts).
+export function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  const token = getAuthToken()
+  if (token)
+    headers.Authorization = `Bearer ${token}`
+  return headers
+}
+
 export async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
-  return $fetch<T>(path, {
-    baseURL: useApiBaseUrl(),
-    method: options.method ?? 'GET',
-    query: flattenQuery(options.query),
-    body: options.body as Record<string, unknown> | undefined,
-    signal: options.signal,
-    headers: { Accept: 'application/json' },
-  })
+  try {
+    return await $fetch<T>(path, {
+      baseURL: useApiBaseUrl(),
+      method: options.method ?? 'GET',
+      query: flattenQuery(options.query),
+      body: options.body as Record<string, unknown> | undefined,
+      signal: options.signal,
+      headers: authHeaders(),
+    })
+  }
+  catch (error) {
+    if (error instanceof FetchError && error.statusCode === 401)
+      authNeeded.value = true
+    throw error
+  }
 }

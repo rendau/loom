@@ -360,17 +360,19 @@ func (s *Service) MarkAttemptRunning(ctx context.Context, ref model.AttemptRef) 
 // FinalizeAttempt фиксирует завершение попытки; false — попытка уже была
 // терминальна (дубль события или страховочный вызов). retryAt задаёт
 // отложенный ретрай неуспешной попытки (up_for_retry вместо failed).
-func (s *Service) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo, retryAt *time.Time) (bool, error) {
+// startedAt — время старта попытки (nil — не стартовала).
+func (s *Service) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo, retryAt *time.Time) (bool, *time.Time, error) {
 	var applied bool
+	var startedAt *time.Time
 	err := s.txm.TxFn(ctx, func(ctx context.Context) error {
 		var err error
-		applied, err = s.repoDb.FinalizeAttempt(ctx, ref, exit, retryAt)
+		applied, startedAt, err = s.repoDb.FinalizeAttempt(ctx, ref, exit, retryAt)
 		return err
 	})
 	if err != nil {
-		return false, fmt.Errorf("repoDb.FinalizeAttempt: %w", err)
+		return false, nil, fmt.Errorf("repoDb.FinalizeAttempt: %w", err)
 	}
-	return applied, nil
+	return applied, startedAt, nil
 }
 
 // PromoteRetries возвращает в очередь up_for_retry-таски с истёкшим backoff.
@@ -411,11 +413,33 @@ func (s *Service) DeleteRun(ctx context.Context, runId string) error {
 	return nil
 }
 
-func (s *Service) FinishRun(ctx context.Context, runId, status string) error {
-	if err := s.repoDb.FinishRun(ctx, runId, status); err != nil {
-		return fmt.Errorf("repoDb.FinishRun: %w", err)
+// FinishRun закрывает ран терминальным статусом; false — ран уже был
+// завершён (гонка инстансов планировщика).
+func (s *Service) FinishRun(ctx context.Context, runId, status string) (bool, error) {
+	applied, err := s.repoDb.FinishRun(ctx, runId, status)
+	if err != nil {
+		return false, fmt.Errorf("repoDb.FinishRun: %w", err)
 	}
-	return nil
+	return applied, nil
+}
+
+// CountActiveTaskInstances — количество тасков в каждом нетерминальном
+// статусе (для метрик планировщика).
+func (s *Service) CountActiveTaskInstances(ctx context.Context) (map[string]int64, error) {
+	counts, err := s.repoDb.CountActiveTaskInstances(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.CountActiveTaskInstances: %w", err)
+	}
+	return counts, nil
+}
+
+// ListPoolUsage — слоты и занятость каждого пула (для метрик планировщика).
+func (s *Service) ListPoolUsage(ctx context.Context) ([]model.PoolUsage, error) {
+	items, err := s.repoDb.ListPoolUsage(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.ListPoolUsage: %w", err)
+	}
+	return items, nil
 }
 
 // newRunId — читаемый уникальный id рана: <даг>-<utc-таймстамп>-<случайный

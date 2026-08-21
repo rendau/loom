@@ -232,6 +232,17 @@ func (s *Scheduler) cronPass(ctx context.Context) error {
 		return fmt.Errorf("dagSvc.ListDueSchedules: %w", err)
 	}
 
+	// лаг cron — насколько «сейчас» обогнало самый старый наступивший тик;
+	// при пустой выборке расписания не отстают
+	lag := time.Duration(0)
+	now := time.Now()
+	for _, dag := range dags {
+		if !dag.NextRunAt.IsZero() {
+			lag = max(lag, now.Sub(dag.NextRunAt))
+		}
+	}
+	metricCronLag.Set(lag.Seconds())
+
 	for _, dag := range dags {
 		if err = s.cronTriggerDag(ctx, dag); err != nil {
 			slog.Error("cron trigger dag", "dag", dag.Name, "error", err)
@@ -299,6 +310,10 @@ func (s *Scheduler) cronTriggerDag(ctx context.Context, dag *dagModel.Main) erro
 // раскрутка графов активных ранов, затем забор готовых тасков из очереди и
 // запуск попыток.
 func (s *Scheduler) pass(ctx context.Context) error {
+	start := time.Now()
+	defer func() { metricPassDuration.Observe(time.Since(start).Seconds()) }()
+	defer s.sampleQueueMetrics(ctx)
+
 	retried, err := s.runSvc.PromoteRetries(ctx)
 	if err != nil {
 		return fmt.Errorf("runSvc.PromoteRetries: %w", err)
@@ -339,6 +354,34 @@ func (s *Scheduler) pass(ctx context.Context) error {
 	// готовыми; дорасткрутит следующий проход (Nudge из finalize/launch не
 	// нужен: очередной тик и события executor'а покрывают это)
 	return nil
+}
+
+// sampleQueueMetrics обновляет гейджи глубины очереди и занятости пулов;
+// метрики best-effort — ошибки не валят проход.
+func (s *Scheduler) sampleQueueMetrics(ctx context.Context) {
+	counts, err := s.runSvc.CountActiveTaskInstances(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("sample task instance metrics", "error", err)
+		}
+		return
+	}
+	for _, status := range []string{runModel.TaskStatusPending, runModel.TaskStatusQueued,
+		runModel.TaskStatusStarting, runModel.TaskStatusRunning, runModel.TaskStatusUpForRetry} {
+		metricTaskInstances.WithLabelValues(status).Set(float64(counts[status]))
+	}
+
+	pools, err := s.runSvc.ListPoolUsage(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("sample pool metrics", "error", err)
+		}
+		return
+	}
+	for _, p := range pools {
+		metricPoolSlots.WithLabelValues(p.Pool).Set(float64(p.Slots))
+		metricPoolBusy.WithLabelValues(p.Pool).Set(float64(p.Busy))
+	}
 }
 
 // limitActiveRuns применяет max_active_runs (решение №26): у дага с лимитом
@@ -414,8 +457,13 @@ func (s *Scheduler) replanRun(ctx context.Context, run *runModel.Main) error {
 	}
 
 	if p.RunDone {
-		if err = s.runSvc.FinishRun(ctx, run.Id, p.RunStatus); err != nil {
+		applied, err := s.runSvc.FinishRun(ctx, run.Id, p.RunStatus)
+		if err != nil {
 			return fmt.Errorf("runSvc.FinishRun: %w", err)
+		}
+		if applied {
+			metricRunFinished.WithLabelValues(p.RunStatus).Inc()
+			metricRunDuration.WithLabelValues(p.RunStatus).Observe(time.Since(run.CreatedAt).Seconds())
 		}
 		slog.Info("run finished", "run_id", run.Id, "status", p.RunStatus)
 	}
@@ -542,8 +590,10 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 	}
 
 	if err = s.executor.Launch(ctx, spec); err != nil {
+		metricLaunchErrors.Inc()
 		return fmt.Errorf("executor.Launch: %w", err)
 	}
+	metricLaunches.Inc()
 
 	slog.Info("attempt launched", "run_id", c.RunId, "task", c.Task, "attempt", c.Attempt)
 	return nil
@@ -604,13 +654,18 @@ func (s *Scheduler) finalizeLost(ref runModel.AttemptRef, exit runModel.ExitInfo
 }
 
 func (s *Scheduler) finalizeCtx(ctx context.Context, ref runModel.AttemptRef, exit runModel.ExitInfo, retryAt *time.Time) {
-	applied, err := s.runSvc.FinalizeAttempt(ctx, ref, exit, retryAt)
+	applied, startedAt, err := s.runSvc.FinalizeAttempt(ctx, ref, exit, retryAt)
 	if err != nil {
 		slog.Error("finalize attempt", "run_id", ref.RunId, "task", ref.Task, "attempt", ref.Attempt, "error", err)
 		return
 	}
 	if !applied {
 		return
+	}
+
+	metricAttemptFinished.WithLabelValues(strconv.FormatBool(exit.Success), exit.Reason).Inc()
+	if startedAt != nil {
+		metricAttemptDuration.WithLabelValues(strconv.FormatBool(exit.Success)).Observe(time.Since(*startedAt).Seconds())
 	}
 
 	// страховка: SDK вызывает FinishAttempt сам, но при смерти пода вызова

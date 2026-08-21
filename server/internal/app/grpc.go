@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/rendau/loom/server/internal/config"
+	"github.com/rendau/loom/server/internal/infra/metrics"
 )
 
 type GrpcServer struct {
@@ -32,14 +33,15 @@ func NewGrpcServer(name string, register func(*grpc.Server)) *GrpcServer {
 			MinTime:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.ChainUnaryInterceptor(GrpcInterceptorRecovery()),
-		grpc.ChainStreamInterceptor(GrpcStreamInterceptorRecovery()),
+		grpc.ChainUnaryInterceptor(unaryInterceptors()...),
+		grpc.ChainStreamInterceptor(streamInterceptors()...),
 	)
 
 	// register handlers
 	if register != nil {
 		register(server)
 	}
+	metrics.Grpc.InitializeMetrics(server)
 
 	// register grpc reflection
 	reflection.Register(server)
@@ -68,6 +70,25 @@ func (s *GrpcServer) Start() error {
 
 func (s *GrpcServer) Stop() {
 	s.server.GracefulStop()
+}
+
+// unaryInterceptors / streamInterceptors — цепочка: метрики (снаружи —
+// меряют всё), auth админских RPC (при ADMIN_TOKEN), recovery (внутри —
+// паника хендлера станет Internal и попадёт в метрики кодом ошибки).
+func unaryInterceptors() []grpc.UnaryServerInterceptor {
+	chain := []grpc.UnaryServerInterceptor{metrics.Grpc.UnaryServerInterceptor()}
+	if config.Conf.AdminToken != "" {
+		chain = append(chain, GrpcInterceptorAuth(config.Conf.AdminToken))
+	}
+	return append(chain, GrpcInterceptorRecovery())
+}
+
+func streamInterceptors() []grpc.StreamServerInterceptor {
+	chain := []grpc.StreamServerInterceptor{metrics.Grpc.StreamServerInterceptor()}
+	if config.Conf.AdminToken != "" {
+		chain = append(chain, GrpcStreamInterceptorAuth(config.Conf.AdminToken))
+	}
+	return append(chain, GrpcStreamInterceptorRecovery())
 }
 
 func GrpcInterceptorRecovery() grpc.UnaryServerInterceptor {

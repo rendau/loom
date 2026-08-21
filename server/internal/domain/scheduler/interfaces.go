@@ -18,9 +18,11 @@ type RunServiceI interface {
 	PromoteRetries(ctx context.Context) (int64, error)
 	ListStaleAttempts(ctx context.Context, olderThan time.Time) ([]runModel.StaleAttempt, error)
 	MarkAttemptRunning(ctx context.Context, ref runModel.AttemptRef) (bool, error)
-	FinalizeAttempt(ctx context.Context, ref runModel.AttemptRef, exit runModel.ExitInfo, retryAt *time.Time) (bool, error)
-	FinishRun(ctx context.Context, runId, status string) error
+	FinalizeAttempt(ctx context.Context, ref runModel.AttemptRef, exit runModel.ExitInfo, retryAt *time.Time) (bool, *time.Time, error)
+	FinishRun(ctx context.Context, runId, status string) (bool, error)
 	Trigger(ctx context.Context, dag *dagModel.Main, spec runModel.TriggerSpec) (string, error)
+	CountActiveTaskInstances(ctx context.Context) (map[string]int64, error)
+	ListPoolUsage(ctx context.Context) ([]runModel.PoolUsage, error)
 }
 
 // DagServiceI — cron-расписания: выборка дагов с наступившим next_run_at и

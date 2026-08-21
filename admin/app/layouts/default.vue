@@ -7,6 +7,11 @@ const navItems: NavigationMenuItem[][] = [[
   { label: 'Пулы', icon: 'i-lucide-layers', to: '/pools' },
   { label: 'Секреты', icon: 'i-lucide-key-round', to: '/secrets' },
 ]]
+
+// смена admin-токена вручную — та же модалка, что и по 401
+function openTokenModal() {
+  authNeeded.value = true
+}
 </script>
 
 <template>
@@ -35,6 +40,17 @@ const navItems: NavigationMenuItem[][] = [[
           :collapsed="collapsed"
           :items="navItems"
           orientation="vertical"
+        />
+      </template>
+
+      <template #footer="{ collapsed }">
+        <UButton
+          icon="i-lucide-key-square"
+          :label="collapsed ? undefined : 'Admin-токен'"
+          color="neutral"
+          variant="ghost"
+          block
+          @click="openTokenModal()"
         />
       </template>
     </UDashboardSidebar>

@@ -12,9 +12,11 @@ type RepoDbI interface {
 	GetRun(ctx context.Context, id string) (*model.Main, bool, error)
 	CreateRun(ctx context.Context, obj *model.Main) error
 	UpdateRun(ctx context.Context, id string, obj *model.Edit) error
-	FinishRun(ctx context.Context, runId, status string) error
+	FinishRun(ctx context.Context, runId, status string) (bool, error)
 	ListExpiredRuns(ctx context.Context, before time.Time, limit int64) ([]string, error)
 	DeleteRun(ctx context.Context, runId string) error
+	CountActiveTaskInstances(ctx context.Context) (map[string]int64, error)
+	ListPoolUsage(ctx context.Context) ([]model.PoolUsage, error)
 
 	CreateTaskInstances(ctx context.Context, runId string, tasks []model.TaskSeed) error
 	ListTaskInstances(ctx context.Context, runId string) ([]*model.TaskInstance, error)
@@ -32,7 +34,7 @@ type RepoDbI interface {
 	ListAttempts(ctx context.Context, runId string) ([]*model.Attempt, error)
 	ListStaleAttempts(ctx context.Context, olderThan time.Time) ([]model.StaleAttempt, error)
 	MarkAttemptRunning(ctx context.Context, ref model.AttemptRef) (bool, error)
-	FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo, retryAt *time.Time) (bool, error)
+	FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo, retryAt *time.Time) (bool, *time.Time, error)
 }
 
 type TxManagerI interface {

@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/rendau/loom/artifact/internal/config"
+	"github.com/rendau/loom/artifact/internal/infra/metrics"
 )
 
 type GrpcServer struct {
@@ -32,14 +33,15 @@ func NewGrpcServer(name string, register func(*grpc.Server)) *GrpcServer {
 			MinTime:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.ChainUnaryInterceptor(GrpcInterceptorRecovery()),
-		grpc.ChainStreamInterceptor(GrpcStreamInterceptorRecovery()),
+		grpc.ChainUnaryInterceptor(metrics.Grpc.UnaryServerInterceptor(), GrpcInterceptorRecovery()),
+		grpc.ChainStreamInterceptor(metrics.Grpc.StreamServerInterceptor(), GrpcStreamInterceptorRecovery()),
 	)
 
 	// register handlers
 	if register != nil {
 		register(server)
 	}
+	metrics.Grpc.InitializeMetrics(server)
 
 	// register grpc reflection
 	reflection.Register(server)

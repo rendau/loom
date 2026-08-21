@@ -211,8 +211,9 @@ func (r *Repo) MarkAttemptRunning(ctx context.Context, ref model.AttemptRef) (bo
 // task instance следует за ней: success/failed, а при неуспехе с retryAt —
 // up_for_retry с отложенным возвратом в очередь. Идемпотентен: если попытка
 // уже терминальна, возвращает false и ничего не меняет (страховочные вызовы,
-// дубли событий).
-func (r *Repo) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo, retryAt *time.Time) (bool, error) {
+// дубли событий). startedAt — время старта попытки (nil — не стартовала,
+// например launch_failed) для метрики длительности.
+func (r *Repo) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo, retryAt *time.Time) (bool, *time.Time, error) {
 	attemptStatus := model.AttemptStatusFailed
 	taskStatus := model.TaskStatusFailed
 	if exit.Success {
@@ -224,17 +225,19 @@ func (r *Repo) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit m
 		taskStatus = model.TaskStatusUpForRetry
 	}
 
-	tag, err := r.TxM.GetConnection(ctx).Exec(ctx, `
+	var startedAt *time.Time
+	err := r.TxM.GetConnection(ctx).QueryRow(ctx, `
 		UPDATE attempt
 		SET status = $1, finished_at = now(), exit_code = $2, exit_reason = $3
-		WHERE run_id = $4 AND task = $5 AND attempt = $6 AND status = ANY($7)`,
+		WHERE run_id = $4 AND task = $5 AND attempt = $6 AND status = ANY($7)
+		RETURNING started_at`,
 		attemptStatus, exit.ExitCode, exit.Reason, ref.RunId, ref.Task, ref.Attempt,
-		[]string{model.AttemptStatusStarting, model.AttemptStatusRunning})
-	if err != nil {
-		return false, fmt.Errorf("FinalizeAttempt attempt: %w", err)
+		[]string{model.AttemptStatusStarting, model.AttemptStatusRunning}).Scan(&startedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil, nil
 	}
-	if tag.RowsAffected() == 0 {
-		return false, nil
+	if err != nil {
+		return false, nil, fmt.Errorf("FinalizeAttempt attempt: %w", err)
 	}
 
 	// finished_at ставится только терминальному статусу: up_for_retry — таск
@@ -247,9 +250,9 @@ func (r *Repo) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit m
 		taskStatus, retryAt, ref.RunId, ref.Task, ref.Attempt,
 		[]string{model.TaskStatusStarting, model.TaskStatusRunning})
 	if err != nil {
-		return false, fmt.Errorf("FinalizeAttempt task_instance: %w", err)
+		return false, nil, fmt.Errorf("FinalizeAttempt task_instance: %w", err)
 	}
-	return true, nil
+	return true, startedAt, nil
 }
 
 // ListStaleAttempts возвращает незавершённые попытки, созданные раньше
@@ -387,16 +390,72 @@ func (r *Repo) ListTaskValues(ctx context.Context, runId string) ([]*model.TaskV
 	return result, nil
 }
 
-// FinishRun закрывает ран терминальным статусом; идемпотентен.
-func (r *Repo) FinishRun(ctx context.Context, runId, status string) error {
-	_, err := r.TxM.GetConnection(ctx).Exec(ctx, `
+// FinishRun закрывает ран терминальным статусом; идемпотентен: false — ран
+// уже был завершён (гонка инстансов планировщика).
+func (r *Repo) FinishRun(ctx context.Context, runId, status string) (bool, error) {
+	tag, err := r.TxM.GetConnection(ctx).Exec(ctx, `
 		UPDATE run SET status = $1, finished_at = now()
 		WHERE id = $2 AND status = $3`,
 		status, runId, model.RunStatusRunning)
 	if err != nil {
-		return fmt.Errorf("FinishRun: %w", err)
+		return false, fmt.Errorf("FinishRun: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() > 0, nil
+}
+
+// CountActiveTaskInstances — количество тасков в каждом нетерминальном
+// статусе (глубина очереди планировщика для метрик).
+func (r *Repo) CountActiveTaskInstances(ctx context.Context) (map[string]int64, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
+		SELECT status, count(*) FROM task_instance
+		WHERE status = ANY($1) GROUP BY status`,
+		[]string{model.TaskStatusPending, model.TaskStatusQueued, model.TaskStatusStarting,
+			model.TaskStatusRunning, model.TaskStatusUpForRetry})
+	if err != nil {
+		return nil, fmt.Errorf("CountActiveTaskInstances: %w", err)
+	}
+	defer rows.Close()
+
+	result := map[string]int64{}
+	for rows.Next() {
+		var status string
+		var count int64
+		if err = rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("CountActiveTaskInstances scan: %w", err)
+		}
+		result[status] = count
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("CountActiveTaskInstances rows: %w", err)
+	}
+	return result, nil
+}
+
+// ListPoolUsage — слоты и занятость (starting+running) каждого пула.
+func (r *Repo) ListPoolUsage(ctx context.Context) ([]model.PoolUsage, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
+		SELECT p.name, p.slots, count(ti.run_id)
+		FROM pool p
+		LEFT JOIN task_instance ti ON ti.pool = p.name AND ti.status = ANY($1)
+		GROUP BY p.name, p.slots`,
+		[]string{model.TaskStatusStarting, model.TaskStatusRunning})
+	if err != nil {
+		return nil, fmt.Errorf("ListPoolUsage: %w", err)
+	}
+	defer rows.Close()
+
+	var result []model.PoolUsage
+	for rows.Next() {
+		var u model.PoolUsage
+		if err = rows.Scan(&u.Pool, &u.Slots, &u.Busy); err != nil {
+			return nil, fmt.Errorf("ListPoolUsage scan: %w", err)
+		}
+		result = append(result, u)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListPoolUsage rows: %w", err)
+	}
+	return result, nil
 }
 
 // ListExpiredRuns возвращает id завершённых ранов с finished_at раньше

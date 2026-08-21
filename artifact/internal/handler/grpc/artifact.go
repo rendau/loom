@@ -47,6 +47,9 @@ func (h *Artifact) WriteArtifact(stream pb.ArtifactService_WriteArtifactServer) 
 	}
 	defer func() { _ = w.Abort() }() // no-op после commit
 
+	metricActiveWriteStreams.Inc()
+	defer metricActiveWriteStreams.Dec()
+
 	for {
 		msg, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -62,6 +65,7 @@ func (h *Artifact) WriteArtifact(stream pb.ArtifactService_WriteArtifactServer) 
 			if _, err = w.Write(m.Chunk); err != nil {
 				return encodeErr(err)
 			}
+			metricReceivedBytes.Add(float64(len(m.Chunk)))
 		case *pb.WriteArtifactRequest_Commit:
 			if !m.Commit {
 				return status.Error(codes.InvalidArgument, "commit must be true")
@@ -87,6 +91,9 @@ func (h *Artifact) ReadArtifact(req *pb.ReadArtifactRequest, stream pb.ArtifactS
 		return encodeErr(err)
 	}
 	defer func() { _ = r.Close() }()
+
+	metricActiveReadStreams.Inc()
+	defer metricActiveReadStreams.Dec()
 
 	buf := make([]byte, readChunkSize)
 	for {

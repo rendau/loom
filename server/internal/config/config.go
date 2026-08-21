@@ -85,6 +85,10 @@ var Conf = struct {
 	// AuthSecret — общий секрет attempt-токенов (control plane, artifact-
 	// сервер, лог-приёмник); пусто — проверка токенов выключена (dev).
 	AuthSecret string `env:"AUTH_SECRET"`
+	// AdminToken — статический bearer-токен админских RPC (Dag/Run/Pool/
+	// Secret, ReadTaskLog, ListTaskValues); пусто — auth выключен (dev).
+	// Task-facing ручки под ним не живут: attempt-токены и describe_id.
+	AdminToken string `env:"ADMIN_TOKEN"`
 	// SecretKey — парольная фраза шифрования секретов (AES-256-GCM, ключ —
 	// SHA-256 от фразы); пусто — секреты хранятся открытым текстом (dev).
 	SecretKey string `env:"SECRET_KEY"`

@@ -1,3 +1,4 @@
+import { authHeaders } from '~/api/client'
 import type { TaskLogEntry } from '~/types/log'
 
 // Чтение лога попытки через server-streaming ручку gateway:
@@ -27,7 +28,11 @@ export async function readTaskLog(
     + `/task/${encodeURIComponent(params.task)}`
     + `/attempt/${params.attempt}/log?follow=${params.follow}`
 
-  const response = await fetch(url, { signal, headers: { Accept: 'application/json' } })
+  const response = await fetch(url, { signal, headers: authHeaders() })
+  if (response.status === 401) {
+    authNeeded.value = true
+    throw new Error('нужен admin-токен')
+  }
   if (!response.ok || !response.body)
     throw new Error(`лог недоступен: HTTP ${response.status}`)
 

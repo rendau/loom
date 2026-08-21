@@ -168,6 +168,13 @@ type StaleAttempt struct {
 	Status string // starting | running
 }
 
+// PoolUsage — занятость пула слотов: Busy — попытки в starting/running.
+type PoolUsage struct {
+	Pool  string
+	Slots int64
+	Busy  int64
+}
+
 // ExitInfo — результат завершения попытки.
 type ExitInfo struct {
 	Success  bool

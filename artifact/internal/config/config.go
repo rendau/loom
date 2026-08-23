@@ -9,7 +9,7 @@ var Conf = struct {
 	Debug    bool   `env:"DEBUG" envDefault:"false"`
 	LogLevel string `env:"LOG_LEVEL" envDefault:"info"`
 
-	GrpcPort       string `env:"GRPC_PORT" envDefault:"5051"`
+	GrpcPort       string `env:"GRPC_PORT" envDefault:"5050"`
 	SystemHttpPort string `env:"SYSTEM_HTTP_PORT" envDefault:"3003"`
 
 	DataDir string `env:"DATA_DIR" envDefault:"./data"`

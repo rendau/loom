@@ -14,7 +14,7 @@ var Conf = struct {
 	GrpcPort       string `env:"GRPC_PORT" envDefault:"5050"`
 	HttpPort       string `env:"HTTP_PORT" envDefault:"80"`
 	HttpCors       bool   `env:"HTTP_CORS" envDefault:"false"`
-	SystemHttpPort string `env:"SYSTEM_HTTP_PORT" envDefault:"3004"`
+	SystemHttpPort string `env:"SYSTEM_HTTP_PORT" envDefault:"3003"`
 
 	// SPA админки: AdminDir — каталог собранной статики (nuxt generate;
 	// каталога нет — админка не раздаётся), AdminPort — её отдельный порт.

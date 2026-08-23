@@ -9,7 +9,7 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-// TaskValueService — мелкие значения тасков (аналог XCom, решение №25):
+// TaskValueService — мелкие значения тасков (аналог XCom):
 // key-value через control plane, не через artifact-сервер. Скоуп значения —
 // (run, task, key): ретрай таска перезаписывает его значения.
 service TaskValueService {

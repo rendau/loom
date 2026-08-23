@@ -58,11 +58,11 @@ func (s *Service) Get(ctx context.Context, name string, errNE bool) (*model.Main
 
 // Register сохраняет даг по манифесту, полученному из образа: валидирует
 // манифест и создаёт/обновляет запись (перерегистрация = новая версия
-// образа). Paused при перерегистрации не трогается; autoUpdate (решение
-// №30) обновляется только при явном значении — nil сохраняет текущее (в
+// образа). Paused при перерегистрации не трогается; autoUpdate
+// обновляется только при явном значении — nil сохраняет текущее (в
 // частности, авто-перерегистрация dagsync флаг не трогает). next_run_at
 // пересчитывается от текущего момента, кроме catchup-дага с тем же
-// расписанием — его тики наверстает cron-цикл (решение №24).
+// расписанием — его тики наверстает cron-цикл.
 func (s *Service) Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest, autoUpdate *bool) (*model.Main, error) {
 	if err := ValidateManifest(m); err != nil {
 		return nil, err
@@ -123,7 +123,7 @@ func (s *Service) SetPaused(ctx context.Context, name string, paused bool) error
 }
 
 // SetAutoUpdate включает/выключает poll-синк новой версии образа дага
-// (решение №30).
+//.
 func (s *Service) SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error {
 	if _, _, err := s.Get(ctx, name, true); err != nil {
 		return err

@@ -345,10 +345,29 @@ func TestStaleWritingAfterRestart(t *testing.T) {
 	s2, err := New(dir)
 	require.NoError(t, err)
 
-	_, err = s2.OpenRead(context.Background(), ref, 0, true)
-	assert.ErrorIs(t, err, ErrAborted)
+	// стрим не абортится лениво — ждёт возможного резюма писателя
+	state, size, err := s2.Stat(ref)
+	require.NoError(t, err)
+	assert.Equal(t, StateWriting, state)
+	assert.EqualValues(t, 6, size)
 
-	state, _, err := s2.Stat(ref)
+	// follow-читатель дочитывает имеющееся и ждёт продолжения, а не abort
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	r, err := s2.OpenRead(ctx, ref, 0, true)
+	require.NoError(t, err)
+	defer r.Close()
+
+	buf := make([]byte, 16)
+	n, err := r.Next(ctx, buf)
+	require.NoError(t, err)
+	assert.Equal(t, "doomed", string(buf[:n]))
+	_, err = r.Next(ctx, buf)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+
+	// судьбу безвозвратно брошенного стрима решает FinishAttempt: aborted
+	require.NoError(t, s2.FinishAttempt(ref.AttemptKey()))
+	state, _, err = s2.Stat(ref)
 	require.NoError(t, err)
 	assert.Equal(t, StateAborted, state)
 }

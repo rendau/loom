@@ -45,11 +45,11 @@ const (
 	TriggerBackfill = "backfill"
 )
 
-// MaxParamsSize — лимит params рана (решение №23): это конфиг, а не данные;
+// MaxParamsSize — лимит params рана: это конфиг, а не данные;
 // данные текут артефактами.
 const MaxParamsSize = 64 * 1024
 
-// MaxValueSize — лимит значения таска (решение №25): значения — для мелочи
+// MaxValueSize — лимит значения таска: значения — для мелочи
 // вроде счётчиков и id, данные текут артефактами.
 const MaxValueSize = 64 * 1024
 
@@ -65,7 +65,7 @@ func TaskStatusTerminal(status string) bool {
 // Main — ран дага. Manifest — снапшот манифеста на момент триггера
 // (ран не зависит от последующих перерегистраций дага). Params — параметры
 // рана (raw JSON-объект, nil — без параметров), LogicalDate — «дата данных»
-// (решение №23).
+//.
 type Main struct {
 	Id          string
 	DagName     string
@@ -103,7 +103,7 @@ type ListReq struct {
 
 // TaskInstance — таск внутри рана; attempt — номер текущей (последней)
 // попытки, 0 — ещё не стартовала. Pool/Priority — денормализация из
-// манифеста для claim-запроса очереди (решение №26).
+// манифеста для claim-запроса очереди.
 type TaskInstance struct {
 	RunId      string
 	Task       string
@@ -144,7 +144,7 @@ type AttemptRef struct {
 	Attempt int32
 }
 
-// TaskValue — мелкое значение таска (аналог XCom, решение №25): скоуп
+// TaskValue — мелкое значение таска (аналог XCom): скоуп
 // (run, task, key), ретрай перезаписывает.
 type TaskValue struct {
 	RunId      string

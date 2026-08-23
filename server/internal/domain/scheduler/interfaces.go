@@ -33,7 +33,7 @@ type DagServiceI interface {
 	AdvanceNextRun(ctx context.Context, name string, from, to time.Time) (bool, error)
 }
 
-// ExecutorI — порт executor'а (решение №8): запуск/остановка на уровне
+// ExecutorI — порт executor'а: запуск/остановка на уровне
 // attempt'а, события жизненного цикла — каналом. ListAlive — попытки, чьи
 // Job'ы ещё существуют (источник правды зомби-детекта).
 type ExecutorI interface {
@@ -44,19 +44,20 @@ type ExecutorI interface {
 }
 
 // ArtifactI — клиент artifact-сервера: страховочный FinishAttempt при
-// завершении/смерти попытки (решение №13).
+// завершении/смерти попытки.
 type ArtifactI interface {
 	FinishAttempt(ctx context.Context, ref runModel.AttemptRef) error
 }
 
-// SecretResolverI — расшифровка значений секретов для env попытки
-// (решение №27); отсутствующий секрет — ошибка (Launch не должен стартовать
-// попытку с пустой переменной).
+// SecretResolverI — расшифровка значений секретов для env попытки;
+// отсутствующий секрет — ошибка (Launch не должен стартовать попытку с
+// пустой переменной).
 type SecretResolverI interface {
 	ResolveValues(ctx context.Context, names []string) (map[string][]byte, error)
 }
 
-// TaskLogI — финализация лог-стрима попытки с дописыванием причины смерти.
+// TaskLogI — финализация лог-стрима попытки (на artifact-сервере) с
+// дописыванием исхода попытки.
 type TaskLogI interface {
-	Finish(key tasklogModel.AttemptKey, final []tasklogModel.Entry) error
+	Finish(ctx context.Context, key tasklogModel.AttemptKey, final []tasklogModel.Entry) error
 }

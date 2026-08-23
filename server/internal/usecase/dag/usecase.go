@@ -48,7 +48,7 @@ func (u *Usecase) Get(ctx context.Context, name string) (*model.Main, error) {
 // Register регистрирует даг по url docker-образа: инспекция (пиннинг digest
 // + `describe`) → валидация манифеста → сохранение. Имя дага берётся из
 // манифеста; повторная регистрация обновляет образ и манифест. autoUpdate
-// nil — сохранить текущее значение флага (решение №30).
+// nil — сохранить текущее значение флага.
 func (u *Usecase) Register(ctx context.Context, image string, autoUpdate *bool) (*model.Main, error) {
 	if image == "" {
 		return nil, errs.ImageRequired
@@ -80,7 +80,7 @@ func (u *Usecase) Register(ctx context.Context, image string, autoUpdate *bool) 
 	return result, nil
 }
 
-// PushManifest — приём манифеста от describe-Job'а (решение №29): доставка
+// PushManifest — приём манифеста от describe-Job'а: доставка
 // ожидающей регистрации по одноразовому describe_id.
 func (u *Usecase) PushManifest(_ context.Context, id string, manifest []byte, errMsg string) error {
 	if id == "" {

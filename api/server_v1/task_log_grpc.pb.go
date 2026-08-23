@@ -19,7 +19,6 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TaskLogService_PushTaskLog_FullMethodName = "/server_v1.TaskLogService/PushTaskLog"
 	TaskLogService_ReadTaskLog_FullMethodName = "/server_v1.TaskLogService/ReadTaskLog"
 )
 
@@ -27,16 +26,10 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// TaskLogService — приём лог-стрима таска на control plane server.
-//
-// SDK держит один стрим на всё время работы attempt'а и шлёт логи батчами
-// (по размеру и по таймеру). Логи дублируются в честный stdout контейнера —
-// страховка на случай OOM/падения SDK: причину смерти тогда дописывает
-// control plane из kubernetes.
+// TaskLogService — чтение логов тасков через control plane (админка).
+// Хранятся логи на artifact-сервере (artifact_v1.TaskLogService), control
+// plane проксирует чтение — у админки и HTTP-gateway одна точка входа.
 type TaskLogServiceClient interface {
-	// PushTaskLog — клиентский стрим: первое сообщение — header
-	// (идентификация attempt'а), далее — батчи строк.
-	PushTaskLog(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[PushTaskLogRequest, PushTaskLogResponse], error)
 	// ReadTaskLog читает лог попытки с начала; при follow=true стрим живёт до
 	// завершения попытки, отдавая новые строки по мере поступления (live-логи
 	// в админке).
@@ -51,22 +44,9 @@ func NewTaskLogServiceClient(cc grpc.ClientConnInterface) TaskLogServiceClient {
 	return &taskLogServiceClient{cc}
 }
 
-func (c *taskLogServiceClient) PushTaskLog(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[PushTaskLogRequest, PushTaskLogResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &TaskLogService_ServiceDesc.Streams[0], TaskLogService_PushTaskLog_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[PushTaskLogRequest, PushTaskLogResponse]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TaskLogService_PushTaskLogClient = grpc.ClientStreamingClient[PushTaskLogRequest, PushTaskLogResponse]
-
 func (c *taskLogServiceClient) ReadTaskLog(ctx context.Context, in *ReadTaskLogRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadTaskLogResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &TaskLogService_ServiceDesc.Streams[1], TaskLogService_ReadTaskLog_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &TaskLogService_ServiceDesc.Streams[0], TaskLogService_ReadTaskLog_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -87,16 +67,10 @@ type TaskLogService_ReadTaskLogClient = grpc.ServerStreamingClient[ReadTaskLogRe
 // All implementations must embed UnimplementedTaskLogServiceServer
 // for forward compatibility.
 //
-// TaskLogService — приём лог-стрима таска на control plane server.
-//
-// SDK держит один стрим на всё время работы attempt'а и шлёт логи батчами
-// (по размеру и по таймеру). Логи дублируются в честный stdout контейнера —
-// страховка на случай OOM/падения SDK: причину смерти тогда дописывает
-// control plane из kubernetes.
+// TaskLogService — чтение логов тасков через control plane (админка).
+// Хранятся логи на artifact-сервере (artifact_v1.TaskLogService), control
+// plane проксирует чтение — у админки и HTTP-gateway одна точка входа.
 type TaskLogServiceServer interface {
-	// PushTaskLog — клиентский стрим: первое сообщение — header
-	// (идентификация attempt'а), далее — батчи строк.
-	PushTaskLog(grpc.ClientStreamingServer[PushTaskLogRequest, PushTaskLogResponse]) error
 	// ReadTaskLog читает лог попытки с начала; при follow=true стрим живёт до
 	// завершения попытки, отдавая новые строки по мере поступления (live-логи
 	// в админке).
@@ -111,9 +85,6 @@ type TaskLogServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedTaskLogServiceServer struct{}
 
-func (UnimplementedTaskLogServiceServer) PushTaskLog(grpc.ClientStreamingServer[PushTaskLogRequest, PushTaskLogResponse]) error {
-	return status.Errorf(codes.Unimplemented, "method PushTaskLog not implemented")
-}
 func (UnimplementedTaskLogServiceServer) ReadTaskLog(*ReadTaskLogRequest, grpc.ServerStreamingServer[ReadTaskLogResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method ReadTaskLog not implemented")
 }
@@ -138,13 +109,6 @@ func RegisterTaskLogServiceServer(s grpc.ServiceRegistrar, srv TaskLogServiceSer
 	s.RegisterService(&TaskLogService_ServiceDesc, srv)
 }
 
-func _TaskLogService_PushTaskLog_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(TaskLogServiceServer).PushTaskLog(&grpc.GenericServerStream[PushTaskLogRequest, PushTaskLogResponse]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TaskLogService_PushTaskLogServer = grpc.ClientStreamingServer[PushTaskLogRequest, PushTaskLogResponse]
-
 func _TaskLogService_ReadTaskLog_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(ReadTaskLogRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -164,11 +128,6 @@ var TaskLogService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*TaskLogServiceServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "PushTaskLog",
-			Handler:       _TaskLogService_PushTaskLog_Handler,
-			ClientStreams: true,
-		},
 		{
 			StreamName:    "ReadTaskLog",
 			Handler:       _TaskLogService_ReadTaskLog_Handler,

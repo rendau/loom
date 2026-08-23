@@ -17,9 +17,8 @@ func TestAuthRequired(t *testing.T) {
 	assert.True(t, authRequired("/server_v1.TaskLogService/ReadTaskLog"))
 	assert.True(t, authRequired("/server_v1.TaskValueService/ListTaskValues"))
 
-	// task-facing ручки — на своих механизмах (attempt-токены, describe_id)
+	// task-facing ручки — открыты внутри кластера (describe_id у манифеста)
 	assert.False(t, authRequired("/server_v1.DagService/PushDagManifest"))
-	assert.False(t, authRequired("/server_v1.TaskLogService/PushTaskLog"))
 	assert.False(t, authRequired("/server_v1.TaskValueService/PushTaskValue"))
 	assert.False(t, authRequired("/server_v1.TaskValueService/PullTaskValue"))
 	assert.False(t, authRequired("/grpc.reflection.v1.ServerReflection/ServerReflectionInfo"))

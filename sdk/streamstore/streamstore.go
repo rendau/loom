@@ -125,12 +125,15 @@ func New(dir string) (*Store, error) {
 }
 
 // stream — активная запись; синхронизирует писателя и follow-читателей.
+// attached — у стрима есть живой писатель; false — писатель отсоединился
+// (обрыв соединения), стрим остаётся writing и ждёт ResumeWrite.
 type stream struct {
-	mu    sync.Mutex
-	cond  *sync.Cond
-	file  *os.File
-	size  int64
-	state State
+	mu       sync.Mutex
+	cond     *sync.Cond
+	file     *os.File
+	size     int64
+	state    State
+	attached bool
 }
 
 func (s *Store) attemptDir(key AttemptKey) string {
@@ -181,15 +184,17 @@ func (s *Store) writeMeta(ref Ref, m meta) error {
 	return nil
 }
 
-// metaLocked читает мету под s.mu и лечит stale-writing (записи, оборванные
-// падением процесса) в aborted.
+// metaLocked читает мету под s.mu. Stale-writing (запись без активного
+// стрима) у завершённой попытки лечится в aborted — писатель уже не
+// вернётся; у живой попытки writing остаётся writing: писатель может
+// возобновить запись (ResumeWrite) после обрыва или рестарта.
 func (s *Store) metaLocked(ref Ref) (meta, error) {
 	m, err := s.readMeta(ref)
 	if err != nil {
 		return meta{}, err
 	}
 
-	if m.State == StateWriting && s.active[ref] == nil {
+	if m.State == StateWriting && s.active[ref] == nil && s.attemptFinishedLocked(ref.AttemptKey()) {
 		m.State = StateAborted
 		if err = s.writeMeta(ref, m); err != nil {
 			return meta{}, err
@@ -197,6 +202,27 @@ func (s *Store) metaLocked(ref Ref) (meta, error) {
 	}
 
 	return m, nil
+}
+
+// activateLocked поднимает writing-стрим без писателя (обрыв соединения или
+// рестарт процесса) в память детачнутым: follow-читатели ждут на нём
+// данных, ResumeWrite переприсоединяет к нему писателя.
+func (s *Store) activateLocked(ref Ref) (*stream, error) {
+	file, err := os.OpenFile(s.dataPath(ref), os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open data file: %w", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("stat data file: %w", err)
+	}
+
+	st := &stream{file: file, state: StateWriting, size: info.Size()}
+	st.cond = sync.NewCond(&st.mu)
+	s.active[ref] = st
+
+	return st, nil
 }
 
 // attemptFinishedLocked проверяет завершённость попытки: кэш в памяти или
@@ -308,7 +334,7 @@ func (s *Store) BeginWrite(ref Ref) (*Writer, error) {
 		return nil, err
 	}
 
-	st := &stream{file: file, state: StateWriting}
+	st := &stream{file: file, state: StateWriting, attached: true}
 	st.cond = sync.NewCond(&st.mu)
 	s.active[ref] = st
 
@@ -318,11 +344,11 @@ func (s *Store) BeginWrite(ref Ref) (*Writer, error) {
 	return &Writer{store: s, ref: ref, st: st}, nil
 }
 
-// ResumeWrite возобновляет запись стрима, оборванную рестартом процесса-
-// владельца: валиден только для writing-меты без активного писателя, запись
-// продолжается с текущего конца файла. Предназначен для стримов, которыми
-// владеет сам процесс хранилища (лог-стримы control plane); артефакты
-// тасков не резюмятся — их ретрай идёт новой попыткой.
+// ResumeWrite возобновляет запись стрима, оставшегося writing без
+// писателя, — после обрыва соединения (писатель отсоединился Release) или
+// рестарта процесса-владельца. Запись продолжается с текущего конца файла;
+// follow-читатели живого стрима возобновления не замечают. Стрим с
+// активным (attached) писателем не резюмится — ErrAlreadyExists.
 func (s *Store) ResumeWrite(ref Ref) (*Writer, error) {
 	if err := ref.validate(); err != nil {
 		return nil, err
@@ -334,36 +360,39 @@ func (s *Store) ResumeWrite(ref Ref) (*Writer, error) {
 	if s.attemptFinishedLocked(ref.AttemptKey()) {
 		return nil, fmt.Errorf("%w: %+v", ErrAttemptFinished, ref)
 	}
-	if _, ok := s.active[ref]; ok {
+
+	st, ok := s.active[ref]
+	if !ok {
+		// мету читаем без ленивого лечения stale-writing — writing здесь
+		// не сирота, а кандидат на возобновление
+		m, err := s.readMeta(ref)
+		if err != nil {
+			return nil, err
+		}
+		switch m.State {
+		case StateCommitted:
+			return nil, ErrAlreadyExists
+		case StateAborted:
+			return nil, ErrAborted
+		}
+
+		if st, err = s.activateLocked(ref); err != nil {
+			return nil, err
+		}
+	}
+
+	// переприсоединяем писателя к живому стриму — follow-читатели держат
+	// этот же stream-объект и возобновления не замечают
+	st.mu.Lock()
+	defer st.mu.Unlock()
+
+	switch {
+	case st.state != StateWriting:
+		return nil, ErrNotWriting
+	case st.attached:
 		return nil, fmt.Errorf("%w: write is in progress", ErrAlreadyExists)
 	}
-
-	// мету читаем без ленивого лечения stale-writing — writing здесь не
-	// сирота, а кандидат на возобновление
-	m, err := s.readMeta(ref)
-	if err != nil {
-		return nil, err
-	}
-	switch m.State {
-	case StateCommitted:
-		return nil, ErrAlreadyExists
-	case StateAborted:
-		return nil, ErrAborted
-	}
-
-	file, err := os.OpenFile(s.dataPath(ref), os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("open data file: %w", err)
-	}
-	info, err := file.Stat()
-	if err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("stat data file: %w", err)
-	}
-
-	st := &stream{file: file, state: StateWriting, size: info.Size()}
-	st.cond = sync.NewCond(&st.mu)
-	s.active[ref] = st
+	st.attached = true
 
 	return &Writer{store: s, ref: ref, st: st}, nil
 }
@@ -447,6 +476,23 @@ func (w *Writer) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// Size — текущий размер стрима (для ack'ов удалённому писателю).
+func (w *Writer) Size() int64 {
+	w.st.mu.Lock()
+	defer w.st.mu.Unlock()
+	return w.st.size
+}
+
+// Release отсоединяет писателя, не завершая запись: стрим остаётся writing
+// и ждёт возобновления (ResumeWrite) — обрыв соединения с удалённым
+// писателем не abort'ит артефакт. Судьбу безвозвратно брошенного стрима
+// решает FinishAttempt попытки. No-op для уже завершённой записи.
+func (w *Writer) Release() {
+	w.st.mu.Lock()
+	w.st.attached = false
+	w.st.mu.Unlock()
+}
+
 // Commit фиксирует артефакт: читатели дочитают его до конца и получат EOF.
 func (w *Writer) Commit() (int64, error) {
 	return w.store.finishStream(w.ref, w.st, StateCommitted)
@@ -511,6 +557,15 @@ func (s *Store) OpenRead(ctx context.Context, ref Ref, offset int64, follow bool
 	}
 
 	st := s.active[ref]
+	if st == nil && m.State == StateWriting {
+		// writing без писателя (обрыв/рестарт): поднимаем стрим детачнутым —
+		// follow-читатель ждёт на нём возвращения писателя, а не abort
+		var actErr error
+		if st, actErr = s.activateLocked(ref); actErr != nil {
+			s.mu.Unlock()
+			return nil, actErr
+		}
+	}
 	s.mu.Unlock()
 
 	if st == nil && m.State == StateAborted {
@@ -618,6 +673,12 @@ func (s *Store) Stat(ref Ref) (State, int64, error) {
 		st.mu.Lock()
 		m.State, m.Size = st.state, st.size
 		st.mu.Unlock()
+	} else if m.State == StateWriting {
+		// writing без поднятого стрима: у меты size появляется только при
+		// завершении — честный текущий размер берём у файла данных
+		if info, statErr := os.Stat(s.dataPath(ref)); statErr == nil {
+			m.Size = info.Size()
+		}
 	}
 
 	return m.State, m.Size, nil
@@ -644,14 +705,20 @@ func (s *Store) AbortRef(ref Ref) error {
 	}
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	m, err := s.metaLocked(ref)
-	s.mu.Unlock()
 	if err != nil {
 		return err
 	}
 
-	if m.State == StateCommitted {
+	switch m.State {
+	case StateCommitted:
 		return ErrNotWriting
+	case StateWriting:
+		// writing без писателя: abort метой, чтобы стрим не ждал резюма
+		m.State = StateAborted
+		return s.writeMeta(ref, m)
 	}
 
 	return nil

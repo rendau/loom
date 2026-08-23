@@ -1,4 +1,4 @@
-// Package k8sdescriber — регистрация дагов без docker-демона (решение №29):
+// Package k8sdescriber — регистрация дагов без docker-демона:
 // манифест и digest образа получаются одноразовым k8s Job'ом в режиме
 // `describe`, образ тянет kubelet. Job сам отправляет манифест на control
 // plane (RPC PushDagManifest с одноразовым describe_id из env); логи пода

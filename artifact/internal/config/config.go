@@ -13,10 +13,10 @@ var Conf = struct {
 	SystemHttpPort string `env:"SYSTEM_HTTP_PORT" envDefault:"3003"`
 
 	DataDir string `env:"DATA_DIR" envDefault:"./data"`
-
-	// AuthSecret — общий с control plane секрет attempt-токенов; пусто —
-	// проверка токенов выключена (dev).
-	AuthSecret string `env:"AUTH_SECRET"`
+	// LogDir — каталог streamstore логов тасков; отдельный от DATA_DIR,
+	// потому что у лог-стримов свой жизненный цикл (commit — от control
+	// plane при финализации попытки, а не от писателя).
+	LogDir string `env:"LOG_DIR" envDefault:"./logs"`
 }{}
 
 func init() {

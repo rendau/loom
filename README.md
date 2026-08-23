@@ -15,8 +15,8 @@ Server регистрирует даг по образу (запуская ег�
 | `sdk/` | Библиотека для написания дагов: DAG/Task, Runtime, манифест, локальный режим |
 | `sdk/streamstore/` | Общая стейт-машина файловых стримов — единая для artifact-сервера и локального режима |
 | `api/` | Общие proto-контракты и сгенерированный код (`api/proto/`, `api/artifact_v1/`, `api/server_v1/`) |
-| `artifact/` | **Artifact server** (data plane): стримовый обмен артефактами между тасками |
-| `server/` | **Control plane**: регистрация дагов, раны, планировщик, k8s-executor, приём логов, REST/gRPC API |
+| `artifact/` | **Artifact server** (data plane): стримовый обмен артефактами между тасками, приём и хранение логов тасков |
+| `server/` | **Control plane** (stateless): регистрация дагов, раны, планировщик, k8s-executor, REST/gRPC API |
 | `examples/` | Примеры дагов (`demo-etl`) |
 | `admin/` | *(планируется)* Админка: журнал запусков, логи, управление дагами |
 
@@ -117,8 +117,11 @@ system http (3004, `/healthcheck`). Основные потоки:
 - **Финализация попытки** — статусы и exit-информация (exit code, OOMKilled)
   в БД, страховочный `FinishAttempt` на artifact-сервере, строка об исходе
   в лог попытки.
-- **Логи** — SDK стримит батчи на `TaskLogService`; хранение — тот же
-  streamstore (реф `(run, task, attempt, "log")`, JSONL), чтение с follow:
+- **Логи** — SDK стримит строки на artifact-сервер
+  (`artifact_v1.TaskLogService`) с seq/ack-подтверждениями: доставка без
+  потерь и дублей, обрыв соединения переживается реконнектом с досылкой
+  хвоста. Хранение — тот же streamstore (реф `(run, task, attempt, "log")`,
+  JSONL); чтение — через control plane (прокси) с follow:
   `GET /run/{id}/task/{task}/attempt/{n}/log?follow=true` (live-логи).
 
 Конфиг — `server/.env.example` (`PG_DSN`, `EXECUTOR=k8s|none`,
@@ -142,8 +145,7 @@ cd server && PG_DSN=postgres://... EXECUTOR=none ./cmd/build/svc  # control plan
 ## Релиз SDK
 
 Публикуются два модуля: `api` (proto-контракты) и `sdk`; sdk зависит от api
-обычным require (без replace, решение №15 в [ROADMAP.md](ROADMAP.md)),
-поэтому **порядок тегирования важен**:
+обычным require (без replace), поэтому **порядок тегирования важен**:
 
 1. Тег `api/vX.Y.Z` на нужный коммит, пуш тега.
 2. В `sdk/go.mod` зафиксировать эту версию
@@ -157,10 +159,3 @@ api тегируется даже без изменений в нём (один�
 api/sdk проще в сопровождении). Внутренние модули (`artifact`, `server`,
 `examples`) не публикуются — живут на replace/go.work.
 
-## Дорожная карта
-
-План, чеклист по фазам и зафиксированные архитектурные решения — в
-[ROADMAP.md](ROADMAP.md). Кратко: готовы SDK (локальный и распределённый
-режимы), artifact-сервер и control plane с планировщиком и k8s-executor
-(фазы 1–4); дальше — надёжность планировщика: cron, ретраи, зомби-детект,
-retention (фаза 5), админка (фаза 6).

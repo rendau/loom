@@ -24,8 +24,8 @@ const (
 
 // TaskLogSource — происхождение строки: структурный логгер Runtime,
 // перехваченные file descriptor'ы процесса (туда пишут паники Go-рантайма
-// и сторонние библиотеки мимо логгера) или сам control plane (причина
-// смерти пода, когда SDK умер вместе с процессом).
+// и сторонние библиотеки мимо логгера) или сам control plane (исход
+// попытки, причина смерти пода).
 type TaskLogSource int32
 
 const (
@@ -81,228 +81,6 @@ func (TaskLogSource) EnumDescriptor() ([]byte, []int) {
 	return file_server_v1_task_log_proto_rawDescGZIP(), []int{0}
 }
 
-type PushTaskLogRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Msg:
-	//
-	//	*PushTaskLogRequest_Header
-	//	*PushTaskLogRequest_Batch
-	Msg           isPushTaskLogRequest_Msg `protobuf_oneof:"msg"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PushTaskLogRequest) Reset() {
-	*x = PushTaskLogRequest{}
-	mi := &file_server_v1_task_log_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PushTaskLogRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PushTaskLogRequest) ProtoMessage() {}
-
-func (x *PushTaskLogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_task_log_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PushTaskLogRequest.ProtoReflect.Descriptor instead.
-func (*PushTaskLogRequest) Descriptor() ([]byte, []int) {
-	return file_server_v1_task_log_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *PushTaskLogRequest) GetMsg() isPushTaskLogRequest_Msg {
-	if x != nil {
-		return x.Msg
-	}
-	return nil
-}
-
-func (x *PushTaskLogRequest) GetHeader() *TaskLogHeader {
-	if x != nil {
-		if x, ok := x.Msg.(*PushTaskLogRequest_Header); ok {
-			return x.Header
-		}
-	}
-	return nil
-}
-
-func (x *PushTaskLogRequest) GetBatch() *TaskLogBatch {
-	if x != nil {
-		if x, ok := x.Msg.(*PushTaskLogRequest_Batch); ok {
-			return x.Batch
-		}
-	}
-	return nil
-}
-
-type isPushTaskLogRequest_Msg interface {
-	isPushTaskLogRequest_Msg()
-}
-
-type PushTaskLogRequest_Header struct {
-	Header *TaskLogHeader `protobuf:"bytes,1,opt,name=header,proto3,oneof"`
-}
-
-type PushTaskLogRequest_Batch struct {
-	Batch *TaskLogBatch `protobuf:"bytes,2,opt,name=batch,proto3,oneof"`
-}
-
-func (*PushTaskLogRequest_Header) isPushTaskLogRequest_Msg() {}
-
-func (*PushTaskLogRequest_Batch) isPushTaskLogRequest_Msg() {}
-
-type PushTaskLogResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PushTaskLogResponse) Reset() {
-	*x = PushTaskLogResponse{}
-	mi := &file_server_v1_task_log_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PushTaskLogResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PushTaskLogResponse) ProtoMessage() {}
-
-func (x *PushTaskLogResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_task_log_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PushTaskLogResponse.ProtoReflect.Descriptor instead.
-func (*PushTaskLogResponse) Descriptor() ([]byte, []int) {
-	return file_server_v1_task_log_proto_rawDescGZIP(), []int{1}
-}
-
-type TaskLogHeader struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	Task          string                 `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
-	Attempt       int32                  `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TaskLogHeader) Reset() {
-	*x = TaskLogHeader{}
-	mi := &file_server_v1_task_log_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TaskLogHeader) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TaskLogHeader) ProtoMessage() {}
-
-func (x *TaskLogHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_task_log_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TaskLogHeader.ProtoReflect.Descriptor instead.
-func (*TaskLogHeader) Descriptor() ([]byte, []int) {
-	return file_server_v1_task_log_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *TaskLogHeader) GetRunId() string {
-	if x != nil {
-		return x.RunId
-	}
-	return ""
-}
-
-func (x *TaskLogHeader) GetTask() string {
-	if x != nil {
-		return x.Task
-	}
-	return ""
-}
-
-func (x *TaskLogHeader) GetAttempt() int32 {
-	if x != nil {
-		return x.Attempt
-	}
-	return 0
-}
-
-type TaskLogBatch struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Entries       []*TaskLogEntry        `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TaskLogBatch) Reset() {
-	*x = TaskLogBatch{}
-	mi := &file_server_v1_task_log_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TaskLogBatch) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TaskLogBatch) ProtoMessage() {}
-
-func (x *TaskLogBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_task_log_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TaskLogBatch.ProtoReflect.Descriptor instead.
-func (*TaskLogBatch) Descriptor() ([]byte, []int) {
-	return file_server_v1_task_log_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *TaskLogBatch) GetEntries() []*TaskLogEntry {
-	if x != nil {
-		return x.Entries
-	}
-	return nil
-}
-
 type TaskLogEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TsUnixMs      int64                  `protobuf:"varint,1,opt,name=ts_unix_ms,json=tsUnixMs,proto3" json:"ts_unix_ms,omitempty"`
@@ -314,7 +92,7 @@ type TaskLogEntry struct {
 
 func (x *TaskLogEntry) Reset() {
 	*x = TaskLogEntry{}
-	mi := &file_server_v1_task_log_proto_msgTypes[4]
+	mi := &file_server_v1_task_log_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -326,7 +104,7 @@ func (x *TaskLogEntry) String() string {
 func (*TaskLogEntry) ProtoMessage() {}
 
 func (x *TaskLogEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_task_log_proto_msgTypes[4]
+	mi := &file_server_v1_task_log_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -339,7 +117,7 @@ func (x *TaskLogEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskLogEntry.ProtoReflect.Descriptor instead.
 func (*TaskLogEntry) Descriptor() ([]byte, []int) {
-	return file_server_v1_task_log_proto_rawDescGZIP(), []int{4}
+	return file_server_v1_task_log_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *TaskLogEntry) GetTsUnixMs() int64 {
@@ -375,7 +153,7 @@ type ReadTaskLogRequest struct {
 
 func (x *ReadTaskLogRequest) Reset() {
 	*x = ReadTaskLogRequest{}
-	mi := &file_server_v1_task_log_proto_msgTypes[5]
+	mi := &file_server_v1_task_log_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -387,7 +165,7 @@ func (x *ReadTaskLogRequest) String() string {
 func (*ReadTaskLogRequest) ProtoMessage() {}
 
 func (x *ReadTaskLogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_task_log_proto_msgTypes[5]
+	mi := &file_server_v1_task_log_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -400,7 +178,7 @@ func (x *ReadTaskLogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadTaskLogRequest.ProtoReflect.Descriptor instead.
 func (*ReadTaskLogRequest) Descriptor() ([]byte, []int) {
-	return file_server_v1_task_log_proto_rawDescGZIP(), []int{5}
+	return file_server_v1_task_log_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ReadTaskLogRequest) GetRunId() string {
@@ -440,7 +218,7 @@ type ReadTaskLogResponse struct {
 
 func (x *ReadTaskLogResponse) Reset() {
 	*x = ReadTaskLogResponse{}
-	mi := &file_server_v1_task_log_proto_msgTypes[6]
+	mi := &file_server_v1_task_log_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -452,7 +230,7 @@ func (x *ReadTaskLogResponse) String() string {
 func (*ReadTaskLogResponse) ProtoMessage() {}
 
 func (x *ReadTaskLogResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_task_log_proto_msgTypes[6]
+	mi := &file_server_v1_task_log_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -465,7 +243,7 @@ func (x *ReadTaskLogResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadTaskLogResponse.ProtoReflect.Descriptor instead.
 func (*ReadTaskLogResponse) Descriptor() ([]byte, []int) {
-	return file_server_v1_task_log_proto_rawDescGZIP(), []int{6}
+	return file_server_v1_task_log_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ReadTaskLogResponse) GetEntries() []*TaskLogEntry {
@@ -479,18 +257,7 @@ var File_server_v1_task_log_proto protoreflect.FileDescriptor
 
 const file_server_v1_task_log_proto_rawDesc = "" +
 	"\n" +
-	"\x18server_v1/task_log.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\"\x80\x01\n" +
-	"\x12PushTaskLogRequest\x122\n" +
-	"\x06header\x18\x01 \x01(\v2\x18.server_v1.TaskLogHeaderH\x00R\x06header\x12/\n" +
-	"\x05batch\x18\x02 \x01(\v2\x17.server_v1.TaskLogBatchH\x00R\x05batchB\x05\n" +
-	"\x03msg\"\x15\n" +
-	"\x13PushTaskLogResponse\"T\n" +
-	"\rTaskLogHeader\x12\x15\n" +
-	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x12\n" +
-	"\x04task\x18\x02 \x01(\tR\x04task\x12\x18\n" +
-	"\aattempt\x18\x03 \x01(\x05R\aattempt\"A\n" +
-	"\fTaskLogBatch\x121\n" +
-	"\aentries\x18\x01 \x03(\v2\x17.server_v1.TaskLogEntryR\aentries\"r\n" +
+	"\x18server_v1/task_log.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\"r\n" +
 	"\fTaskLogEntry\x12\x1c\n" +
 	"\n" +
 	"ts_unix_ms\x18\x01 \x01(\x03R\btsUnixMs\x120\n" +
@@ -508,9 +275,8 @@ const file_server_v1_task_log_proto_rawDesc = "" +
 	"\x13TASK_LOG_SOURCE_LOG\x10\x01\x12\x1a\n" +
 	"\x16TASK_LOG_SOURCE_STDOUT\x10\x02\x12\x1a\n" +
 	"\x16TASK_LOG_SOURCE_STDERR\x10\x03\x12\x1a\n" +
-	"\x16TASK_LOG_SOURCE_SERVER\x10\x042\xea\x01\n" +
-	"\x0eTaskLogService\x12N\n" +
-	"\vPushTaskLog\x12\x1d.server_v1.PushTaskLogRequest\x1a\x1e.server_v1.PushTaskLogResponse(\x01\x12\x87\x01\n" +
+	"\x16TASK_LOG_SOURCE_SERVER\x10\x042\x9a\x01\n" +
+	"\x0eTaskLogService\x12\x87\x01\n" +
 	"\vReadTaskLog\x12\x1d.server_v1.ReadTaskLogRequest\x1a\x1e.server_v1.ReadTaskLogResponse\"7\x82\xd3\xe4\x93\x021\x12//run/{run_id}/task/{task}/attempt/{attempt}/log0\x01B0Z.github.com/rendau/loom/api/server_v1;server_v1b\x06proto3"
 
 var (
@@ -526,32 +292,23 @@ func file_server_v1_task_log_proto_rawDescGZIP() []byte {
 }
 
 var file_server_v1_task_log_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_server_v1_task_log_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_server_v1_task_log_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_server_v1_task_log_proto_goTypes = []any{
 	(TaskLogSource)(0),          // 0: server_v1.TaskLogSource
-	(*PushTaskLogRequest)(nil),  // 1: server_v1.PushTaskLogRequest
-	(*PushTaskLogResponse)(nil), // 2: server_v1.PushTaskLogResponse
-	(*TaskLogHeader)(nil),       // 3: server_v1.TaskLogHeader
-	(*TaskLogBatch)(nil),        // 4: server_v1.TaskLogBatch
-	(*TaskLogEntry)(nil),        // 5: server_v1.TaskLogEntry
-	(*ReadTaskLogRequest)(nil),  // 6: server_v1.ReadTaskLogRequest
-	(*ReadTaskLogResponse)(nil), // 7: server_v1.ReadTaskLogResponse
+	(*TaskLogEntry)(nil),        // 1: server_v1.TaskLogEntry
+	(*ReadTaskLogRequest)(nil),  // 2: server_v1.ReadTaskLogRequest
+	(*ReadTaskLogResponse)(nil), // 3: server_v1.ReadTaskLogResponse
 }
 var file_server_v1_task_log_proto_depIdxs = []int32{
-	3, // 0: server_v1.PushTaskLogRequest.header:type_name -> server_v1.TaskLogHeader
-	4, // 1: server_v1.PushTaskLogRequest.batch:type_name -> server_v1.TaskLogBatch
-	5, // 2: server_v1.TaskLogBatch.entries:type_name -> server_v1.TaskLogEntry
-	0, // 3: server_v1.TaskLogEntry.source:type_name -> server_v1.TaskLogSource
-	5, // 4: server_v1.ReadTaskLogResponse.entries:type_name -> server_v1.TaskLogEntry
-	1, // 5: server_v1.TaskLogService.PushTaskLog:input_type -> server_v1.PushTaskLogRequest
-	6, // 6: server_v1.TaskLogService.ReadTaskLog:input_type -> server_v1.ReadTaskLogRequest
-	2, // 7: server_v1.TaskLogService.PushTaskLog:output_type -> server_v1.PushTaskLogResponse
-	7, // 8: server_v1.TaskLogService.ReadTaskLog:output_type -> server_v1.ReadTaskLogResponse
-	7, // [7:9] is the sub-list for method output_type
-	5, // [5:7] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	0, // 0: server_v1.TaskLogEntry.source:type_name -> server_v1.TaskLogSource
+	1, // 1: server_v1.ReadTaskLogResponse.entries:type_name -> server_v1.TaskLogEntry
+	2, // 2: server_v1.TaskLogService.ReadTaskLog:input_type -> server_v1.ReadTaskLogRequest
+	3, // 3: server_v1.TaskLogService.ReadTaskLog:output_type -> server_v1.ReadTaskLogResponse
+	3, // [3:4] is the sub-list for method output_type
+	2, // [2:3] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_task_log_proto_init() }
@@ -559,17 +316,13 @@ func file_server_v1_task_log_proto_init() {
 	if File_server_v1_task_log_proto != nil {
 		return
 	}
-	file_server_v1_task_log_proto_msgTypes[0].OneofWrappers = []any{
-		(*PushTaskLogRequest_Header)(nil),
-		(*PushTaskLogRequest_Batch)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_v1_task_log_proto_rawDesc), len(file_server_v1_task_log_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   7,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

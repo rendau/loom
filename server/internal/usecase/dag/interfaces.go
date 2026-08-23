@@ -17,14 +17,14 @@ type ServiceI interface {
 
 // ImageInspectorI — инспекция образа дага при регистрации: пиннутый digest
 // и JSON-манифест (`describe`). Реализации: docker-CLI (dockercli) и
-// одноразовый k8s Job (k8sdescriber, решение №29) — pull и запуск
+// одноразовый k8s Job (k8sdescriber) — pull и запуск
 // контейнера являются деталью реализации.
 type ImageInspectorI interface {
 	Inspect(ctx context.Context, image string) (digest string, manifest []byte, err error)
 }
 
-// ManifestSinkI — приём манифеста от describe-Job'а (PushDagManifest,
-// решение №29): доставка ожидающей регистрации по одноразовому describe_id.
+// ManifestSinkI — приём манифеста от describe-Job'а (PushDagManifest):
+// доставка ожидающей регистрации по одноразовому describe_id.
 // false — id неизвестен (регистрация не ждёт: опоздал, повтор или подбор).
 type ManifestSinkI interface {
 	Deliver(id string, manifest []byte, errMsg string) bool

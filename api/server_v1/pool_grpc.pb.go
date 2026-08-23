@@ -28,7 +28,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// PoolService — пулы слотов параллелизма (решение №26): таски всех дагов
+// PoolService — пулы слотов параллелизма: таски всех дагов
 // конкурируют за слоты своего пула. Удаления нет — на пул могут ссылаться
 // манифесты; slots = 0 ставит пул на паузу.
 type PoolServiceClient interface {
@@ -69,7 +69,7 @@ func (c *poolServiceClient) SetPool(ctx context.Context, in *PoolSetReq, opts ..
 // All implementations must embed UnimplementedPoolServiceServer
 // for forward compatibility.
 //
-// PoolService — пулы слотов параллелизма (решение №26): таски всех дагов
+// PoolService — пулы слотов параллелизма: таски всех дагов
 // конкурируют за слоты своего пула. Удаления нет — на пул могут ссылаться
 // манифесты; slots = 0 ставит пул на паузу.
 type PoolServiceServer interface {

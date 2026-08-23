@@ -15,12 +15,11 @@ import (
 )
 
 // Админские RPC защищаются статическим bearer-токеном (ADMIN_TOKEN).
-// Task-facing ручки исключены — они живут на своих механизмах: PushTaskLog и
-// Push/PullTaskValue — attempt-токены, PushDagManifest — одноразовый
-// describe_id (решение №29). Новые RPC защищены по умолчанию.
+// Task-facing ручки исключены — Push/PullTaskValue открыты внутри кластера,
+// PushDagManifest — одноразовый describe_id. Новые RPC защищены по
+// умолчанию.
 var authExemptMethods = map[string]struct{}{
 	"/server_v1.DagService/PushDagManifest":     {},
-	"/server_v1.TaskLogService/PushTaskLog":     {},
 	"/server_v1.TaskValueService/PushTaskValue": {},
 	"/server_v1.TaskValueService/PullTaskValue": {},
 }

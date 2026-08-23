@@ -38,11 +38,11 @@ type DagMain struct {
 	ModifiedAt  *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=modified_at,json=modifiedAt,proto3,oneof" json:"modified_at,omitempty"`
 	// Ближайший запуск по cron-расписанию; отсутствует у дагов без расписания.
 	NextRunAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=next_run_at,json=nextRunAt,proto3,oneof" json:"next_run_at,omitempty"`
-	// Наверстывать пропущенные тики расписания (решение №24).
+	// Наверстывать пропущенные тики расписания.
 	Catchup bool `protobuf:"varint,11,opt,name=catchup,proto3" json:"catchup,omitempty"`
-	// Лимит одновременно выполняющихся ранов; 0 — без лимита (решение №26).
+	// Лимит одновременно выполняющихся ранов; 0 — без лимита.
 	MaxActiveRuns int32 `protobuf:"varint,12,opt,name=max_active_runs,json=maxActiveRuns,proto3" json:"max_active_runs,omitempty"`
-	// Авто-обновление: poll-синк digest'а тега образа (решение №30).
+	// Авто-обновление: poll-синк digest'а тега образа.
 	AutoUpdate    bool `protobuf:"varint,13,opt,name=auto_update,json=autoUpdate,proto3" json:"auto_update,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -177,7 +177,7 @@ type DagTaskMain struct {
 	RetryDelaySec int32                  `protobuf:"varint,4,opt,name=retry_delay_sec,json=retryDelaySec,proto3" json:"retry_delay_sec,omitempty"` // базовая пауза backoff'а; 0 — дефолт сервера
 	TimeoutSec    int32                  `protobuf:"varint,5,opt,name=timeout_sec,json=timeoutSec,proto3" json:"timeout_sec,omitempty"`            // 0 — без таймаута
 	Resources     *DagTaskResources      `protobuf:"bytes,6,opt,name=resources,proto3,oneof" json:"resources,omitempty"`
-	Pool          string                 `protobuf:"bytes,7,opt,name=pool,proto3" json:"pool,omitempty"`          // пул слотов; пусто — default (решение №26)
+	Pool          string                 `protobuf:"bytes,7,opt,name=pool,proto3" json:"pool,omitempty"`          // пул слотов; пусто — default
 	Priority      int32                  `protobuf:"varint,8,opt,name=priority,proto3" json:"priority,omitempty"` // больше — раньше из очереди
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -393,7 +393,7 @@ func (x *DagTaskResources) GetMemoryLimit() string {
 type DagRegisterReq struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Image string                 `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
-	// Авто-обновление (решение №30); отсутствует — сохранить текущее значение
+	// Авто-обновление; отсутствует — сохранить текущее значение
 	// (перерегистрация не сбрасывает флаг), у нового дага — false.
 	AutoUpdate    *bool `protobuf:"varint,2,opt,name=auto_update,json=autoUpdate,proto3,oneof" json:"auto_update,omitempty"`
 	unknownFields protoimpl.UnknownFields

@@ -1,5 +1,5 @@
 // Package scheduler — раскрутка графа рана: очередь тасков в Postgres
-// (FOR UPDATE SKIP LOCKED, решение №10), запуск попыток через executor,
+// (FOR UPDATE SKIP LOCKED), запуск попыток через executor,
 // обработка событий их жизненного цикла и финализация (FinishAttempt на
 // artifact-сервере, закрытие лог-стрима, каскад по рёбрам графа), ретраи
 // с backoff, таймауты тасков и cron-триггер ранов по расписанию дага.
@@ -17,7 +17,6 @@ import (
 	json "github.com/goccy/go-json"
 	"github.com/samber/lo"
 
-	"github.com/rendau/loom/api/attempttoken"
 	loom "github.com/rendau/loom/sdk"
 	"github.com/rendau/loom/server/internal/domain/dag/manifest"
 	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
@@ -54,8 +53,6 @@ type Config struct {
 	ZombieGrace   time.Duration // возраст попытки, до которого её не сверяем
 	ClaimLimit    int64         // сколько queued-тасков забирать за проход
 	TaskEnv       TaskEnv
-	TokenSecret   string        // секрет attempt-токенов; пусто — без токенов
-	TokenTTL      time.Duration // срок действия attempt-токена
 }
 
 type Scheduler struct {
@@ -223,9 +220,9 @@ const catchupMaxPerPass = 10
 // cronPass — один проход cron-триггера: даги с наступившим next_run_at.
 // Сдвиг next_run_at — compare-and-swap до триггера: при гонке инстансов ран
 // создаёт только победитель, а упавший после сдвига триггер теряет тик.
-// Обычный даг продолжает расписание от «сейчас» (пропущенные тики теряются,
-// решение №17); catchup-даг двигает next_run_at на следующий тик после
-// сработавшего и наверстывает пропущенное (решение №24).
+// Обычный даг продолжает расписание от «сейчас» (пропущенные тики
+// теряются); catchup-даг двигает next_run_at на следующий тик после
+// сработавшего и наверстывает пропущенное.
 func (s *Scheduler) cronPass(ctx context.Context) error {
 	dags, err := s.dagSvc.ListDueSchedules(ctx)
 	if err != nil {
@@ -384,7 +381,7 @@ func (s *Scheduler) sampleQueueMetrics(ctx context.Context) {
 	}
 }
 
-// limitActiveRuns применяет max_active_runs (решение №26): у дага с лимитом
+// limitActiveRuns применяет max_active_runs: у дага с лимитом
 // раскручиваются только N старейших активных ранов, у остальных таски
 // остаются pending до освобождения места. Лимит берётся из манифеста самого
 // свежего рана дага (актуальная регистрация); финализация запущенных попыток
@@ -574,21 +571,6 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 		}
 	}
 
-	// attempt-токен: запись только в свой attempt, чтение — в своём ране
-	// (решение №8); проверяют artifact-сервер и лог-приёмник
-	if s.cfg.TokenSecret != "" {
-		token, err := attempttoken.Sign([]byte(s.cfg.TokenSecret), attempttoken.Claims{
-			RunID:     c.RunId,
-			Task:      c.Task,
-			Attempt:   c.Attempt,
-			ExpiresAt: time.Now().Add(s.cfg.TokenTTL).Unix(),
-		})
-		if err != nil {
-			return fmt.Errorf("sign attempt token: %w", err)
-		}
-		spec.Env[loom.EnvToken] = token
-	}
-
 	if err = s.executor.Launch(ctx, spec); err != nil {
 		metricLaunchErrors.Inc()
 		return fmt.Errorf("executor.Launch: %w", err)
@@ -669,13 +651,13 @@ func (s *Scheduler) finalizeCtx(ctx context.Context, ref runModel.AttemptRef, ex
 	}
 
 	// страховка: SDK вызывает FinishAttempt сам, но при смерти пода вызова
-	// могло не быть — повторяем, вызов идемпотентен (решение №13)
+	// могло не быть — повторяем, вызов идемпотентен
 	if err = s.artifact.FinishAttempt(ctx, ref); err != nil {
 		slog.Warn("artifact finish attempt", "run_id", ref.RunId, "task", ref.Task, "attempt", ref.Attempt, "error", err)
 	}
 
 	key := tasklogModel.AttemptKey{RunId: ref.RunId, Task: ref.Task, Attempt: ref.Attempt}
-	if err = s.tasklog.Finish(key, []tasklogModel.Entry{exitLogEntry(exit, retryAt)}); err != nil {
+	if err = s.tasklog.Finish(ctx, key, []tasklogModel.Entry{exitLogEntry(exit, retryAt)}); err != nil {
 		slog.Warn("finish task log", "run_id", ref.RunId, "task", ref.Task, "attempt", ref.Attempt, "error", err)
 	}
 
@@ -730,7 +712,7 @@ func retryBackoff(delaySec int, failedAttempt int32) time.Duration {
 }
 
 // exitLogEntry — строка от control plane с исходом попытки; при смерти SDK
-// вместе с процессом это единственный след причины смерти в логе (решение №7).
+// вместе с процессом это единственный след причины смерти в логе.
 func exitLogEntry(exit runModel.ExitInfo, retryAt *time.Time) tasklogModel.Entry {
 	line := "attempt failed"
 	if exit.Success {

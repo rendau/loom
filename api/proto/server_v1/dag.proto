@@ -45,7 +45,7 @@ service DagService {
     };
   }
 
-  // SetDagAutoUpdate включает/выключает авто-обновление дага (решение №30):
+  // SetDagAutoUpdate включает/выключает авто-обновление дага:
   // control plane периодически сверяет digest тега образа с registry и при
   // изменении перерегистрирует даг автоматически.
   rpc SetDagAutoUpdate(DagSetAutoUpdateReq) returns (google.protobuf.Empty) {
@@ -61,7 +61,7 @@ service DagService {
     };
   }
 
-  // PushDagManifest — внутренний вызов describe-Job'а (решение №29): при
+  // PushDagManifest — внутренний вызов describe-Job'а: при
   // регистрации через k8s Job сам отправляет манифест (или ошибку валидации
   // дага) на control plane, вместо передачи через логи пода. describe_id —
   // одноразовый секрет, выданный Job'у в env при создании; ожидающая
@@ -88,11 +88,11 @@ message DagMain {
   optional google.protobuf.Timestamp modified_at = 9;
   // Ближайший запуск по cron-расписанию; отсутствует у дагов без расписания.
   optional google.protobuf.Timestamp next_run_at = 10;
-  // Наверстывать пропущенные тики расписания (решение №24).
+  // Наверстывать пропущенные тики расписания.
   bool catchup = 11;
-  // Лимит одновременно выполняющихся ранов; 0 — без лимита (решение №26).
+  // Лимит одновременно выполняющихся ранов; 0 — без лимита.
   int32 max_active_runs = 12;
-  // Авто-обновление: poll-синк digest'а тега образа (решение №30).
+  // Авто-обновление: poll-синк digest'а тега образа.
   bool auto_update = 13;
 }
 
@@ -103,7 +103,7 @@ message DagTaskMain {
   int32 retry_delay_sec = 4; // базовая пауза backoff'а; 0 — дефолт сервера
   int32 timeout_sec = 5;     // 0 — без таймаута
   optional DagTaskResources resources = 6;
-  string pool = 7;           // пул слотов; пусто — default (решение №26)
+  string pool = 7;           // пул слотов; пусто — default
   int32 priority = 8;        // больше — раньше из очереди
 }
 
@@ -124,7 +124,7 @@ message DagTaskResources {
 
 message DagRegisterReq {
   string image = 1;
-  // Авто-обновление (решение №30); отсутствует — сохранить текущее значение
+  // Авто-обновление; отсутствует — сохранить текущее значение
   // (перерегистрация не сбрасывает флаг), у нового дага — false.
   optional bool auto_update = 2;
 }

@@ -8,7 +8,7 @@ import "google/api/annotations.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
-// PoolService — пулы слотов параллелизма (решение №26): таски всех дагов
+// PoolService — пулы слотов параллелизма: таски всех дагов
 // конкурируют за слоты своего пула. Удаления нет — на пул могут ссылаться
 // манифесты; slots = 0 ставит пул на паузу.
 service PoolService {

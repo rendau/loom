@@ -1,7 +1,7 @@
 // Package dockercli — инспекция docker-образов дагов через container-CLI
 // (docker или совместимый бинарь): pull, резолв digest, запуск `describe`
 // для получения манифеста при регистрации дага. Используется при
-// EXECUTOR=docker/none; в k8s — k8sdescriber (решение №29).
+// EXECUTOR=docker/none; в k8s — k8sdescriber.
 package dockercli
 
 import (

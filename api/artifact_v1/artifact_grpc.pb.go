@@ -38,10 +38,14 @@ const (
 // Артефакт скоупится на попытку таска: (run_id, task, attempt, name) —
 // ретрай таска пишет свои артефакты новой попыткой, не трогая прошлые.
 type ArtifactServiceClient interface {
-	// WriteArtifact пишет артефакт клиентским стримом: первое сообщение —
-	// header, далее chunk'и, последнее — commit. Закрытие стрима без
-	// commit трактуется как abort (писатель упал).
-	WriteArtifact(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[WriteArtifactRequest, WriteArtifactResponse], error)
+	// WriteArtifact пишет артефакт bidi-стримом: первое сообщение — header,
+	// далее chunk'и, последнее — commit (или abort). Сервер подтверждает
+	// записанное ack'ами (size — байт сохранено); обрыв стрима без
+	// commit/abort НЕ abort'ит запись — стрим остаётся writing и ждёт
+	// резюма: header с resume=true продолжает запись, ack на него сообщает
+	// точку продолжения (писатель досылает неподтверждённый хвост). Судьбу
+	// безвозвратно брошенного стрима решает FinishAttempt попытки.
+	WriteArtifact(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WriteArtifactRequest, WriteArtifactAck], error)
 	// ReadArtifact читает артефакт с offset. При follow=true читатель,
 	// догнавший хвост пишущегося артефакта, ждёт новых данных; поток
 	// завершается только после commit записи, а abort записи возвращает
@@ -68,18 +72,18 @@ func NewArtifactServiceClient(cc grpc.ClientConnInterface) ArtifactServiceClient
 	return &artifactServiceClient{cc}
 }
 
-func (c *artifactServiceClient) WriteArtifact(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[WriteArtifactRequest, WriteArtifactResponse], error) {
+func (c *artifactServiceClient) WriteArtifact(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WriteArtifactRequest, WriteArtifactAck], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &ArtifactService_ServiceDesc.Streams[0], ArtifactService_WriteArtifact_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[WriteArtifactRequest, WriteArtifactResponse]{ClientStream: stream}
+	x := &grpc.GenericClientStream[WriteArtifactRequest, WriteArtifactAck]{ClientStream: stream}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ArtifactService_WriteArtifactClient = grpc.ClientStreamingClient[WriteArtifactRequest, WriteArtifactResponse]
+type ArtifactService_WriteArtifactClient = grpc.BidiStreamingClient[WriteArtifactRequest, WriteArtifactAck]
 
 func (c *artifactServiceClient) ReadArtifact(ctx context.Context, in *ReadArtifactRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadArtifactResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -151,10 +155,14 @@ func (c *artifactServiceClient) DeleteRunArtifacts(ctx context.Context, in *Dele
 // Артефакт скоупится на попытку таска: (run_id, task, attempt, name) —
 // ретрай таска пишет свои артефакты новой попыткой, не трогая прошлые.
 type ArtifactServiceServer interface {
-	// WriteArtifact пишет артефакт клиентским стримом: первое сообщение —
-	// header, далее chunk'и, последнее — commit. Закрытие стрима без
-	// commit трактуется как abort (писатель упал).
-	WriteArtifact(grpc.ClientStreamingServer[WriteArtifactRequest, WriteArtifactResponse]) error
+	// WriteArtifact пишет артефакт bidi-стримом: первое сообщение — header,
+	// далее chunk'и, последнее — commit (или abort). Сервер подтверждает
+	// записанное ack'ами (size — байт сохранено); обрыв стрима без
+	// commit/abort НЕ abort'ит запись — стрим остаётся writing и ждёт
+	// резюма: header с resume=true продолжает запись, ack на него сообщает
+	// точку продолжения (писатель досылает неподтверждённый хвост). Судьбу
+	// безвозвратно брошенного стрима решает FinishAttempt попытки.
+	WriteArtifact(grpc.BidiStreamingServer[WriteArtifactRequest, WriteArtifactAck]) error
 	// ReadArtifact читает артефакт с offset. При follow=true читатель,
 	// догнавший хвост пишущегося артефакта, ждёт новых данных; поток
 	// завершается только после commit записи, а abort записи возвращает
@@ -181,7 +189,7 @@ type ArtifactServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedArtifactServiceServer struct{}
 
-func (UnimplementedArtifactServiceServer) WriteArtifact(grpc.ClientStreamingServer[WriteArtifactRequest, WriteArtifactResponse]) error {
+func (UnimplementedArtifactServiceServer) WriteArtifact(grpc.BidiStreamingServer[WriteArtifactRequest, WriteArtifactAck]) error {
 	return status.Errorf(codes.Unimplemented, "method WriteArtifact not implemented")
 }
 func (UnimplementedArtifactServiceServer) ReadArtifact(*ReadArtifactRequest, grpc.ServerStreamingServer[ReadArtifactResponse]) error {
@@ -221,11 +229,11 @@ func RegisterArtifactServiceServer(s grpc.ServiceRegistrar, srv ArtifactServiceS
 }
 
 func _ArtifactService_WriteArtifact_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ArtifactServiceServer).WriteArtifact(&grpc.GenericServerStream[WriteArtifactRequest, WriteArtifactResponse]{ServerStream: stream})
+	return srv.(ArtifactServiceServer).WriteArtifact(&grpc.GenericServerStream[WriteArtifactRequest, WriteArtifactAck]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ArtifactService_WriteArtifactServer = grpc.ClientStreamingServer[WriteArtifactRequest, WriteArtifactResponse]
+type ArtifactService_WriteArtifactServer = grpc.BidiStreamingServer[WriteArtifactRequest, WriteArtifactAck]
 
 func _ArtifactService_ReadArtifact_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(ReadArtifactRequest)
@@ -338,6 +346,7 @@ var ArtifactService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "WriteArtifact",
 			Handler:       _ArtifactService_WriteArtifact_Handler,
+			ServerStreams: true,
 			ClientStreams: true,
 		},
 		{

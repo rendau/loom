@@ -1,5 +1,5 @@
 // Package registrycli — лёгкий клиент Docker Registry HTTP API v2 для
-// авто-обновления дагов (решение №30): резолв текущего digest'а тега без
+// авто-обновления дагов: резолв текущего digest'а тега без
 // скачивания образа (HEAD /v2/<repo>/manifests/<tag>). Поддерживает
 // anonymous-доступ, Basic и token-auth (Bearer challenge, как у ghcr и
 // Docker Hub); креды — стандартный docker config.json (путь в

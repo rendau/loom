@@ -33,6 +33,12 @@ func NewGrpcServer(name string, register func(*grpc.Server)) *GrpcServer {
 			MinTime:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
+		// ping клиентов: мёртвое соединение (исчезнувший под таска)
+		// закрывается за ~Time+Timeout, освобождая его стримы для резюма
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    10 * time.Second,
+			Timeout: 3 * time.Second,
+		}),
 		grpc.ChainUnaryInterceptor(metrics.Grpc.UnaryServerInterceptor(), GrpcInterceptorRecovery()),
 		grpc.ChainStreamInterceptor(metrics.Grpc.StreamServerInterceptor(), GrpcStreamInterceptorRecovery()),
 	)

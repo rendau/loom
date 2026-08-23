@@ -55,6 +55,14 @@ jobs:
   # Сборка бинарей и docker-образов: на PR — build-only (проверка, что всё
   # собирается), на пуше в main — пуш в ghcr.io с тегом latest,
   # на теге v* — пуш с semver-тегами.
+  #
+  # Образ пересобирается только когда изменилось замыкание его входов:
+  # content-хэш считается по git-блобам исходников, попадающих в бинарь и
+  # образ (модуль + общие api/sdk, для server ещё admin/), плюс go.work,
+  # go.work.sum, Dockerfile, Makefile и сам workflow. Если образ с тегом
+  # content-<hash> уже в registry — сборка и пуш пропускаются, digest тега
+  # latest не меняется, и деплой (watch по digest'у) не рестартит под.
+  # Коммит, трогающий только server/, не тронет под artifact — и наоборот.
   images:
     runs-on: ubuntu-latest
     needs: [go, admin]
@@ -63,25 +71,14 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.work
-          cache-dependency-path: go.work.sum
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: admin/pnpm-lock.yaml
 
-      # Dockerfile'ы рантаймовые: копируют готовый бинарь из cmd/build,
-      # server дополнительно — migrations и статику админки из server/admin-ui
-      - name: Build binaries
-        run: make build
-      - name: Build admin SPA
-        run: make build-admin
+      - name: Compute content hashes
+        id: hash
+        run: |
+          calc() { git ls-tree -r HEAD --format='%(objectname) %(path)' -- "$@" | sha256sum | cut -c1-16; }
+          common="api sdk go.work go.work.sum Makefile .github/workflows/ci.yml"
+          echo "artifact=$(calc artifact $common)" >> "$GITHUB_OUTPUT"
+          echo "server=$(calc server admin $common)" >> "$GITHUB_OUTPUT"
 
       - name: Login to ghcr.io
         if: github.event_name == 'push'
@@ -91,7 +88,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # только на пуше в ветку: релизные теги v* собираются всегда, PR — тоже
+      # (build-only). Пустой output на PR/теге означает «собирать».
+      - name: Check for existing images
+        id: exists
+        if: github.event_name == 'push' && github.ref_type != 'tag'
+        run: |
+          check() { docker manifest inspect "$1" >/dev/null 2>&1 && echo true || echo false; }
+          echo "artifact=$(check ghcr.io/${{ github.repository }}/artifact:content-${{ steps.hash.outputs.artifact }})" >> "$GITHUB_OUTPUT"
+          echo "server=$(check ghcr.io/${{ github.repository }}/server:content-${{ steps.hash.outputs.server }})" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v6
+        if: steps.exists.outputs.artifact != 'true' || steps.exists.outputs.server != 'true'
+        with:
+          go-version-file: go.work
+          cache-dependency-path: go.work.sum
+
+      # ── artifact ──
+      # Dockerfile рантаймовый: копирует готовый бинарь из cmd/build
+      - name: Build artifact binary
+        if: steps.exists.outputs.artifact != 'true'
+        run: make build-artifact
       - name: Docker meta (artifact)
+        if: steps.exists.outputs.artifact != 'true'
         id: meta_artifact
         uses: docker/metadata-action@v5
         with:
@@ -99,8 +118,10 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=content-${{ steps.hash.outputs.artifact }},enable=${{ github.event_name == 'push' }}
             type=ref,event=pr
       - name: Build/push artifact image
+        if: steps.exists.outputs.artifact != 'true'
         uses: docker/build-push-action@v6
         with:
           context: artifact
@@ -108,7 +129,25 @@ jobs:
           tags: ${{ steps.meta_artifact.outputs.tags }}
           labels: ${{ steps.meta_artifact.outputs.labels }}
 
+      # ── server (бинарь + migrations + статика админки) ──
+      - uses: pnpm/action-setup@v4
+        if: steps.exists.outputs.server != 'true'
+        with:
+          version: 10
+      - uses: actions/setup-node@v5
+        if: steps.exists.outputs.server != 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: admin/pnpm-lock.yaml
+      - name: Build server binary
+        if: steps.exists.outputs.server != 'true'
+        run: make build-server
+      - name: Build admin SPA
+        if: steps.exists.outputs.server != 'true'
+        run: make build-admin
       - name: Docker meta (server)
+        if: steps.exists.outputs.server != 'true'
         id: meta_server
         uses: docker/metadata-action@v5
         with:
@@ -116,8 +155,10 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=content-${{ steps.hash.outputs.server }},enable=${{ github.event_name == 'push' }}
             type=ref,event=pr
       - name: Build/push server image
+        if: steps.exists.outputs.server != 'true'
         uses: docker/build-push-action@v6
         with:
           context: server

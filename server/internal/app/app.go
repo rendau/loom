@@ -31,7 +31,6 @@ import (
 	domainScheduler "github.com/rendau/loom/server/internal/domain/scheduler"
 	secretDb "github.com/rendau/loom/server/internal/domain/secret/repo/db"
 	secretService "github.com/rendau/loom/server/internal/domain/secret/service"
-	domainTasklog "github.com/rendau/loom/server/internal/domain/tasklog"
 	grpcHandler "github.com/rendau/loom/server/internal/handler/grpc"
 	"github.com/rendau/loom/server/internal/service/artifactcli"
 	"github.com/rendau/loom/server/internal/service/dockercli"
@@ -101,19 +100,12 @@ func (a *App) Init() {
 	secretSvc, err := secretService.New(secretDb.New(repoBase), config.Conf.SecretKey)
 	errCheck(err, "secret service init")
 
-	tasklogSvc, err := domainTasklog.New(config.Conf.LogDir)
-	errCheck(err, "tasklog service init")
-	slog.Info("task log dir: " + config.Conf.LogDir)
-
 	// services
-	if config.Conf.AuthSecret == "" {
-		slog.Warn("attempt token auth disabled (AUTH_SECRET is empty)")
-	}
-	a.artifactCli, err = artifactcli.New(config.Conf.ArtifactAddr, config.Conf.AuthSecret)
+	a.artifactCli, err = artifactcli.New(config.Conf.ArtifactAddr)
 	errCheck(err, "artifact client init")
 
 	// инспектор образов регистрации следует executor'у: в k8s — одноразовый
-	// describe-Job, который push'ит манифест на control plane (решение №29),
+	// describe-Job, который push'ит манифест на control plane,
 	// иначе — docker-CLI (без sink'а)
 	var (
 		imageInspector dagUsc.ImageInspectorI = dockercli.New(config.Conf.DockerBin)
@@ -143,7 +135,7 @@ func (a *App) Init() {
 
 	if a.executor != nil {
 		a.scheduler = domainScheduler.New(
-			runSvc, dagSvc, a.executor, a.artifactCli, tasklogSvc, secretSvc,
+			runSvc, dagSvc, a.executor, a.artifactCli, a.artifactCli, secretSvc,
 			domainScheduler.Config{
 				Tick:          config.Conf.SchedTick,
 				CronTick:      config.Conf.SchedCronTick,
@@ -154,27 +146,25 @@ func (a *App) Init() {
 					ArtifactAddr: config.Conf.TaskArtifactAddr,
 					ServerAddr:   config.Conf.TaskServerAddr,
 				},
-				TokenSecret: config.Conf.AuthSecret,
-				TokenTTL:    config.Conf.TokenTTL,
 			},
 		)
 		schedulerNudger = a.scheduler
 	}
 
 	// retention
-	a.retention = domainRetention.New(runSvc, a.artifactCli, tasklogSvc,
+	a.retention = domainRetention.New(runSvc, a.artifactCli, a.artifactCli,
 		config.Conf.RunTTL, config.Conf.RetentionTick)
 
 	// usecases
 	dagUsecase := dagUsc.New(dagSvc, imageInspector, poolSvc, manifestSink)
 
-	// авто-обновление дагов (решение №30): digest-чек registry + авто-
+	// авто-обновление дагов: digest-чек registry + авто-
 	// перерегистрация через обычный Register-флоу usecase'а
 	a.dagSync = domainDagSync.New(dagSvc, registrycli.New(config.Conf.RegistryAuthFile),
 		dagUsecase, config.Conf.DagSyncTick)
 
 	runUsecase := runUsc.New(runSvc, dagSvc, schedulerNudger)
-	tasklogUsecase := tasklogUsc.New(tasklogSvc, runSvc)
+	tasklogUsecase := tasklogUsc.New(a.artifactCli, runSvc)
 	poolUsecase := poolUsc.New(poolSvc)
 	secretUsecase := secretUsc.New(secretSvc)
 
@@ -182,8 +172,8 @@ func (a *App) Init() {
 	{
 		dagHandler := grpcHandler.NewDag(dagUsecase)
 		runHandler := grpcHandler.NewRun(runUsecase)
-		tasklogHandler := grpcHandler.NewTaskLog(tasklogUsecase, config.Conf.AuthSecret)
-		taskValueHandler := grpcHandler.NewTaskValue(runUsecase, config.Conf.AuthSecret)
+		tasklogHandler := grpcHandler.NewTaskLog(tasklogUsecase)
+		taskValueHandler := grpcHandler.NewTaskValue(runUsecase)
 		poolHandler := grpcHandler.NewPool(poolUsecase)
 		secretHandler := grpcHandler.NewSecret(secretUsecase)
 

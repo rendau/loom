@@ -11,10 +11,14 @@ option go_package = "github.com/rendau/loom/api/artifact_v1;artifact_v1";
 // Артефакт скоупится на попытку таска: (run_id, task, attempt, name) —
 // ретрай таска пишет свои артефакты новой попыткой, не трогая прошлые.
 service ArtifactService {
-  // WriteArtifact пишет артефакт клиентским стримом: первое сообщение —
-  // header, далее chunk'и, последнее — commit. Закрытие стрима без
-  // commit трактуется как abort (писатель упал).
-  rpc WriteArtifact(stream WriteArtifactRequest) returns (WriteArtifactResponse);
+  // WriteArtifact пишет артефакт bidi-стримом: первое сообщение — header,
+  // далее chunk'и, последнее — commit (или abort). Сервер подтверждает
+  // записанное ack'ами (size — байт сохранено); обрыв стрима без
+  // commit/abort НЕ abort'ит запись — стрим остаётся writing и ждёт
+  // резюма: header с resume=true продолжает запись, ack на него сообщает
+  // точку продолжения (писатель досылает неподтверждённый хвост). Судьбу
+  // безвозвратно брошенного стрима решает FinishAttempt попытки.
+  rpc WriteArtifact(stream WriteArtifactRequest) returns (stream WriteArtifactAck);
 
   // ReadArtifact читает артефакт с offset. При follow=true читатель,
   // догнавший хвост пишущегося артефакта, ждёт новых данных; поток
@@ -58,14 +62,27 @@ enum ArtifactState {
 
 message WriteArtifactRequest {
   oneof msg {
-    ArtifactRef header = 1;
+    WriteArtifactHeader header = 1;
     bytes chunk = 2;
     bool commit = 3;
+    bool abort = 4;
   }
 }
 
-message WriteArtifactResponse {
+message WriteArtifactHeader {
+  ArtifactRef ref = 1;
+  // resume — реконнект писателя: продолжить writing-стрим с текущего
+  // размера (ack на header — точка продолжения); false — новая запись.
+  bool resume = 2;
+}
+
+// WriteArtifactAck — подтверждение приёма: сервер сохранил size байт
+// (после header — точка продолжения записи); committed/aborted — ответ на
+// commit/abort, запись завершена.
+message WriteArtifactAck {
   int64 size = 1;
+  bool committed = 2;
+  bool aborted = 3;
 }
 
 // Read

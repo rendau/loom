@@ -7,31 +7,6 @@ import (
 	domainModel "github.com/rendau/loom/server/internal/domain/tasklog/model"
 )
 
-// proto → domain
-
-func DecodeTaskLogEntry(v *pb.TaskLogEntry, _ int) domainModel.Entry {
-	return domainModel.Entry{
-		TsUnixMs: v.GetTsUnixMs(),
-		Source:   decodeTaskLogSource(v.GetSource()),
-		Line:     v.GetLine(),
-	}
-}
-
-func decodeTaskLogSource(v pb.TaskLogSource) string {
-	switch v {
-	case pb.TaskLogSource_TASK_LOG_SOURCE_LOG:
-		return domainModel.SourceLog
-	case pb.TaskLogSource_TASK_LOG_SOURCE_STDOUT:
-		return domainModel.SourceStdout
-	case pb.TaskLogSource_TASK_LOG_SOURCE_STDERR:
-		return domainModel.SourceStderr
-	case pb.TaskLogSource_TASK_LOG_SOURCE_SERVER:
-		return domainModel.SourceServer
-	default:
-		return ""
-	}
-}
-
 // domain → proto
 
 func EncodeTaskLogEntry(v domainModel.Entry, _ int) *pb.TaskLogEntry {

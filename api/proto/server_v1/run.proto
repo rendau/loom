@@ -69,7 +69,7 @@ message RunMain {
   google.protobuf.Timestamp created_at = 7;
   optional google.protobuf.Timestamp finished_at = 8;
   // «Дата данных» рана: тик расписания у cron/backfill-рана, момент
-  // триггера у ручного (решение №23).
+  // триггера у ручного.
   google.protobuf.Timestamp logical_date = 9;
   // Параметры рана (аналог dagrun.conf); отсутствуют — ран без параметров.
   google.protobuf.Struct params = 10;

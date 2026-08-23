@@ -81,8 +81,8 @@ go run . run --params='{"day":"x"}'  # с параметрами рана
 - **Runtime**: `Output`/`Input` — стримы артефактов; `PushValue`/`PullValue` —
   мелкие значения (аналог XCom, ≤64KB); `Params`/`BindParams` — параметры
   рана; `LogicalDate` — «дата данных»; `Log()` — логгер (в распределённом
-  режиме строки уходят стримом на control plane).
+  режиме строки уходят стримом на artifact-сервер с подтверждениями
+  доставки и дублем в stdout контейнера).
 
 Семантика артефактов, commit/abort и жизненный цикл попыток — в
-[README монорепы](https://github.com/rendau/loom#readme) и
-[ROADMAP](https://github.com/rendau/loom/blob/main/ROADMAP.md).
+[README монорепы](https://github.com/rendau/loom#readme).

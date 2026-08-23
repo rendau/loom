@@ -47,12 +47,12 @@ type DagServiceClient interface {
 	// SetDagPaused ставит даг на паузу / снимает с паузы. Пауза останавливает
 	// только запуски по расписанию; ручной триггер работает.
 	SetDagPaused(ctx context.Context, in *DagSetPausedReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	// SetDagAutoUpdate включает/выключает авто-обновление дага (решение №30):
+	// SetDagAutoUpdate включает/выключает авто-обновление дага:
 	// control plane периодически сверяет digest тега образа с registry и при
 	// изменении перерегистрирует даг автоматически.
 	SetDagAutoUpdate(ctx context.Context, in *DagSetAutoUpdateReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	DeleteDag(ctx context.Context, in *DagDeleteReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	// PushDagManifest — внутренний вызов describe-Job'а (решение №29): при
+	// PushDagManifest — внутренний вызов describe-Job'а: при
 	// регистрации через k8s Job сам отправляет манифест (или ошибку валидации
 	// дага) на control plane, вместо передачи через логи пода. describe_id —
 	// одноразовый секрет, выданный Job'у в env при создании; ожидающая
@@ -156,12 +156,12 @@ type DagServiceServer interface {
 	// SetDagPaused ставит даг на паузу / снимает с паузы. Пауза останавливает
 	// только запуски по расписанию; ручной триггер работает.
 	SetDagPaused(context.Context, *DagSetPausedReq) (*emptypb.Empty, error)
-	// SetDagAutoUpdate включает/выключает авто-обновление дага (решение №30):
+	// SetDagAutoUpdate включает/выключает авто-обновление дага:
 	// control plane периодически сверяет digest тега образа с registry и при
 	// изменении перерегистрирует даг автоматически.
 	SetDagAutoUpdate(context.Context, *DagSetAutoUpdateReq) (*emptypb.Empty, error)
 	DeleteDag(context.Context, *DagDeleteReq) (*emptypb.Empty, error)
-	// PushDagManifest — внутренний вызов describe-Job'а (решение №29): при
+	// PushDagManifest — внутренний вызов describe-Job'а: при
 	// регистрации через k8s Job сам отправляет манифест (или ошибку валидации
 	// дага) на control plane, вместо передачи через логи пода. describe_id —
 	// одноразовый секрет, выданный Job'у в env при создании; ожидающая

@@ -7,9 +7,9 @@ import (
 	"github.com/rendau/loom/server/internal/domain/tasklog/model"
 )
 
+// ServiceI — чтение логов с artifact-сервера (artifactcli).
 type ServiceI interface {
-	Append(key model.AttemptKey, entries []model.Entry) error
-	Read(ctx context.Context, key model.AttemptKey, follow bool, fn func([]model.Entry) error) error
+	ReadTaskLog(ctx context.Context, key model.AttemptKey, follow bool, fn func([]model.Entry) error) error
 }
 
 type RunServiceI interface {

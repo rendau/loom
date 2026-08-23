@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rendau/loom/api/attempttoken"
 	loom "github.com/rendau/loom/sdk"
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
 	"github.com/rendau/loom/server/internal/domain/dag/manifest"
@@ -40,16 +39,12 @@ import (
 	domainScheduler "github.com/rendau/loom/server/internal/domain/scheduler"
 	secretDb "github.com/rendau/loom/server/internal/domain/secret/repo/db"
 	secretService "github.com/rendau/loom/server/internal/domain/secret/service"
-	domainTasklog "github.com/rendau/loom/server/internal/domain/tasklog"
 	tasklogModel "github.com/rendau/loom/server/internal/domain/tasklog/model"
 	"github.com/rendau/loom/server/internal/errs"
 	runUsc "github.com/rendau/loom/server/internal/usecase/run"
 )
 
 const waitTimeout = 5 * time.Second
-
-// testAuthSecret — секрет attempt-токенов тестового планировщика.
-const testAuthSecret = "test-auth-secret"
 
 // ── фейки ───────────────────────────────────────────────
 
@@ -167,6 +162,38 @@ func (a *fakeArtifact) deleted() []string {
 	return slices.Clone(a.deletedRuns)
 }
 
+// fakeTasklog — фейк лог-клиента artifact-сервера: планировщик финализирует
+// им логи попыток, retention удаляет логи рана.
+type fakeTasklog struct {
+	mu       sync.Mutex
+	finished map[tasklogModel.AttemptKey][]tasklogModel.Entry
+	deleted  []string
+}
+
+func newFakeTasklog() *fakeTasklog {
+	return &fakeTasklog{finished: map[tasklogModel.AttemptKey][]tasklogModel.Entry{}}
+}
+
+func (f *fakeTasklog) Finish(_ context.Context, key tasklogModel.AttemptKey, final []tasklogModel.Entry) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.finished[key] = append(f.finished[key], final...)
+	return nil
+}
+
+func (f *fakeTasklog) DeleteRunTaskLogs(_ context.Context, runId string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleted = append(f.deleted, runId)
+	return nil
+}
+
+func (f *fakeTasklog) deletedRuns() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.deleted)
+}
+
 // ── окружение ───────────────────────────────────────────
 
 type env struct {
@@ -175,7 +202,7 @@ type env struct {
 	runSvc     *runService.Service
 	poolSvc    *poolService.Service
 	secretSvc  *secretService.Service
-	tasklogSvc *domainTasklog.Service
+	tasklog    *fakeTasklog
 	executor   *fakeExecutor
 	artifact   *fakeArtifact
 	scheduler  *domainScheduler.Scheduler
@@ -217,13 +244,11 @@ func newEnv(t *testing.T) *env {
 		`INSERT INTO pool (name, slots) VALUES ('default', 64) ON CONFLICT (name) DO NOTHING`)
 	require.NoError(t, err)
 
-	tasklogSvc, err := domainTasklog.New(t.TempDir())
-	require.NoError(t, err)
-
+	tasklog := newFakeTasklog()
 	executor := newFakeExecutor()
 	artifact := &fakeArtifact{}
 
-	scheduler := domainScheduler.New(runSvc, dagSvc, executor, artifact, tasklogSvc, secretSvc,
+	scheduler := domainScheduler.New(runSvc, dagSvc, executor, artifact, tasklog, secretSvc,
 		domainScheduler.Config{
 			Tick:          30 * time.Millisecond,
 			CronTick:      50 * time.Millisecond,
@@ -231,8 +256,6 @@ func newEnv(t *testing.T) *env {
 			ZombieGrace:   50 * time.Millisecond,
 			ClaimLimit:    10,
 			TaskEnv:       domainScheduler.TaskEnv{ArtifactAddr: "artifact:5051", ServerAddr: "server:5052"},
-			TokenSecret:   testAuthSecret,
-			TokenTTL:      time.Minute,
 		})
 	scheduler.Start()
 	t.Cleanup(scheduler.Stop)
@@ -243,7 +266,7 @@ func newEnv(t *testing.T) *env {
 		runSvc:     runSvc,
 		poolSvc:    poolSvc,
 		secretSvc:  secretSvc,
-		tasklogSvc: tasklogSvc,
+		tasklog:    tasklog,
 		executor:   executor,
 		artifact:   artifact,
 		scheduler:  scheduler,
@@ -308,17 +331,13 @@ func (e *env) waitRunStatus(t *testing.T, runId, status string) {
 	}, waitTimeout, 10*time.Millisecond, "run %q did not reach status %q", runId, status)
 }
 
-func readLog(t *testing.T, svc *domainTasklog.Service, ref runModel.AttemptRef) []tasklogModel.Entry {
+// readLog — финальные строки лога попытки, дописанные планировщиком при
+// финализации (сам лог живёт на artifact-сервере, здесь он — фейк).
+func readLog(t *testing.T, f *fakeTasklog, ref runModel.AttemptRef) []tasklogModel.Entry {
 	t.Helper()
-	var got []tasklogModel.Entry
-	err := svc.Read(context.Background(),
-		tasklogModel.AttemptKey{RunId: ref.RunId, Task: ref.Task, Attempt: ref.Attempt},
-		false, func(entries []tasklogModel.Entry) error {
-			got = append(got, entries...)
-			return nil
-		})
-	require.NoError(t, err)
-	return got
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.finished[tasklogModel.AttemptKey{RunId: ref.RunId, Task: ref.Task, Attempt: ref.Attempt}])
 }
 
 // ── тесты ───────────────────────────────────────────────
@@ -353,14 +372,6 @@ func TestSchedulerHappyPathWithStreamedEdge(t *testing.T) {
 	assert.Equal(t, "{}", extract.Env[loom.EnvDepAttempts])
 	assert.Equal(t, "artifact:5051", extract.Env[loom.EnvArtifactAddr])
 	assert.Equal(t, "server:5052", extract.Env[loom.EnvServerAddr])
-
-	// attempt-токен выдан и скоуплен ровно на эту попытку
-	claims, err := attempttoken.Verify([]byte(testAuthSecret), extract.Env[loom.EnvToken], time.Now())
-	require.NoError(t, err)
-	assert.Equal(t, runId, claims.RunID)
-	assert.Equal(t, "extract", claims.Task)
-	assert.Equal(t, int32(1), claims.Attempt)
-	assert.False(t, claims.Admin)
 
 	// стримовый получатель ко-стартует со стартом отправителя
 	e.executor.started(extract.Ref)
@@ -397,7 +408,7 @@ func TestSchedulerHappyPathWithStreamedEdge(t *testing.T) {
 
 	// лог каждой попытки закоммичен и содержит строку control plane об исходе
 	for _, ref := range []runModel.AttemptRef{extract.Ref, transform.Ref, load.Ref} {
-		entries := readLog(t, e.tasklogSvc, ref)
+		entries := readLog(t, e.tasklog, ref)
 		require.NotEmpty(t, entries)
 		last := entries[len(entries)-1]
 		assert.Equal(t, tasklogModel.SourceServer, last.Source)
@@ -454,7 +465,7 @@ func TestSchedulerFailureCascade(t *testing.T) {
 	assert.Equal(t, "OOMKilled", attempts[0].ExitReason)
 
 	// причина смерти дописана в лог попытки
-	entries := readLog(t, e.tasklogSvc, a.Ref)
+	entries := readLog(t, e.tasklog, a.Ref)
 	require.NotEmpty(t, entries)
 	assert.Contains(t, entries[len(entries)-1].Line, "OOMKilled")
 }
@@ -543,7 +554,7 @@ func TestSchedulerRetrySucceeds(t *testing.T) {
 	assert.True(t, tis[0].FinishedAt.IsZero(), "up_for_retry — не терминальный статус")
 
 	// в логе первой попытки — строка о запланированном ретрае
-	entries := readLog(t, e.tasklogSvc, first.Ref)
+	entries := readLog(t, e.tasklog, first.Ref)
 	require.NotEmpty(t, entries)
 	assert.Contains(t, entries[len(entries)-1].Line, "retry scheduled at")
 
@@ -712,7 +723,7 @@ func TestSchedulerTaskTimeout(t *testing.T) {
 	assert.Equal(t, runModel.AttemptStatusFailed, attempts[0].Status)
 	assert.Equal(t, "timeout", attempts[0].ExitReason)
 
-	entries := readLog(t, e.tasklogSvc, a.Ref)
+	entries := readLog(t, e.tasklog, a.Ref)
 	require.NotEmpty(t, entries)
 	assert.Contains(t, entries[len(entries)-1].Line, "timeout")
 }
@@ -777,7 +788,7 @@ func TestSchedulerZombieRunningPodLost(t *testing.T) {
 	assert.Equal(t, "pod_lost", attempts[0].ExitReason)
 
 	// причина зафиксирована и в логе попытки
-	entries := readLog(t, e.tasklogSvc, a.Ref)
+	entries := readLog(t, e.tasklog, a.Ref)
 	require.NotEmpty(t, entries)
 	assert.Contains(t, entries[len(entries)-1].Line, "pod_lost")
 }
@@ -1046,7 +1057,7 @@ func TestTaskValues(t *testing.T) {
 	assert.Zero(t, count)
 }
 
-// Пулы (решение №26): таски конкурируют за слоты пула, приоритетный
+// Пулы: таски конкурируют за слоты пула, приоритетный
 // забирается первым; освобождение слота пускает следующего.
 func TestPoolSlotsAndPriority(t *testing.T) {
 	e := newEnv(t)
@@ -1085,7 +1096,7 @@ func TestPoolSlotsAndPriority(t *testing.T) {
 	require.NoError(t, e.poolSvc.CheckExist(context.Background(), []string{"default", "tiny"}))
 }
 
-// max_active_runs (решение №26): второй ран дага ждёт завершения первого.
+// max_active_runs: второй ран дага ждёт завершения первого.
 func TestMaxActiveRuns(t *testing.T) {
 	e := newEnv(t)
 	dagName := e.registerDag(t, `{
@@ -1122,7 +1133,7 @@ func TestMaxActiveRuns(t *testing.T) {
 	e.waitRunStatus(t, run2, runModel.RunStatusSuccess)
 }
 
-// Секреты (решение №27): значение шифруется в БД и инъектится в env попытки;
+// Секреты: значение шифруется в БД и инъектится в env попытки;
 // отсутствующий секрет валит запуск (launch_failed).
 func TestSecrets(t *testing.T) {
 	e := newEnv(t)
@@ -1194,7 +1205,7 @@ func TestRetentionSweep(t *testing.T) {
 	e.executor.finished(a.Ref, true, 0, "")
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	retention := domainRetention.New(e.runSvc, e.artifact, e.tasklogSvc, time.Hour, time.Hour)
+	retention := domainRetention.New(e.runSvc, e.artifact, e.tasklog, time.Hour, time.Hour)
 
 	// ран моложе TTL — не удаляется
 	deleted, err := retention.Sweep(context.Background())
@@ -1215,14 +1226,9 @@ func TestRetentionSweep(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, found)
 
-	// artifact-сервер получил DeleteRunArtifacts
+	// artifact-сервер получил DeleteRunArtifacts и DeleteRunTaskLogs
 	assert.Equal(t, []string{runId}, e.artifact.deleted())
-
-	// лог попытки удалён
-	err = e.tasklogSvc.Read(context.Background(),
-		tasklogModel.AttemptKey{RunId: runId, Task: "a", Attempt: 1}, false,
-		func([]tasklogModel.Entry) error { return nil })
-	assert.ErrorIs(t, err, errs.ObjectNotFound)
+	assert.Equal(t, []string{runId}, e.tasklog.deletedRuns())
 
 	// повторный проход — пусто
 	deleted, err = retention.Sweep(context.Background())

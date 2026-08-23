@@ -7,25 +7,22 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 
 	artifactpb "github.com/rendau/loom/api/artifact_v1"
-	"github.com/rendau/loom/api/attempttoken"
-	serverpb "github.com/rendau/loom/api/server_v1"
 	domain "github.com/rendau/loom/artifact/internal/domain/artifact"
+	tasklogDomain "github.com/rendau/loom/artifact/internal/domain/tasklog"
 	handler "github.com/rendau/loom/artifact/internal/handler/grpc"
 	loom "github.com/rendau/loom/sdk"
 	"github.com/rendau/loom/sdk/streamstore"
@@ -46,20 +43,20 @@ func startGrpcServer(t *testing.T, register func(*grpc.Server)) string {
 	return lis.Addr().String()
 }
 
+// startArtifactServer поднимает artifact-сервер целиком: артефакты и логи
+// тасков (отдельные streamstore-каталоги, как в проде).
 func startArtifactServer(t *testing.T) string {
-	return startArtifactServerAuth(t, "")
-}
-
-// startArtifactServerAuth поднимает artifact-сервер; непустой secret включает
-// проверку attempt-токенов.
-func startArtifactServerAuth(t *testing.T, secret string) string {
 	t.Helper()
 
 	svc, err := domain.New(t.TempDir())
 	require.NoError(t, err)
 
+	tasklogSvc, err := tasklogDomain.New(t.TempDir())
+	require.NoError(t, err)
+
 	return startGrpcServer(t, func(srv *grpc.Server) {
-		artifactpb.RegisterArtifactServiceServer(srv, handler.NewArtifact(svc, secret))
+		artifactpb.RegisterArtifactServiceServer(srv, handler.NewArtifact(svc))
+		artifactpb.RegisterTaskLogServiceServer(srv, handler.NewTaskLog(tasklogSvc))
 	})
 }
 
@@ -225,60 +222,33 @@ func TestRunTaskMissingArtifactAfterFinish(t *testing.T) {
 	require.ErrorIs(t, err, streamstore.ErrNotFound)
 }
 
-// logCollector — стаб TaskLogService control plane'а.
-type logCollector struct {
-	serverpb.UnimplementedTaskLogServiceServer
+// readTaskLog вычитывает лог попытки с artifact-сервера (без follow).
+func readTaskLog(t *testing.T, addr, runId, task string, attempt int32) []*artifactpb.TaskLogEntry {
+	t.Helper()
 
-	mu      sync.Mutex
-	headers []*serverpb.TaskLogHeader
-	entries []*serverpb.TaskLogEntry
-}
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
 
-func (c *logCollector) PushTaskLog(stream grpc.ClientStreamingServer[serverpb.PushTaskLogRequest, serverpb.PushTaskLogResponse]) error {
+	stream, err := artifactpb.NewTaskLogServiceClient(conn).ReadTaskLog(context.Background(),
+		&artifactpb.ReadTaskLogRequest{RunId: runId, Task: task, Attempt: attempt})
+	require.NoError(t, err)
+
+	var entries []*artifactpb.TaskLogEntry
 	for {
-		msg, err := stream.Recv()
+		rep, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
-			return stream.SendAndClose(&serverpb.PushTaskLogResponse{})
+			return entries
 		}
-		if err != nil {
-			return err
-		}
-
-		c.mu.Lock()
-		switch m := msg.GetMsg().(type) {
-		case *serverpb.PushTaskLogRequest_Header:
-			c.headers = append(c.headers, m.Header)
-		case *serverpb.PushTaskLogRequest_Batch:
-			c.entries = append(c.entries, m.Batch.GetEntries()...)
-		}
-		c.mu.Unlock()
+		require.NoError(t, err)
+		entries = append(entries, rep.GetEntries()...)
 	}
 }
 
-func (c *logCollector) logLines() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	var lines []string
-	for _, e := range c.entries {
-		if e.GetSource() == serverpb.TaskLogSource_TASK_LOG_SOURCE_LOG {
-			lines = append(lines, e.GetLine())
-		}
-	}
-
-	return lines
-}
-
-// TestRunTaskLogStream — логи таска уезжают батчами на control plane:
-// header идентифицирует attempt, строки Runtime.Log доставлены до
-// завершения RunTask.
+// TestRunTaskLogStream — логи таска уезжают стримом на artifact-сервер:
+// строки Runtime.Log подтверждены и читаемы к завершению RunTask.
 func TestRunTaskLogStream(t *testing.T) {
-	artifactAddr := startArtifactServer(t)
-
-	collector := &logCollector{}
-	serverAddr := startGrpcServer(t, func(srv *grpc.Server) {
-		serverpb.RegisterTaskLogServiceServer(srv, collector)
-	})
+	addr := startArtifactServer(t)
 
 	d := loom.New("itest")
 	d.Task("worker", func(_ context.Context, rt *loom.Runtime) error {
@@ -286,18 +256,12 @@ func TestRunTaskLogStream(t *testing.T) {
 		return nil
 	})
 
-	spec := taskSpec(artifactAddr, "worker")
-	spec.ServerAddr = serverAddr
-	require.NoError(t, d.RunTask(context.Background(), spec))
+	require.NoError(t, d.RunTask(context.Background(), taskSpec(addr, "worker")))
 
-	collector.mu.Lock()
-	require.Len(t, collector.headers, 1)
-	require.Equal(t, "run-1", collector.headers[0].GetRunId())
-	require.Equal(t, "worker", collector.headers[0].GetTask())
-	require.EqualValues(t, 1, collector.headers[0].GetAttempt())
-	collector.mu.Unlock()
-
-	lines := collector.logLines()
+	lines := lo.FilterMap(readTaskLog(t, addr, "run-1", "worker", 1),
+		func(e *artifactpb.TaskLogEntry, _ int) (string, bool) {
+			return e.GetLine(), e.GetSource() == artifactpb.TaskLogSource_TASK_LOG_SOURCE_LOG
+		})
 	require.True(t, len(lines) >= 3, "want start/hello/success lines, got: %v", lines)
 
 	var found bool
@@ -310,86 +274,146 @@ func TestRunTaskLogStream(t *testing.T) {
 	require.True(t, found, "log line not delivered: %v", lines)
 }
 
-// TestAttemptTokenAuth — проверка attempt-токенов: запись только в свой
-// attempt, чтение — в своём ране, служебные операции — только admin-токеном,
-// просроченный токен отклоняется.
-func TestAttemptTokenAuth(t *testing.T) {
-	const secret = "itest-secret"
-	addr := startArtifactServerAuth(t, secret)
+// ── рестарты artifact-сервера ───────────────────────────
 
-	sign := func(c attempttoken.Claims) string {
-		c.ExpiresAt = time.Now().Add(time.Minute).Unix()
-		token, err := attempttoken.Sign([]byte(secret), c)
-		require.NoError(t, err)
-		return token
+// restartableServer — artifact-сервер, который можно «рестартнуть» на том же
+// адресе: все соединения рвутся, домены пересоздаются над теми же
+// каталогами — как рестарт пода с PVC.
+type restartableServer struct {
+	t       *testing.T
+	addr    string
+	dataDir string
+	logDir  string
+	srv     *grpc.Server
+}
+
+func startRestartableServer(t *testing.T) *restartableServer {
+	t.Helper()
+
+	rs := &restartableServer{t: t, dataDir: t.TempDir(), logDir: t.TempDir()}
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	rs.addr = lis.Addr().String()
+
+	rs.serve(lis)
+	t.Cleanup(func() { rs.srv.Stop() })
+
+	return rs
+}
+
+func (rs *restartableServer) serve(lis net.Listener) {
+	svc, err := domain.New(rs.dataDir)
+	require.NoError(rs.t, err)
+	tasklogSvc, err := tasklogDomain.New(rs.logDir)
+	require.NoError(rs.t, err)
+
+	srv := grpc.NewServer()
+	artifactpb.RegisterArtifactServiceServer(srv, handler.NewArtifact(svc))
+	artifactpb.RegisterTaskLogServiceServer(srv, handler.NewTaskLog(tasklogSvc))
+
+	go func() { _ = srv.Serve(lis) }()
+	rs.srv = srv
+}
+
+func (rs *restartableServer) restart() {
+	rs.srv.Stop()
+
+	var lis net.Listener
+	require.Eventually(rs.t, func() bool {
+		var err error
+		lis, err = net.Listen("tcp", rs.addr)
+		return err == nil
+	}, 5*time.Second, 50*time.Millisecond, "rebind %s", rs.addr)
+
+	rs.serve(lis)
+}
+
+// TestLogStreamSurvivesServerRestart — рестарт artifact-сервера посреди
+// работы таска не теряет и не дублирует строки лога: sink переподключается
+// и досылает неподтверждённый хвост, сервер дедуплицирует по seq.
+func TestLogStreamSurvivesServerRestart(t *testing.T) {
+	rs := startRestartableServer(t)
+
+	const half = 50
+	d := loom.New("itest")
+	d.Task("worker", func(_ context.Context, rt *loom.Runtime) error {
+		for i := range half {
+			rt.Log().Info(fmt.Sprintf("line-%03d", i))
+		}
+		rs.restart()
+		for i := half; i < 2*half; i++ {
+			rt.Log().Info(fmt.Sprintf("line-%03d", i))
+		}
+		return nil
+	})
+
+	require.NoError(t, d.RunTask(context.Background(), taskSpec(rs.addr, "worker")))
+
+	lines := lo.FilterMap(readTaskLog(t, rs.addr, "run-1", "worker", 1),
+		func(e *artifactpb.TaskLogEntry, _ int) (string, bool) {
+			return e.GetLine(), strings.Contains(e.GetLine(), "line-")
+		})
+	require.Len(t, lines, 2*half, "потери или дубли строк: %v", lines)
+	for i, line := range lines {
+		require.Contains(t, line, fmt.Sprintf("line-%03d", i), "строки не по порядку")
 	}
+}
 
-	d := loom.New("auth_dag")
+// TestArtifactStreamsSurviveServerRestart — рестарт artifact-сервера посреди
+// стримового обмена: писатель резюмит запись и досылает хвост, follow-
+// читатель переоткрывается со своего offset'а; данные доходят целиком.
+func TestArtifactStreamsSurviveServerRestart(t *testing.T) {
+	rs := startRestartableServer(t)
+
+	head := []byte("head-before-restart|")
+	tail := []byte("tail-after-restart")
+
+	headRead := make(chan struct{})
+	var got []byte
+
+	d := loom.New("itest")
 	producer := d.Task("producer", func(_ context.Context, rt *loom.Runtime) error {
 		out, err := rt.Output("data")
 		if err != nil {
 			return err
 		}
-		_, err = out.Write([]byte("payload"))
+		if _, err = out.Write(head); err != nil {
+			return err
+		}
+
+		<-headRead // читатель забрал голову — рвём обоих
+		rs.restart()
+
+		_, err = out.Write(tail)
 		return err
 	})
-	var got []byte
 	d.Task("consumer", func(_ context.Context, rt *loom.Runtime) error {
 		in, err := rt.Input("producer", "data")
 		if err != nil {
 			return err
 		}
-		defer in.Close()
-		got, err = io.ReadAll(in)
-		return err
-	}, loom.After(producer))
+		defer func() { _ = in.Close() }()
 
-	// запись со своим токеном
-	spec := taskSpec(addr, "producer")
-	spec.Token = sign(attempttoken.Claims{RunID: spec.RunID, Task: "producer", Attempt: 1})
-	require.NoError(t, d.RunTask(context.Background(), spec))
+		buf := make([]byte, len(head))
+		if _, err = io.ReadFull(in, buf); err != nil {
+			return err
+		}
+		close(headRead)
 
-	// чтение выхода зависимости — токеном своего таска того же рана
-	consumerSpec := taskSpec(addr, "consumer")
-	consumerSpec.Token = sign(attempttoken.Claims{RunID: consumerSpec.RunID, Task: "consumer", Attempt: 1})
-	require.NoError(t, d.RunTask(context.Background(), consumerSpec))
-	require.Equal(t, "payload", string(got))
+		rest, err := io.ReadAll(in)
+		if err != nil {
+			return err
+		}
+		got = append(buf, rest...)
 
-	// без токена — отказ
-	noToken := taskSpec(addr, "producer")
-	noToken.Attempt = 2
-	require.Error(t, d.RunTask(context.Background(), noToken))
+		return nil
+	}, loom.AfterStreamed(producer))
 
-	// токен чужого рана — отказ на запись
-	foreign := taskSpec(addr, "producer")
-	foreign.Attempt = 3
-	foreign.Token = sign(attempttoken.Claims{RunID: "run-2", Task: "producer", Attempt: 3})
-	require.Error(t, d.RunTask(context.Background(), foreign))
+	g, ctx := errgroup.WithContext(context.Background())
+	g.Go(func() error { return d.RunTask(ctx, taskSpec(rs.addr, "producer")) })
+	g.Go(func() error { return d.RunTask(ctx, taskSpec(rs.addr, "consumer")) })
+	require.NoError(t, g.Wait())
 
-	// unary-операции точным статусом: attempt-токен не может чистить ран
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
-	client := artifactpb.NewArtifactServiceClient(conn)
-
-	writerCtx := metadata.AppendToOutgoingContext(context.Background(), attempttoken.MetadataKey, spec.Token)
-	_, err = client.DeleteRunArtifacts(writerCtx, &artifactpb.DeleteRunArtifactsRequest{RunId: spec.RunID})
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
-
-	adminCtx := metadata.AppendToOutgoingContext(context.Background(), attempttoken.MetadataKey,
-		sign(attempttoken.Claims{Admin: true}))
-	_, err = client.DeleteRunArtifacts(adminCtx, &artifactpb.DeleteRunArtifactsRequest{RunId: spec.RunID})
-	require.NoError(t, err)
-
-	// просроченный токен — Unauthenticated
-	expired, err := attempttoken.Sign([]byte(secret), attempttoken.Claims{
-		RunID: spec.RunID, Task: "producer", Attempt: 4,
-		ExpiresAt: time.Now().Add(-time.Minute).Unix(),
-	})
-	require.NoError(t, err)
-	expiredCtx := metadata.AppendToOutgoingContext(context.Background(), attempttoken.MetadataKey, expired)
-	_, err = client.FinishAttempt(expiredCtx, &artifactpb.FinishAttemptRequest{
-		RunId: spec.RunID, Task: "producer", Attempt: 4,
-	})
-	require.Equal(t, codes.Unauthenticated, status.Code(err))
+	require.Equal(t, string(head)+string(tail), string(got))
 }

@@ -17,16 +17,18 @@ const readChunkSize = 256 * 1024
 type Artifact struct {
 	pb.UnsafeArtifactServiceServer
 
-	svc  *domain.Service
-	auth *authorizer
+	svc *domain.Service
 }
 
-// NewArtifact создаёт handler; непустой authSecret включает проверку
-// attempt-токенов (metadata loom-token).
-func NewArtifact(svc *domain.Service, authSecret string) *Artifact {
-	return &Artifact{svc: svc, auth: newAuthorizer(authSecret)}
+func NewArtifact(svc *domain.Service) *Artifact {
+	return &Artifact{svc: svc}
 }
 
+// WriteArtifact — bidi-стрим записи: header (begin или resume) → ack с
+// точкой продолжения, chunk'и → ack'и с числом сохранённых байт,
+// commit/abort → финальный ack. Обрыв стрима без commit/abort отсоединяет
+// писателя (Release), не abort'я запись: писатель вернётся с resume=true и
+// дошлёт неподтверждённый хвост.
 func (h *Artifact) WriteArtifact(stream pb.ArtifactService_WriteArtifactServer) error {
 	first, err := stream.Recv()
 	if err != nil {
@@ -37,15 +39,28 @@ func (h *Artifact) WriteArtifact(stream pb.ArtifactService_WriteArtifactServer) 
 	if header == nil {
 		return status.Error(codes.InvalidArgument, "first message must be header")
 	}
-	if err = h.auth.checkAttempt(stream.Context(), header.GetRunId(), header.GetTask(), header.GetAttempt()); err != nil {
-		return err
-	}
 
-	w, err := h.svc.BeginWrite(decodeRef(header))
+	var w *domain.Writer
+	if header.GetResume() {
+		w, err = h.svc.ResumeWrite(decodeRef(header.GetRef()))
+	} else {
+		w, err = h.svc.BeginWrite(decodeRef(header.GetRef()))
+	}
 	if err != nil {
 		return encodeErr(err)
 	}
-	defer func() { _ = w.Abort() }() // no-op после commit
+
+	// обрыв без commit/abort — отсоединить писателя, оставив стрим writing
+	finished := false
+	defer func() {
+		if !finished {
+			w.Release()
+		}
+	}()
+
+	if err = stream.Send(&pb.WriteArtifactAck{Size: w.Size()}); err != nil {
+		return err
+	}
 
 	metricActiveWriteStreams.Inc()
 	defer metricActiveWriteStreams.Dec()
@@ -53,8 +68,7 @@ func (h *Artifact) WriteArtifact(stream pb.ArtifactService_WriteArtifactServer) 
 	for {
 		msg, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
-			// клиент закрыл стрим без commit — писатель упал: abort
-			return status.Error(codes.Aborted, "stream closed without commit")
+			return nil // клиент ушёл без commit/abort — ждём резюма
 		}
 		if err != nil {
 			return encodeErr(err)
@@ -66,6 +80,9 @@ func (h *Artifact) WriteArtifact(stream pb.ArtifactService_WriteArtifactServer) 
 				return encodeErr(err)
 			}
 			metricReceivedBytes.Add(float64(len(m.Chunk)))
+			if err = stream.Send(&pb.WriteArtifactAck{Size: w.Size()}); err != nil {
+				return err
+			}
 		case *pb.WriteArtifactRequest_Commit:
 			if !m.Commit {
 				return status.Error(codes.InvalidArgument, "commit must be true")
@@ -74,7 +91,17 @@ func (h *Artifact) WriteArtifact(stream pb.ArtifactService_WriteArtifactServer) 
 			if err != nil {
 				return encodeErr(err)
 			}
-			return stream.SendAndClose(&pb.WriteArtifactResponse{Size: size})
+			finished = true
+			return stream.Send(&pb.WriteArtifactAck{Size: size, Committed: true})
+		case *pb.WriteArtifactRequest_Abort:
+			if !m.Abort {
+				return status.Error(codes.InvalidArgument, "abort must be true")
+			}
+			if err = w.Abort(); err != nil {
+				return encodeErr(err)
+			}
+			finished = true
+			return stream.Send(&pb.WriteArtifactAck{Aborted: true})
 		default:
 			return status.Error(codes.InvalidArgument, "unexpected message")
 		}
@@ -82,10 +109,6 @@ func (h *Artifact) WriteArtifact(stream pb.ArtifactService_WriteArtifactServer) 
 }
 
 func (h *Artifact) ReadArtifact(req *pb.ReadArtifactRequest, stream pb.ArtifactService_ReadArtifactServer) error {
-	if err := h.auth.checkRun(stream.Context(), req.GetRef().GetRunId()); err != nil {
-		return err
-	}
-
 	r, err := h.svc.OpenRead(stream.Context(), decodeRef(req.GetRef()), req.GetOffset(), req.GetFollow())
 	if err != nil {
 		return encodeErr(err)
@@ -113,10 +136,6 @@ func (h *Artifact) ReadArtifact(req *pb.ReadArtifactRequest, stream pb.ArtifactS
 }
 
 func (h *Artifact) StatArtifact(ctx context.Context, req *pb.StatArtifactRequest) (*pb.StatArtifactResponse, error) {
-	if err := h.auth.checkRun(ctx, req.GetRef().GetRunId()); err != nil {
-		return nil, err
-	}
-
 	state, size, err := h.svc.Stat(decodeRef(req.GetRef()))
 	if err != nil {
 		return nil, encodeErr(err)
@@ -126,12 +145,7 @@ func (h *Artifact) StatArtifact(ctx context.Context, req *pb.StatArtifactRequest
 }
 
 func (h *Artifact) AbortArtifact(ctx context.Context, req *pb.AbortArtifactRequest) (*pb.AbortArtifactResponse, error) {
-	ref := req.GetRef()
-	if err := h.auth.checkAttempt(ctx, ref.GetRunId(), ref.GetTask(), ref.GetAttempt()); err != nil {
-		return nil, err
-	}
-
-	if err := h.svc.AbortRef(decodeRef(ref)); err != nil {
+	if err := h.svc.AbortRef(decodeRef(req.GetRef())); err != nil {
 		return nil, encodeErr(err)
 	}
 
@@ -139,10 +153,6 @@ func (h *Artifact) AbortArtifact(ctx context.Context, req *pb.AbortArtifactReque
 }
 
 func (h *Artifact) FinishAttempt(ctx context.Context, req *pb.FinishAttemptRequest) (*pb.FinishAttemptResponse, error) {
-	if err := h.auth.checkAttempt(ctx, req.GetRunId(), req.GetTask(), req.GetAttempt()); err != nil {
-		return nil, err
-	}
-
 	key := domain.AttemptKey{RunID: req.GetRunId(), Task: req.GetTask(), Attempt: req.GetAttempt()}
 	if err := h.svc.FinishAttempt(key); err != nil {
 		return nil, encodeErr(err)
@@ -152,10 +162,6 @@ func (h *Artifact) FinishAttempt(ctx context.Context, req *pb.FinishAttemptReque
 }
 
 func (h *Artifact) DeleteRunArtifacts(ctx context.Context, req *pb.DeleteRunArtifactsRequest) (*pb.DeleteRunArtifactsResponse, error) {
-	if err := h.auth.checkAdmin(ctx); err != nil {
-		return nil, err
-	}
-
 	if err := h.svc.DeleteRun(req.GetRunId()); err != nil {
 		return nil, encodeErr(err)
 	}

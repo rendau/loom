@@ -79,7 +79,7 @@ func (h *Dag) DeleteDag(ctx context.Context, req *pb.DagDeleteReq) (*emptypb.Emp
 	return &emptypb.Empty{}, nil
 }
 
-// PushDagManifest — внутренний вызов describe-Job'а (решение №29); вместо
+// PushDagManifest — внутренний вызов describe-Job'а; вместо
 // токена его авторизует одноразовый непубличный describe_id.
 func (h *Dag) PushDagManifest(ctx context.Context, req *pb.DagPushManifestReq) (*emptypb.Empty, error) {
 	if err := h.usecase.PushManifest(ctx, req.GetDescribeId(), req.GetManifest(), req.GetError()); err != nil {

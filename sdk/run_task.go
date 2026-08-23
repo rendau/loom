@@ -16,13 +16,12 @@ import (
 // Env-контракт контейнера таска: executor передаёт параметры запуска через
 // переменные окружения (значения флагов run --task имеют приоритет).
 const (
-	EnvServerAddr   = "LOOM_SERVER_ADDR"   // адрес control plane (лог-стрим); пусто — логи только в stdout
-	EnvArtifactAddr = "LOOM_ARTIFACT_ADDR" // адрес artifact-сервера (data plane)
+	EnvServerAddr   = "LOOM_SERVER_ADDR"   // адрес control plane (значения тасков); пусто — без PushValue/PullValue
+	EnvArtifactAddr = "LOOM_ARTIFACT_ADDR" // адрес artifact-сервера (data plane: артефакты и лог-стрим)
 	EnvRunID        = "LOOM_RUN_ID"
 	EnvTask         = "LOOM_TASK"
 	EnvAttempt      = "LOOM_ATTEMPT"
 	EnvDepAttempts  = "LOOM_DEP_ATTEMPTS" // json-объект {"task": attempt}: чьи артефакты читать
-	EnvToken        = "LOOM_TOKEN"        // короткоживущий токен, скоупленный на attempt
 	EnvRunParams    = "LOOM_RUN_PARAMS"   // параметры рана (raw JSON-объект); пусто — без параметров
 	EnvLogicalDate  = "LOOM_LOGICAL_DATE" // «дата данных» рана, RFC3339
 )
@@ -41,9 +40,8 @@ type TaskRunSpec struct {
 	Task    string
 	Attempt int
 
-	ArtifactAddr string         // адрес artifact-сервера, обязателен
-	ServerAddr   string         // адрес control plane; пусто — без лог-стрима
-	Token        string         // attempt-токен; прикладывается metadata'ой к вызовам
+	ArtifactAddr string         // адрес artifact-сервера (артефакты и логи), обязателен
+	ServerAddr   string         // адрес control plane; пусто — без значений тасков
 	DepAttempts  map[string]int // таск-зависимость → номер попытки (по умолчанию 1)
 
 	Params      []byte    // параметры рана (raw JSON-объект); nil — без параметров
@@ -77,7 +75,6 @@ func taskRunSpecFromEnv() (TaskRunSpec, error) {
 		Task:         os.Getenv(EnvTask),
 		ArtifactAddr: os.Getenv(EnvArtifactAddr),
 		ServerAddr:   os.Getenv(EnvServerAddr),
-		Token:        os.Getenv(EnvToken),
 	}
 
 	if raw := os.Getenv(EnvAttempt); raw != "" {
@@ -108,8 +105,8 @@ func taskRunSpecFromEnv() (TaskRunSpec, error) {
 	return spec, nil
 }
 
-// RunTask выполняет один таск дага в распределённом режиме: артефакты — через
-// artifact-сервер, логи — стримом на control plane (и дублем в stdout).
+// RunTask выполняет один таск дага в распределённом режиме: артефакты и
+// логи — через artifact-сервер (логи дублируются в stdout).
 // По завершении попытки — независимо от исхода — вызывает FinishAttempt:
 // остатки записей abort'ятся, читатели несозданных артефактов получают
 // NOT_FOUND. Ошибка таска (включая панику) — в возвращаемом значении.
@@ -158,14 +155,10 @@ func (d *DAG) RunTask(ctx context.Context, spec TaskRunSpec) error {
 	return err
 }
 
-// newLogSink собирает sink по спеке: gRPC-стрим на control plane или, без
-// него (нет адреса / стрим не открылся), только дубль в настоящий stdout.
+// newLogSink собирает sink по спеке: стрим на artifact-сервер (data plane)
+// или, если клиент не собрался, только дубль в настоящий stdout.
 func newLogSink(spec TaskRunSpec, dup io.Writer) logSink {
-	if spec.ServerAddr == "" {
-		return &writerSink{w: dup}
-	}
-
-	sink, err := newGrpcLogSink(spec.ServerAddr, spec.Token, dup, spec.RunID, spec.Task, spec.Attempt)
+	sink, err := newGrpcLogSink(spec.ArtifactAddr, dup, spec.RunID, spec.Task, spec.Attempt)
 	if err != nil {
 		fmt.Fprintf(dup, "loom: task log stream disabled: %v\n", err)
 		return &writerSink{w: dup}
@@ -175,7 +168,7 @@ func newLogSink(spec TaskRunSpec, dup io.Writer) logSink {
 }
 
 func (d *DAG) runTaskWithSink(ctx context.Context, t *Task, spec TaskRunSpec, sink logSink) error {
-	store, err := dialGrpcStore(spec.ArtifactAddr, spec.Token)
+	store, err := dialGrpcStore(spec.ArtifactAddr)
 	if err != nil {
 		return err
 	}
@@ -185,7 +178,7 @@ func (d *DAG) runTaskWithSink(ctx context.Context, t *Task, spec TaskRunSpec, si
 	// вернут явную ошибку
 	var values valueStore
 	if spec.ServerAddr != "" {
-		vs, vErr := dialGrpcValueStore(spec.ServerAddr, spec.Token)
+		vs, vErr := dialGrpcValueStore(spec.ServerAddr)
 		if vErr != nil {
 			return vErr
 		}

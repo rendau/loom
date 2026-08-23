@@ -16,6 +16,7 @@ import (
 	pb "github.com/rendau/loom/api/artifact_v1"
 	"github.com/rendau/loom/artifact/internal/config"
 	domainArtifact "github.com/rendau/loom/artifact/internal/domain/artifact"
+	domainTasklog "github.com/rendau/loom/artifact/internal/domain/tasklog"
 	grpcHandler "github.com/rendau/loom/artifact/internal/handler/grpc"
 )
 
@@ -35,15 +36,18 @@ func (a *App) Init() {
 	errCheck(err, "artifact service init")
 	slog.Info("artifact data dir: " + config.Conf.DataDir)
 
+	tasklogSvc, err := domainTasklog.New(config.Conf.LogDir)
+	errCheck(err, "tasklog service init")
+	slog.Info("task log dir: " + config.Conf.LogDir)
+
 	// grpc server
 	{
-		if config.Conf.AuthSecret == "" {
-			slog.Warn("attempt token auth disabled (AUTH_SECRET is empty)")
-		}
-		artifactHandler := grpcHandler.NewArtifact(artifactSvc, config.Conf.AuthSecret)
+		artifactHandler := grpcHandler.NewArtifact(artifactSvc)
+		tasklogHandler := grpcHandler.NewTaskLog(tasklogSvc)
 
 		a.grpcServer = NewGrpcServer("main", func(server *grpc.Server) {
 			pb.RegisterArtifactServiceServer(server, artifactHandler)
+			pb.RegisterTaskLogServiceServer(server, tasklogHandler)
 		})
 	}
 

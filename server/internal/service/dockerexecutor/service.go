@@ -1,4 +1,4 @@
-// Package dockerexecutor — executor попыток поверх docker CLI (решение №28):
+// Package dockerexecutor — executor попыток поверх docker CLI:
 // 1 контейнер = 1 attempt на хосте control plane, без kubernetes. События
 // жизненного цикла — поллингом `docker ps`/`docker inspect`: started
 // публикуется сразу после успешного `docker run -d`, finished — когда

@@ -13,12 +13,12 @@ type Main struct {
 	Image       string
 	ImageDigest string
 	Schedule    string
-	Catchup     bool // наверстывать пропущенные тики расписания (решение №24)
+	Catchup     bool // наверстывать пропущенные тики расписания
 	// Лимит одновременно выполняющихся ранов дага; 0 — без лимита
-	// (решение №26).
+	//.
 	MaxActiveRuns int
 	Paused        bool
-	// AutoUpdate — poll-синк новой версии образа (решение №30): свойство
+	// AutoUpdate — poll-синк новой версии образа: свойство
 	// деплоя, не манифеста; хранится в БД.
 	AutoUpdate bool
 	SdkVersion string
@@ -43,7 +43,7 @@ type Task struct {
 }
 
 // SecretRef — инъекция секрета control plane в env контейнера таска
-// (решение №27).
+//.
 type SecretRef struct {
 	Env    string
 	Secret string

@@ -21,8 +21,8 @@ import (
 // совместимость при регистрации дага.
 const Version = "0.1.0"
 
-// EnvDescribeID — env-контракт describe-Job'а (регистрация дага через k8s,
-// решение №29): непустой id включает отправку манифеста (или ошибки
+// EnvDescribeID — env-контракт describe-Job'а (регистрация дага через
+// k8s): непустой id включает отправку манифеста (или ошибки
 // валидации дага) на control plane по адресу EnvServerAddr — describe_id
 // одноразовый, им регистрация сопоставляет ответ Job'а. Печать манифеста в
 // stdout при этом сохраняется (диагностика через kubectl logs).
@@ -43,7 +43,7 @@ commands:
              выполнить один таск в распределённом режиме (вызывает executor);
              параметры также берутся из env: LOOM_ARTIFACT_ADDR (обязателен),
              LOOM_SERVER_ADDR, LOOM_RUN_ID, LOOM_TASK, LOOM_ATTEMPT,
-             LOOM_DEP_ATTEMPTS, LOOM_TOKEN; флаги приоритетнее env
+             LOOM_DEP_ATTEMPTS; флаги приоритетнее env
 
 exit codes: 0 — успех, 1 — таск упал, 2 — некорректный вызов/конфигурация
 `
@@ -112,8 +112,8 @@ func runCLI(d *DAG, args []string, stdout, stderr io.Writer) int {
 }
 
 // runDescribe печатает манифест в stdout, а при непустом EnvDescribeID ещё
-// и отправляет его на control plane (push-режим describe-Job'а, решение
-// №29). Ошибка валидации дага в push-режиме тоже уходит на server — иначе
+// и отправляет его на control plane (push-режим describe-Job'а). Ошибка
+// валидации дага в push-режиме тоже уходит на server — иначе
 // регистрация ждала бы таймаута и разбирала логи пода.
 func runDescribe(d *DAG, validateErr error, stdout, stderr io.Writer) int {
 	describeID := os.Getenv(EnvDescribeID)

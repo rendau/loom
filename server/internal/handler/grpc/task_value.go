@@ -18,19 +18,13 @@ type TaskValue struct {
 	pb.UnsafeTaskValueServiceServer
 
 	usecase *runUsc.Usecase
-	auth    *tokenAuth
 }
 
-// NewTaskValue создаёт handler значений тасков; непустой authSecret включает
-// проверку токенов: пуш — свой attempt, чтение — свой ран.
-func NewTaskValue(uc *runUsc.Usecase, authSecret string) *TaskValue {
-	return &TaskValue{usecase: uc, auth: newTokenAuth(authSecret)}
+func NewTaskValue(uc *runUsc.Usecase) *TaskValue {
+	return &TaskValue{usecase: uc}
 }
 
 func (h *TaskValue) PushTaskValue(ctx context.Context, req *pb.TaskValuePushReq) (*emptypb.Empty, error) {
-	if err := h.auth.checkAttempt(ctx, req.GetRunId(), req.GetTask(), req.GetAttempt()); err != nil {
-		return nil, err
-	}
 	if req.GetValue() == nil {
 		return nil, status.Error(codes.InvalidArgument, "value is required")
 	}
@@ -48,10 +42,6 @@ func (h *TaskValue) PushTaskValue(ctx context.Context, req *pb.TaskValuePushReq)
 }
 
 func (h *TaskValue) PullTaskValue(ctx context.Context, req *pb.TaskValuePullReq) (*pb.TaskValuePullRep, error) {
-	if err := h.auth.checkRun(ctx, req.GetRunId()); err != nil {
-		return nil, err
-	}
-
 	v, err := h.usecase.PullValue(ctx, req.GetRunId(), req.GetTask(), req.GetKey())
 	if err != nil {
 		return nil, encodeErr(err)

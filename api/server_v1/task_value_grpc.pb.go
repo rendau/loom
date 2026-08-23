@@ -29,7 +29,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// TaskValueService — мелкие значения тасков (аналог XCom, решение №25):
+// TaskValueService — мелкие значения тасков (аналог XCom):
 // key-value через control plane, не через artifact-сервер. Скоуп значения —
 // (run, task, key): ретрай таска перезаписывает его значения.
 type TaskValueServiceClient interface {
@@ -86,7 +86,7 @@ func (c *taskValueServiceClient) ListTaskValues(ctx context.Context, in *TaskVal
 // All implementations must embed UnimplementedTaskValueServiceServer
 // for forward compatibility.
 //
-// TaskValueService — мелкие значения тасков (аналог XCom, решение №25):
+// TaskValueService — мелкие значения тасков (аналог XCom):
 // key-value через control plane, не через artifact-сервер. Скоуп значения —
 // (run, task, key): ретрай таска перезаписывает его значения.
 type TaskValueServiceServer interface {

@@ -29,7 +29,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// SecretService — секреты для env-инъекции в поды тасков (решение №27).
+// SecretService — секреты для env-инъекции в поды тасков.
 // API write-only: значение можно записать и удалить, но не прочитать —
 // расшифровывает только control plane при запуске попытки.
 type SecretServiceClient interface {
@@ -82,7 +82,7 @@ func (c *secretServiceClient) DeleteSecret(ctx context.Context, in *SecretDelete
 // All implementations must embed UnimplementedSecretServiceServer
 // for forward compatibility.
 //
-// SecretService — секреты для env-инъекции в поды тасков (решение №27).
+// SecretService — секреты для env-инъекции в поды тасков.
 // API write-only: значение можно записать и удалить, но не прочитать —
 // расшифровывает только control plane при запуске попытки.
 type SecretServiceServer interface {

@@ -1,7 +1,7 @@
 // Package retention — TTL завершённых ранов: периодическая очистка
-// артефактов (artifact-сервер), логов (streamstore) и записей БД. Порядок
-// удаления — данные раньше записи рана: упавшая на артефактах очистка
-// оставляет ран в БД и повторится следующим проходом.
+// артефактов и логов (artifact-сервер) и записей БД. Порядок удаления —
+// данные раньше записи рана: упавшая на артефактах очистка оставляет ран
+// в БД и повторится следующим проходом.
 package retention
 
 import (
@@ -26,7 +26,7 @@ type ArtifactI interface {
 }
 
 type TaskLogI interface {
-	DeleteRun(runId string) error
+	DeleteRunTaskLogs(ctx context.Context, runId string) error
 }
 
 type Service struct {
@@ -113,8 +113,8 @@ func (s *Service) deleteRun(ctx context.Context, runId string) error {
 	if err := s.artifact.DeleteRunArtifacts(ctx, runId); err != nil {
 		return fmt.Errorf("artifact.DeleteRunArtifacts: %w", err)
 	}
-	if err := s.tasklog.DeleteRun(runId); err != nil {
-		return fmt.Errorf("tasklog.DeleteRun: %w", err)
+	if err := s.tasklog.DeleteRunTaskLogs(ctx, runId); err != nil {
+		return fmt.Errorf("tasklog.DeleteRunTaskLogs: %w", err)
 	}
 	if err := s.runSvc.DeleteRun(ctx, runId); err != nil {
 		return fmt.Errorf("runSvc.DeleteRun: %w", err)

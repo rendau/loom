@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pb "github.com/rendau/loom/api/server_v1"
@@ -60,26 +58,18 @@ func (s *fsValueStore) Pull(_ context.Context, runID, task, key string) ([]byte,
 type grpcValueStore struct {
 	conn   *grpc.ClientConn
 	client pb.TaskValueServiceClient
-	token  string
 }
 
-func dialGrpcValueStore(addr, token string) (*grpcValueStore, error) {
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func dialGrpcValueStore(addr string) (*grpcValueStore, error) {
+	conn, err := grpc.NewClient(addr, dialOpts()...)
 	if err != nil {
 		return nil, fmt.Errorf("dial control plane %q: %w", addr, err)
 	}
-	return &grpcValueStore{conn: conn, client: pb.NewTaskValueServiceClient(conn), token: token}, nil
+	return &grpcValueStore{conn: conn, client: pb.NewTaskValueServiceClient(conn)}, nil
 }
 
 func (s *grpcValueStore) Close() error {
 	return s.conn.Close()
-}
-
-func (s *grpcValueStore) withToken(ctx context.Context) context.Context {
-	if s.token == "" {
-		return ctx
-	}
-	return metadata.AppendToOutgoingContext(ctx, tokenMetadataKey, s.token)
 }
 
 func (s *grpcValueStore) Push(ctx context.Context, runID, task string, attempt int, key string, value []byte) error {
@@ -88,7 +78,7 @@ func (s *grpcValueStore) Push(ctx context.Context, runID, task string, attempt i
 		return fmt.Errorf("invalid value json: %w", err)
 	}
 
-	_, err := s.client.PushTaskValue(s.withToken(ctx), &pb.TaskValuePushReq{
+	_, err := s.client.PushTaskValue(ctx, &pb.TaskValuePushReq{
 		RunId:   runID,
 		Task:    task,
 		Attempt: int32(attempt),
@@ -99,7 +89,7 @@ func (s *grpcValueStore) Push(ctx context.Context, runID, task string, attempt i
 }
 
 func (s *grpcValueStore) Pull(ctx context.Context, runID, task, key string) ([]byte, error) {
-	rep, err := s.client.PullTaskValue(s.withToken(ctx), &pb.TaskValuePullReq{
+	rep, err := s.client.PullTaskValue(ctx, &pb.TaskValuePullReq{
 		RunId: runID,
 		Task:  task,
 		Key:   key,

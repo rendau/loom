@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+package artifact_v1;
+
+option go_package = "github.com/rendau/loom/api/artifact_v1;artifact_v1";
+
+// TaskLogService — приём и хранение логов тасков на artifact-сервере
+// (data plane). Лог попытки — JSONL-стрим той же файловой стейт-машины
+// streamstore, что и артефакты; commit стрима делает control plane при
+// финализации попытки.
+//
+// Протокол доставки — без потерь: строки нумеруются клиентом (seq с нуля),
+// сервер подтверждает записанное ack'ами. При реконнекте клиент повторно
+// шлёт header, сервер отвечает ack с числом уже сохранённых строк — клиент
+// отбрасывает подтверждённый префикс своего буфера и досылает остальное.
+// Строки батча с seq меньше сохранённого сервер молча пропускает, поэтому
+// повторная досылка не дублирует строки.
+service TaskLogService {
+  // PushTaskLog — bidi-стрим приёма логов: клиент шлёт header, затем батчи
+  // строк с first_seq; сервер отвечает ack'ами (после header и после
+  // каждого записанного батча). Закрытие стрима клиентом — нормальное
+  // завершение; commit лог-стрима делает control plane (FinishTaskLog).
+  rpc PushTaskLog(stream PushTaskLogRequest) returns (stream PushTaskLogAck);
+
+  // ReadTaskLog читает лог попытки, пропустив первые after_seq строк; при
+  // follow=true стрим живёт до финализации лога, отдавая новые строки по
+  // мере поступления.
+  rpc ReadTaskLog(ReadTaskLogRequest) returns (stream ReadTaskLogResponse);
+
+  // FinishTaskLog — финализация лога попытки control plane'ом: дописывает
+  // финальные строки (исход попытки), коммитит стрим и помечает попытку
+  // завершённой (follow-читатели получают EOF). Идемпотентен.
+  rpc FinishTaskLog(FinishTaskLogRequest) returns (FinishTaskLogResponse);
+
+  // DeleteRunTaskLogs удаляет все логи рана (retention).
+  rpc DeleteRunTaskLogs(DeleteRunTaskLogsRequest) returns (DeleteRunTaskLogsResponse);
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message PushTaskLogRequest {
+  oneof msg {
+    TaskLogHeader header = 1;
+    TaskLogBatch batch = 2;
+  }
+}
+
+// PushTaskLogAck — подтверждение приёма: сервер сохранил все строки с
+// seq < next_seq.
+message PushTaskLogAck {
+  int64 next_seq = 1;
+}
+
+message TaskLogHeader {
+  string run_id = 1;
+  string task = 2;
+  int32 attempt = 3;
+}
+
+message TaskLogBatch {
+  // first_seq — номер первой строки батча (сквозная нумерация строк
+  // попытки клиентом, с нуля).
+  int64 first_seq = 1;
+  repeated TaskLogEntry entries = 2;
+}
+
+// TaskLogSource — происхождение строки: структурный логгер Runtime,
+// перехваченные file descriptor'ы процесса (туда пишут паники Go-рантайма
+// и сторонние библиотеки мимо логгера) или сам control plane (исход
+// попытки, причина смерти пода).
+enum TaskLogSource {
+  TASK_LOG_SOURCE_UNSPECIFIED = 0;
+  TASK_LOG_SOURCE_LOG = 1;
+  TASK_LOG_SOURCE_STDOUT = 2;
+  TASK_LOG_SOURCE_STDERR = 3;
+  TASK_LOG_SOURCE_SERVER = 4;
+}
+
+message TaskLogEntry {
+  int64 ts_unix_ms = 1;
+  TaskLogSource source = 2;
+  string line = 3;
+}
+
+// Read
+
+message ReadTaskLogRequest {
+  string run_id = 1;
+  string task = 2;
+  int32 attempt = 3;
+  // after_seq — сколько первых строк пропустить (для реконнекта читателя).
+  int64 after_seq = 4;
+  bool follow = 5;
+}
+
+message ReadTaskLogResponse {
+  repeated TaskLogEntry entries = 1;
+}
+
+// Finish
+
+message FinishTaskLogRequest {
+  string run_id = 1;
+  string task = 2;
+  int32 attempt = 3;
+  // final — финальные строки от control plane (исход попытки); дописываются
+  // перед commit.
+  repeated TaskLogEntry final = 4;
+}
+
+message FinishTaskLogResponse {}
+
+// DeleteRun
+
+message DeleteRunTaskLogsRequest {
+  string run_id = 1;
+}
+
+message DeleteRunTaskLogsResponse {}

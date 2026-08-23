@@ -27,9 +27,6 @@ var Conf = struct {
 
 	PgDsn string `env:"PG_DSN"`
 
-	// LogDir — каталог streamstore для логов тасков.
-	LogDir string `env:"LOG_DIR" envDefault:"./data/logs"`
-
 	// ArtifactAddr — адрес artifact-сервера для самого control plane
 	// (FinishAttempt-страховка, retention).
 	ArtifactAddr string `env:"ARTIFACT_ADDR" envDefault:"127.0.0.1:5051"`
@@ -45,8 +42,8 @@ var Conf = struct {
 	DockerBin string `env:"DOCKER_BIN" envDefault:"docker"`
 
 	// Executor: k8s — kubernetes Job'ы; docker — контейнеры на хосте через
-	// docker CLI (решение №28, один хост без кластера); none — не запускать
-	// executor (dev-режим: только API и приём логов).
+	// docker CLI (один хост без кластера); none — не запускать
+	// executor (dev-режим: только API).
 	Executor string `env:"EXECUTOR" envDefault:"k8s"`
 
 	// DockerNetwork — docker-сеть контейнеров тасков (пусто — дефолтная);
@@ -60,8 +57,8 @@ var Conf = struct {
 	K8sKubeconfig string `env:"K8S_KUBECONFIG"` // пусто — in-cluster, иначе путь к kubeconfig
 	// K8sJobTTL — ttlSecondsAfterFinished завершённых Job'ов.
 	K8sJobTTL time.Duration `env:"K8S_JOB_TTL" envDefault:"1h"`
-	// K8sDescribeTimeout — таймаут describe-Job'а регистрации дага (решение
-	// №29); должен покрывать и pull образа.
+	// K8sDescribeTimeout — таймаут describe-Job'а регистрации дага; должен
+	// покрывать и pull образа.
 	K8sDescribeTimeout time.Duration `env:"K8S_DESCRIBE_TIMEOUT" envDefault:"5m"`
 	// K8sImagePullSecret — имя dockerconfigjson-секрета в K8S_NAMESPACE для
 	// pull приватных образов дагов: подставляется в imagePullSecrets подов
@@ -86,26 +83,20 @@ var Conf = struct {
 	// RetentionTick — период проходов очистки.
 	RetentionTick time.Duration `env:"RETENTION_TICK" envDefault:"1h"`
 
-	// DagSyncTick — период авто-обновления дагов (решение №30): digest-чек
+	// DagSyncTick — период авто-обновления дагов: digest-чек
 	// тега в registry для дагов с auto_update; 0 — выключено.
 	DagSyncTick time.Duration `env:"DAG_SYNC_TICK" envDefault:"5m"`
 	// RegistryAuthFile — путь к docker config.json с кредами registry для
 	// digest-чека приватных образов; пусто — anonymous-доступ.
 	RegistryAuthFile string `env:"REGISTRY_AUTH_FILE"`
 
-	// AuthSecret — общий секрет attempt-токенов (control plane, artifact-
-	// сервер, лог-приёмник); пусто — проверка токенов выключена (dev).
-	AuthSecret string `env:"AUTH_SECRET"`
 	// AdminToken — статический bearer-токен админских RPC (Dag/Run/Pool/
 	// Secret, ReadTaskLog, ListTaskValues); пусто — auth выключен (dev).
-	// Task-facing ручки под ним не живут: attempt-токены и describe_id.
+	// Task-facing ручки под ним не живут.
 	AdminToken string `env:"ADMIN_TOKEN"`
 	// SecretKey — парольная фраза шифрования секретов (AES-256-GCM, ключ —
 	// SHA-256 от фразы); пусто — секреты хранятся открытым текстом (dev).
 	SecretKey string `env:"SECRET_KEY"`
-	// TokenTTL — срок действия attempt-токена; должен покрывать максимальную
-	// длительность таска.
-	TokenTTL time.Duration `env:"TOKEN_TTL" envDefault:"24h"`
 }{}
 
 func init() {

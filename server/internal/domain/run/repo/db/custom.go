@@ -71,7 +71,7 @@ func (r *Repo) PromoteTaskInstances(ctx context.Context, runId string, tasks []s
 const claimCandidateLimit = 500
 
 // ClaimQueuedTasks забирает из очереди до limit queued-тасков с учётом
-// свободных слотов пулов (решение №26), переводя их в starting с инкрементом
+// свободных слотов пулов, переводя их в starting с инкрементом
 // номера попытки. Пулы лочатся FOR UPDATE — claim'ы конкурентных инстансов
 // сериализуются и не перебирают слоты; кандидаты — приоритетные первыми
 // (внутри приоритета — старейшие), под FOR UPDATE SKIP LOCKED. Вызывать в

@@ -52,6 +52,12 @@ func (s *Service) BeginWrite(ref Ref) (*Writer, error) {
 	return s.store.BeginWrite(ref)
 }
 
+// ResumeWrite возобновляет запись после обрыва соединения с писателем или
+// рестарта сервера — с текущего размера стрима.
+func (s *Service) ResumeWrite(ref Ref) (*Writer, error) {
+	return s.store.ResumeWrite(ref)
+}
+
 func (s *Service) OpenRead(ctx context.Context, ref Ref, offset int64, follow bool) (*Reader, error) {
 	return s.store.OpenRead(ctx, ref, offset, follow)
 }

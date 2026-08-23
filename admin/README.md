@@ -13,7 +13,7 @@ pnpm dev               # http://localhost:3000
 ```
 
 Gateway при этом должен быть запущен с `HTTP_CORS=true` (dev-режим сервера:
-`EXECUTOR=none`, см. корневой ROADMAP).
+`EXECUTOR=none`).
 
 Проверки: `pnpm typecheck` и `pnpm lint`.
 

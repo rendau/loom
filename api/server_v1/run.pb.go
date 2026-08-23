@@ -37,7 +37,7 @@ type RunMain struct {
 	CreatedAt   *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	FinishedAt  *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=finished_at,json=finishedAt,proto3,oneof" json:"finished_at,omitempty"`
 	// «Дата данных» рана: тик расписания у cron/backfill-рана, момент
-	// триггера у ручного (решение №23).
+	// триггера у ручного.
 	LogicalDate *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=logical_date,json=logicalDate,proto3" json:"logical_date,omitempty"`
 	// Параметры рана (аналог dagrun.conf); отсутствуют — ран без параметров.
 	Params        *structpb.Struct `protobuf:"bytes,10,opt,name=params,proto3" json:"params,omitempty"`

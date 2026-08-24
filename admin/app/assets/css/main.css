@@ -14,3 +14,47 @@
     cursor: pointer;
   }
 }
+
+/* Переходы между страницами (nuxt.config: experimental.viewTransition).
+   Снимок всей страницы мягко перекрашивается, а тело активной панели —
+   отдельный элемент перехода: контент подъезжает, шапка и сайдбар стоят
+   на месте. Nuxt пропускает анимацию при prefers-reduced-motion. */
+@keyframes loom-page-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes loom-page-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes loom-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+::view-transition-old(root) {
+  animation: loom-page-out 120ms ease-in both;
+}
+
+::view-transition-new(root) {
+  animation: loom-page-in 180ms ease-out both;
+}
+
+/* тело панели дашборда (одна на страницу — имя остаётся уникальным) */
+[id^="dashboard-panel"] > [data-slot="body"] {
+  view-transition-name: loom-panel-body;
+}
+
+::view-transition-old(loom-panel-body) {
+  animation: loom-page-out 110ms ease-in both;
+}
+
+::view-transition-new(loom-panel-body) {
+  animation: loom-panel-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}

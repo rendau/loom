@@ -243,11 +243,8 @@ function regStatusLabel(status: DagRegistration['status']): string {
             <NuxtLink :to="`/runs?dag_name=${encodeURIComponent(dag.name)}`" class="text-primary hover:underline">
               Раны дага →
             </NuxtLink>
-            <NuxtLink :to="`/variables?dag_name=${encodeURIComponent(dag.name)}`" class="text-primary hover:underline">
-              Переменные дага →
-            </NuxtLink>
-            <NuxtLink :to="`/secrets?dag_name=${encodeURIComponent(dag.name)}`" class="text-primary hover:underline">
-              Секреты дага →
+            <NuxtLink :to="`/env?dag_name=${encodeURIComponent(dag.name)}`" class="text-primary hover:underline">
+              Переменные и секреты дага →
             </NuxtLink>
           </div>
         </div>

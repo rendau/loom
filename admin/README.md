@@ -3,7 +3,8 @@
 Админка loom: Nuxt 4 SPA (`ssr: false`) + Nuxt UI v4 поверх gateway API
 control plane (grpc-gateway, порт 8082). Дашборд, даги (карточка со схемой
 до первого запуска), раны с метриками, live-логи (follow, разбор
-logfmt/JSON/ANSI), переменные и секреты со скоупами, пользователи.
+logfmt/JSON/ANSI), переменные и секреты одним разделом (`/env`) со
+скоупами, пользователи.
 
 Вход — по логину и паролю (сессия хранится в localStorage). Пока в системе
 нет ни одного пользователя, админка открывает экран первичной настройки
@@ -49,7 +50,7 @@ app/
   middleware/  # auth.global — гард сессии (/login, /setup)
   layouts/     # default (UDashboardGroup/Sidebar), auth (вход без сайдбара)
   pages/       # / (дашборд), /dags, /dags/[name], /runs, /runs/[id],
-               # /runs/[id]/log, /variables, /secrets, /pools, /users
+               # /runs/[id]/log, /env (переменные и секреты), /pools, /users
   components/  # dag/* — модалки дага; run/LogViewer — просмотр лога;
                # dashboard/* — карточки и SVG-графики
 ```

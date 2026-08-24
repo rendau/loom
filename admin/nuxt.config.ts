@@ -29,6 +29,12 @@ export default defineNuxtConfig({
     },
   },
 
+  // Анимация переходов между страницами — через View Transitions API
+  // (правила ::view-transition-* в main.css). Vue-переход (pageTransition)
+  // тут неприменим: UDashboardPanel рендерит два корневых узла, и Transition
+  // такой фрагмент анимировать не может. Nuxt сам уважает prefers-reduced-motion.
+  experimental: { viewTransition: true },
+
   typescript: {
     strict: true,
     typeCheck: false, // проверка через `pnpm typecheck` (vue-tsc), не в дев-сборке

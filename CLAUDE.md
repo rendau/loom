@@ -32,8 +32,9 @@ docker-образ = один даг, таски запускаются экзе�
 - `examples/` — примеры дагов
 - `admin/` — админка: Nuxt 4 SPA (`ssr: false`) + Nuxt UI v4 (НЕ Naive UI;
   образец — проект caravaneer). Дашборд, карточка дага (схема до первого
-  запуска), метрики ранов, читабельные логи, переменные/секреты,
-  пользователи. Раздаётся server'ом на `ADMIN_PORT` (8081)
+  запуска), метрики ранов, читабельные логи, переменные и секреты одним
+  разделом `/env` (тип — колонка и фильтр), пользователи. Переходы между
+  страницами анимированы (`app.pageTransition` + классы `.page-*`). Раздаётся server'ом на `ADMIN_PORT` (8081)
   из `ADMIN_DIR` (`make build-admin`), рантайм-конфиг — `/config.js` из env
   `ADMIN_API_BASE_URL`; дев — `pnpm dev` + `.env` (+ `HTTP_CORS=true` на
   gateway). После правок: `pnpm typecheck` → `pnpm lint`. См. `admin/README.md`

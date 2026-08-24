@@ -9,8 +9,7 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
     { label: 'Даги', icon: 'i-lucide-workflow', to: '/dags' },
     { label: 'Раны', icon: 'i-lucide-list', to: '/runs' },
     { label: 'Пулы', icon: 'i-lucide-layers', to: '/pools' },
-    { label: 'Переменные', icon: 'i-lucide-variable', to: '/variables' },
-    { label: 'Секреты', icon: 'i-lucide-key-round', to: '/secrets' },
+    { label: 'Переменные и секреты', icon: 'i-lucide-key-round', to: '/env' },
   ]
   if (isAdmin.value)
     items.push({ label: 'Пользователи', icon: 'i-lucide-users', to: '/users' })
@@ -56,6 +55,7 @@ const userMenuItems = computed<DropdownMenuItem[][]>(() => [[
           :collapsed="collapsed"
           :items="navItems"
           orientation="vertical"
+          :ui="{ linkLabel: 'whitespace-normal' }"
         />
       </template>
 

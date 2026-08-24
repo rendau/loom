@@ -194,9 +194,14 @@ func (s *Service) buildJob(name, image, id string) *batchv1.Job {
 					RestartPolicy:    corev1.RestartPolicyNever,
 					ImagePullSecrets: pullSecretRefs(s.pullSecret),
 					Containers: []corev1.Container{{
-						Name:  containerName,
-						Image: image,
-						Args:  []string{"describe"},
+						Name: containerName,
+						// describe обязан смотреть актуальное содержимое тега:
+						// с дефолтной политикой (IfNotPresent у любого тега,
+						// кроме latest) на узле мог остаться старый слой, и
+						// обновление дага пиннило бы прежний digest
+						Image:           image,
+						ImagePullPolicy: corev1.PullAlways,
+						Args:            []string{"describe"},
 						Env: []corev1.EnvVar{
 							{Name: loom.EnvDescribeID, Value: id},
 							{Name: loom.EnvServerAddr, Value: s.serverAddr},

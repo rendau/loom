@@ -48,7 +48,7 @@ create table run (
     image        text        not null, -- образ для запуска подов: repo@digest
     image_digest text        not null,
     trigger      text        not null, -- manual | schedule | backfill
-    status       text        not null, -- running | success | failed
+    status       text        not null, -- running | success | failed | canceled (остановлен вручную)
     manifest     jsonb       not null, -- снапшот манифеста на момент триггера
     params       jsonb,                -- параметры рана (аналог dagrun.conf); null — без параметров
     -- «дата данных»: тик расписания у cron/backfill-рана, момент триггера у ручного
@@ -76,7 +76,8 @@ insert into pool (name, slots) values ('default', 64);
 create table task_instance (
     run_id      text not null references run (id) on delete cascade,
     task        text not null,
-    -- pending | queued | starting | running | up_for_retry | success | failed | upstream_failed
+    -- pending | queued | starting | running | up_for_retry | success | failed |
+    -- upstream_failed | canceled (ран остановлен вручную)
     status      text not null,
     attempt     int  not null default 0, -- номер текущей (последней) попытки
     -- пул и приоритет из манифеста: денормализация для claim-запроса очереди

@@ -24,6 +24,7 @@ type RepoDbI interface {
 	ClaimQueuedTasks(ctx context.Context, limit int64) ([]model.ClaimedTask, error)
 	PromoteRetries(ctx context.Context) (int64, error)
 	RetryTaskSubgraph(ctx context.Context, runId, task string, downstream []string) (bool, error)
+	CancelRun(ctx context.Context, runId string) (bool, []model.AttemptRef, error)
 
 	UpsertTaskValue(ctx context.Context, v *model.TaskValue) error
 	GetTaskValue(ctx context.Context, runId, task, key string) (*model.TaskValue, bool, error)

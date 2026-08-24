@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
-import { listRuns } from '~/api/run.api'
+import { cancelRun, listRuns } from '~/api/run.api'
 import type { Run } from '~/types/run'
 
 const PAGE_SIZE = 30
@@ -23,6 +23,7 @@ const statusOptions = [
   { label: 'выполняется', value: 'running' },
   { label: 'успех', value: 'success' },
   { label: 'провал', value: 'failed' },
+  { label: 'остановлен', value: 'canceled' },
 ]
 
 const toast = useToast()
@@ -73,7 +74,31 @@ const columns: TableColumn<Run>[] = [
   { accessorKey: 'logical_date', header: 'Лог. дата' },
   { accessorKey: 'created_at', header: 'Создан' },
   { id: 'duration', header: 'Длительность' },
+  { id: 'actions', header: '' },
 ]
+
+// принудительная остановка выполняющегося рана
+const { canManageDag } = useAuth()
+const action = useApiAction()
+const cancelTarget = ref<Run | null>(null)
+
+function canCancel(run: Run): boolean {
+  return run.status === 'running' && canManageDag(run.dag_name)
+}
+
+async function confirmCancel() {
+  const target = cancelTarget.value
+  if (!target)
+    return
+  const ok = await action.run(
+    () => cancelRun(target.id),
+    { success: 'Ран остановлен' },
+  )
+  if (ok !== undefined) {
+    cancelTarget.value = null
+    await load()
+  }
+}
 </script>
 
 <template>
@@ -138,6 +163,20 @@ const columns: TableColumn<Run>[] = [
         <template #duration-cell="{ row }">
           {{ formatDuration(row.original.created_at, row.original.finished_at) }}
         </template>
+
+        <template #actions-cell="{ row }">
+          <div class="flex justify-end">
+            <UTooltip v-if="canCancel(row.original)" text="Остановить ран">
+              <UButton
+                icon="i-lucide-circle-stop"
+                size="sm"
+                color="error"
+                variant="ghost"
+                @click="cancelTarget = row.original"
+              />
+            </UTooltip>
+          </div>
+        </template>
       </UTable>
 
       <div v-if="!loading && runs.length === 0" class="p-8 text-center text-muted">
@@ -147,6 +186,22 @@ const columns: TableColumn<Run>[] = [
       <div v-if="totalCount > PAGE_SIZE" class="flex justify-center border-t border-default p-3">
         <UPagination v-model:page="page" :total="totalCount" :items-per-page="PAGE_SIZE" />
       </div>
+
+      <UModal :open="cancelTarget !== null" title="Остановить ран?" @update:open="cancelTarget = null">
+        <template #body>
+          <p>
+            Ран <span class="font-mono font-medium">{{ cancelTarget?.id }}</span>: выполняющиеся
+            таски будут убиты, а незавершённые — получат статус «остановлен». Успешные таски
+            останутся успешными: ран можно будет доиграть ретраем таска.
+          </p>
+        </template>
+        <template #footer>
+          <div class="flex w-full justify-end gap-2">
+            <UButton color="neutral" variant="ghost" label="Отмена" @click="cancelTarget = null" />
+            <UButton color="error" label="Остановить" :loading="action.loading.value" @click="confirmCancel" />
+          </div>
+        </template>
+      </UModal>
     </template>
   </UDashboardPanel>
 </template>

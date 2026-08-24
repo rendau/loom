@@ -133,6 +133,32 @@ func (u *Usecase) Process(ctx context.Context, reg *dagregModel.Main) (string, e
 	return m.Name, nil
 }
 
+// Sync — принудительное обновление дага из registry: перерегистрация его
+// текущего образа прямо сейчас, не дожидаясь тика авто-обновления. Образ
+// берётся из записи дага (тег, каким его задали при регистрации), поэтому
+// pull + describe подтягивают актуальное содержимое тега; digest и манифест
+// дага переписываются результатом, настройки — нет.
+func (u *Usecase) Sync(ctx context.Context, name string) (*dagregModel.Main, error) {
+	if name == "" {
+		return nil, errs.IdRequired
+	}
+
+	dag, _, err := u.svc.Get(ctx, name, true)
+	if err != nil {
+		return nil, fmt.Errorf("svc.Get: %w", err)
+	}
+
+	reg, err := u.registrations.Enqueue(ctx, dagregModel.EnqueueSpec{
+		Image:   dag.Image,
+		Source:  dagregModel.SourceManual,
+		DagName: dag.Name,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("registrations.Enqueue: %w", err)
+	}
+	return reg, nil
+}
+
 func (u *Usecase) GetRegistration(ctx context.Context, id string) (*dagregModel.Main, error) {
 	if id == "" {
 		return nil, errs.IdRequired

@@ -46,6 +46,18 @@ service RunService {
     };
   }
 
+  // CancelRun принудительно останавливает выполняющийся ран: живые попытки
+  // убиваются через executor, незавершённые таски и сам ран получают статус
+  // canceled. Уже успешные таски остаются success, поэтому остановленный ран
+  // можно доиграть ретраем таска (RetryTask). Завершённый ран останавливать
+  // нечего (run_not_running).
+  rpc CancelRun(RunCancelReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/run/{id}/cancel"
+      body: "*"
+    };
+  }
+
   // BackfillRun создаёт раны за прошедший период: по рану на каждый тик
   // cron-расписания дага в [from, to), trigger=backfill, logical_date=тик.
   // Требует расписания у дага; число тиков за вызов ограничено.
@@ -65,7 +77,7 @@ message RunMain {
   string image = 3;
   string image_digest = 4;
   string trigger = 5; // manual | schedule | backfill
-  string status = 6;  // running | success | failed
+  string status = 6;  // running | success | failed | canceled
   google.protobuf.Timestamp created_at = 7;
   optional google.protobuf.Timestamp finished_at = 8;
   // «Дата данных» рана: тик расписания у cron/backfill-рана, момент
@@ -77,7 +89,8 @@ message RunMain {
 
 message TaskInstanceMain {
   string task = 1;
-  // pending | queued | starting | running | up_for_retry | success | failed | upstream_failed
+  // pending | queued | starting | running | up_for_retry | success | failed |
+  // upstream_failed | canceled
   string status = 2;
   int32 attempt = 3; // номер текущей (последней) попытки; 0 — ещё не стартовала
   optional google.protobuf.Timestamp queued_at = 4;
@@ -138,6 +151,12 @@ message RunGetReq {
 message RunRetryTaskReq {
   string run_id = 1;
   string task = 2;
+}
+
+// Cancel
+
+message RunCancelReq {
+  string id = 1;
 }
 
 // Backfill

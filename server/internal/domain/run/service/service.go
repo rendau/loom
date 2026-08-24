@@ -156,7 +156,7 @@ func (s *Service) RetryTask(ctx context.Context, runId, task string) error {
 	if !ok {
 		return errs.TaskNotFound
 	}
-	if ti.Status != model.TaskStatusSuccess && ti.Status != model.TaskStatusFailed {
+	if !lo.Contains([]string{model.TaskStatusSuccess, model.TaskStatusFailed, model.TaskStatusCanceled}, ti.Status) {
 		// на завершённом ране остаётся только upstream_failed: сам таск не
 		// исполнялся — ретраить нужно его упавшую зависимость
 		return errs.ErrFull{Err: errs.TaskNotRetryable, Desc: "таск не исполнялся: ретрайте упавшую зависимость"}
@@ -176,6 +176,35 @@ func (s *Service) RetryTask(ctx context.Context, runId, task string) error {
 		return nil
 	})
 	return err
+}
+
+// Cancel останавливает выполняющийся ран: ран и не начавшие исполняться
+// таски получают canceled, а живые попытки возвращаются вызывающему — их
+// убивает и финализирует планировщик (usecase). Успешные таски остаются
+// success: остановленный ран можно доиграть ретраем таска.
+func (s *Service) Cancel(ctx context.Context, runId string) ([]model.AttemptRef, error) {
+	var live []model.AttemptRef
+
+	err := s.txm.TxFn(ctx, func(ctx context.Context) error {
+		applied, refs, txErr := s.repoDb.CancelRun(ctx, runId)
+		if txErr != nil {
+			return fmt.Errorf("repoDb.CancelRun: %w", txErr)
+		}
+		if !applied {
+			// ран либо не существует, либо уже завершён — различаем для
+			// понятного сообщения админке
+			if _, _, gErr := s.Get(ctx, runId, true); gErr != nil {
+				return gErr
+			}
+			return errs.ErrFull{Err: errs.RunNotRunning, Desc: "ран уже завершён"}
+		}
+		live = refs
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return live, nil
 }
 
 // downstreamOf возвращает транзитивных потомков таска по рёбрам манифеста

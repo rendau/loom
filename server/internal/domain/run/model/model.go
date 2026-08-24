@@ -12,6 +12,9 @@ const (
 	RunStatusRunning = "running"
 	RunStatusSuccess = "success"
 	RunStatusFailed  = "failed"
+	// RunStatusCanceled — ран остановлен вручную (CancelRun); терминальный,
+	// но доиграть его ретраем таска можно.
+	RunStatusCanceled = "canceled"
 )
 
 // Статусы task instance.
@@ -19,6 +22,7 @@ const (
 //	pending → queued → starting → running → success | failed
 //	pending → upstream_failed (зависимость упала)
 //	starting/running → up_for_retry → queued (остались ретраи, ждём backoff)
+//	любой нетерминальный → canceled (ран остановлен вручную)
 const (
 	TaskStatusPending        = "pending"
 	TaskStatusQueued         = "queued"
@@ -28,6 +32,9 @@ const (
 	TaskStatusSuccess        = "success"
 	TaskStatusFailed         = "failed"
 	TaskStatusUpstreamFailed = "upstream_failed"
+	// TaskStatusCanceled — таск остановлен вместе с раном: либо его живая
+	// попытка убита, либо он не успел исполниться.
+	TaskStatusCanceled = "canceled"
 )
 
 // Статусы попытки.
@@ -56,7 +63,7 @@ const MaxValueSize = 64 * 1024
 // TaskStatusTerminal — терминален ли статус task instance.
 func TaskStatusTerminal(status string) bool {
 	switch status {
-	case TaskStatusSuccess, TaskStatusFailed, TaskStatusUpstreamFailed:
+	case TaskStatusSuccess, TaskStatusFailed, TaskStatusUpstreamFailed, TaskStatusCanceled:
 		return true
 	}
 	return false
@@ -184,6 +191,10 @@ type ExitInfo struct {
 	ExitCode *int32
 	Reason   string
 	Message  string
+	// Canceled — попытку убила остановка рана: сама попытка неуспешна
+	// (failed), но её task instance получает canceled, а не failed, и
+	// ретраев ему не назначают.
+	Canceled bool
 }
 
 // LaunchSpec — параметры запуска попытки executor'ом: образ рана (пиннутый

@@ -11,6 +11,7 @@ export function runStatusColor(status: RunStatus): BadgeColor {
     case 'running': return 'info'
     case 'success': return 'success'
     case 'failed': return 'error'
+    case 'canceled': return 'neutral'
     default: return 'neutral'
   }
 }
@@ -20,6 +21,7 @@ export function runStatusLabel(status: RunStatus): string {
     case 'running': return 'выполняется'
     case 'success': return 'успех'
     case 'failed': return 'провал'
+    case 'canceled': return 'остановлен'
     default: return status
   }
 }
@@ -51,6 +53,7 @@ export function taskStatusColor(status: TaskStatus): BadgeColor {
     case 'success': return 'success'
     case 'failed': return 'error'
     case 'upstream_failed': return 'warning'
+    case 'canceled': return 'neutral'
     default: return 'neutral'
   }
 }
@@ -65,6 +68,7 @@ export function taskStatusLabel(status: TaskStatus): string {
     case 'success': return 'успех'
     case 'failed': return 'провал'
     case 'upstream_failed': return 'провал зависимости'
+    case 'canceled': return 'остановлен'
     default: return status
   }
 }

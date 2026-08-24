@@ -85,6 +85,13 @@ func (h *Run) RetryTask(ctx context.Context, req *pb.RunRetryTaskReq) (*emptypb.
 	return &emptypb.Empty{}, nil
 }
 
+func (h *Run) CancelRun(ctx context.Context, req *pb.RunCancelReq) (*emptypb.Empty, error) {
+	if err := h.usecase.Cancel(ctx, req.GetId()); err != nil {
+		return nil, encodeErr(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
 func (h *Run) GetRun(ctx context.Context, req *pb.RunGetReq) (*pb.RunGetRep, error) {
 	run, manifestTasks, tasks, attempts, err := h.usecase.Get(ctx, req.GetId())
 	if err != nil {

@@ -132,6 +132,31 @@ func (u *Usecase) Backfill(ctx context.Context, dagName string, from, to time.Ti
 	return runIds, nil
 }
 
+// Cancel принудительно останавливает выполняющийся ран: ран и его
+// незавершённые таски получают canceled, живые попытки убиваются через
+// executor и финализируются (лог коммитится, артефакты закрываются).
+func (u *Usecase) Cancel(ctx context.Context, runId string) error {
+	if runId == "" {
+		return errs.IdRequired
+	}
+
+	run, _, err := u.svc.Get(ctx, runId, true)
+	if err != nil {
+		return fmt.Errorf("svc.Get: %w", err)
+	}
+	if err = u.authz.RequireDag(ctx, run.DagName); err != nil {
+		return err
+	}
+
+	live, err := u.svc.Cancel(ctx, runId)
+	if err != nil {
+		return fmt.Errorf("svc.Cancel: %w", err)
+	}
+
+	u.scheduler.CancelAttempts(ctx, live)
+	return nil
+}
+
 // ── значения тасков ─────────────────────────────────────
 
 func (u *Usecase) PushValue(ctx context.Context, ref model.AttemptRef, key string, value []byte) error {

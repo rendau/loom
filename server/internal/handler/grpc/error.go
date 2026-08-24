@@ -48,7 +48,8 @@ func encodeErr(err error) error {
 		code = codes.AlreadyExists
 	case errs.AttemptLogAborted:
 		code = codes.Aborted
-	case errs.LogAlreadyPushed, errs.RunNotFinished, errs.TaskNotRetryable, errs.AttemptOutdated:
+	case errs.LogAlreadyPushed, errs.RunNotFinished, errs.RunNotRunning, errs.TaskNotRetryable,
+		errs.AttemptOutdated:
 		code = codes.FailedPrecondition
 	default:
 		code = codes.InvalidArgument

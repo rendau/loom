@@ -33,7 +33,7 @@ type RunMain struct {
 	Image       string                 `protobuf:"bytes,3,opt,name=image,proto3" json:"image,omitempty"`
 	ImageDigest string                 `protobuf:"bytes,4,opt,name=image_digest,json=imageDigest,proto3" json:"image_digest,omitempty"`
 	Trigger     string                 `protobuf:"bytes,5,opt,name=trigger,proto3" json:"trigger,omitempty"` // manual | schedule | backfill
-	Status      string                 `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`   // running | success | failed
+	Status      string                 `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`   // running | success | failed | canceled
 	CreatedAt   *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	FinishedAt  *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=finished_at,json=finishedAt,proto3,oneof" json:"finished_at,omitempty"`
 	// «Дата данных» рана: тик расписания у cron/backfill-рана, момент
@@ -148,7 +148,8 @@ func (x *RunMain) GetParams() *structpb.Struct {
 type TaskInstanceMain struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Task  string                 `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
-	// pending | queued | starting | running | up_for_retry | success | failed | upstream_failed
+	// pending | queued | starting | running | up_for_retry | success | failed |
+	// upstream_failed | canceled
 	Status     string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	Attempt    int32                  `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"` // номер текущей (последней) попытки; 0 — ещё не стартовала
 	QueuedAt   *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=queued_at,json=queuedAt,proto3,oneof" json:"queued_at,omitempty"`
@@ -655,6 +656,50 @@ func (x *RunRetryTaskReq) GetTask() string {
 	return ""
 }
 
+type RunCancelReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunCancelReq) Reset() {
+	*x = RunCancelReq{}
+	mi := &file_server_v1_run_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunCancelReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunCancelReq) ProtoMessage() {}
+
+func (x *RunCancelReq) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_run_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunCancelReq.ProtoReflect.Descriptor instead.
+func (*RunCancelReq) Descriptor() ([]byte, []int) {
+	return file_server_v1_run_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *RunCancelReq) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
 type RunBackfillReq struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	DagName string                 `protobuf:"bytes,1,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"`
@@ -668,7 +713,7 @@ type RunBackfillReq struct {
 
 func (x *RunBackfillReq) Reset() {
 	*x = RunBackfillReq{}
-	mi := &file_server_v1_run_proto_msgTypes[9]
+	mi := &file_server_v1_run_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -680,7 +725,7 @@ func (x *RunBackfillReq) String() string {
 func (*RunBackfillReq) ProtoMessage() {}
 
 func (x *RunBackfillReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_run_proto_msgTypes[9]
+	mi := &file_server_v1_run_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -693,7 +738,7 @@ func (x *RunBackfillReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunBackfillReq.ProtoReflect.Descriptor instead.
 func (*RunBackfillReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_run_proto_rawDescGZIP(), []int{9}
+	return file_server_v1_run_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RunBackfillReq) GetDagName() string {
@@ -733,7 +778,7 @@ type RunBackfillRep struct {
 
 func (x *RunBackfillRep) Reset() {
 	*x = RunBackfillRep{}
-	mi := &file_server_v1_run_proto_msgTypes[10]
+	mi := &file_server_v1_run_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -745,7 +790,7 @@ func (x *RunBackfillRep) String() string {
 func (*RunBackfillRep) ProtoMessage() {}
 
 func (x *RunBackfillRep) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_run_proto_msgTypes[10]
+	mi := &file_server_v1_run_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -758,7 +803,7 @@ func (x *RunBackfillRep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunBackfillRep.ProtoReflect.Descriptor instead.
 func (*RunBackfillRep) Descriptor() ([]byte, []int) {
-	return file_server_v1_run_proto_rawDescGZIP(), []int{10}
+	return file_server_v1_run_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *RunBackfillRep) GetRunIds() []string {
@@ -782,7 +827,7 @@ type RunGetRep struct {
 
 func (x *RunGetRep) Reset() {
 	*x = RunGetRep{}
-	mi := &file_server_v1_run_proto_msgTypes[11]
+	mi := &file_server_v1_run_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -794,7 +839,7 @@ func (x *RunGetRep) String() string {
 func (*RunGetRep) ProtoMessage() {}
 
 func (x *RunGetRep) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_run_proto_msgTypes[11]
+	mi := &file_server_v1_run_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -807,7 +852,7 @@ func (x *RunGetRep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunGetRep.ProtoReflect.Descriptor instead.
 func (*RunGetRep) Descriptor() ([]byte, []int) {
-	return file_server_v1_run_proto_rawDescGZIP(), []int{11}
+	return file_server_v1_run_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RunGetRep) GetRun() *RunMain {
@@ -913,7 +958,9 @@ const file_server_v1_run_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"<\n" +
 	"\x0fRunRetryTaskReq\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x12\n" +
-	"\x04task\x18\x02 \x01(\tR\x04task\"\xb8\x01\n" +
+	"\x04task\x18\x02 \x01(\tR\x04task\"\x1e\n" +
+	"\fRunCancelReq\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xb8\x01\n" +
 	"\x0eRunBackfillReq\x12\x19\n" +
 	"\bdag_name\x18\x01 \x01(\tR\adagName\x12.\n" +
 	"\x04from\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04from\x12*\n" +
@@ -925,14 +972,15 @@ const file_server_v1_run_proto_rawDesc = "" +
 	"\x03run\x18\x01 \x01(\v2\x12.server_v1.RunMainR\x03run\x121\n" +
 	"\x05tasks\x18\x02 \x03(\v2\x1b.server_v1.TaskInstanceMainR\x05tasks\x122\n" +
 	"\battempts\x18\x03 \x03(\v2\x16.server_v1.AttemptMainR\battempts\x12=\n" +
-	"\x0emanifest_tasks\x18\x04 \x03(\v2\x16.server_v1.DagTaskMainR\rmanifestTasks2\xbb\x03\n" +
+	"\x0emanifest_tasks\x18\x04 \x03(\v2\x16.server_v1.DagTaskMainR\rmanifestTasks2\x96\x04\n" +
 	"\n" +
 	"RunService\x12Q\n" +
 	"\n" +
 	"TriggerRun\x12\x18.server_v1.RunTriggerReq\x1a\x18.server_v1.RunTriggerRep\"\x0f\x82\xd3\xe4\x93\x02\t:\x01*\"\x04/run\x12E\n" +
 	"\aListRun\x12\x15.server_v1.RunListReq\x1a\x15.server_v1.RunListRep\"\f\x82\xd3\xe4\x93\x02\x06\x12\x04/run\x12G\n" +
 	"\x06GetRun\x12\x14.server_v1.RunGetReq\x1a\x14.server_v1.RunGetRep\"\x11\x82\xd3\xe4\x93\x02\v\x12\t/run/{id}\x12k\n" +
-	"\tRetryTask\x12\x1a.server_v1.RunRetryTaskReq\x1a\x16.google.protobuf.Empty\"*\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/run/{run_id}/task/{task}/retry\x12]\n" +
+	"\tRetryTask\x12\x1a.server_v1.RunRetryTaskReq\x1a\x16.google.protobuf.Empty\"*\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/run/{run_id}/task/{task}/retry\x12Y\n" +
+	"\tCancelRun\x12\x17.server_v1.RunCancelReq\x1a\x16.google.protobuf.Empty\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/run/{id}/cancel\x12]\n" +
 	"\vBackfillRun\x12\x19.server_v1.RunBackfillReq\x1a\x19.server_v1.RunBackfillRep\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/run/backfillB0Z.github.com/rendau/loom/api/server_v1;server_v1b\x06proto3"
 
 var (
@@ -947,7 +995,7 @@ func file_server_v1_run_proto_rawDescGZIP() []byte {
 	return file_server_v1_run_proto_rawDescData
 }
 
-var file_server_v1_run_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_server_v1_run_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_server_v1_run_proto_goTypes = []any{
 	(*RunMain)(nil),                 // 0: server_v1.RunMain
 	(*TaskInstanceMain)(nil),        // 1: server_v1.TaskInstanceMain
@@ -958,51 +1006,54 @@ var file_server_v1_run_proto_goTypes = []any{
 	(*RunListRep)(nil),              // 6: server_v1.RunListRep
 	(*RunGetReq)(nil),               // 7: server_v1.RunGetReq
 	(*RunRetryTaskReq)(nil),         // 8: server_v1.RunRetryTaskReq
-	(*RunBackfillReq)(nil),          // 9: server_v1.RunBackfillReq
-	(*RunBackfillRep)(nil),          // 10: server_v1.RunBackfillRep
-	(*RunGetRep)(nil),               // 11: server_v1.RunGetRep
-	(*timestamppb.Timestamp)(nil),   // 12: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),         // 13: google.protobuf.Struct
-	(*common.ListParamsSt)(nil),     // 14: common.ListParamsSt
-	(*common.PaginationInfoSt)(nil), // 15: common.PaginationInfoSt
-	(*DagTaskMain)(nil),             // 16: server_v1.DagTaskMain
-	(*emptypb.Empty)(nil),           // 17: google.protobuf.Empty
+	(*RunCancelReq)(nil),            // 9: server_v1.RunCancelReq
+	(*RunBackfillReq)(nil),          // 10: server_v1.RunBackfillReq
+	(*RunBackfillRep)(nil),          // 11: server_v1.RunBackfillRep
+	(*RunGetRep)(nil),               // 12: server_v1.RunGetRep
+	(*timestamppb.Timestamp)(nil),   // 13: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),         // 14: google.protobuf.Struct
+	(*common.ListParamsSt)(nil),     // 15: common.ListParamsSt
+	(*common.PaginationInfoSt)(nil), // 16: common.PaginationInfoSt
+	(*DagTaskMain)(nil),             // 17: server_v1.DagTaskMain
+	(*emptypb.Empty)(nil),           // 18: google.protobuf.Empty
 }
 var file_server_v1_run_proto_depIdxs = []int32{
-	12, // 0: server_v1.RunMain.created_at:type_name -> google.protobuf.Timestamp
-	12, // 1: server_v1.RunMain.finished_at:type_name -> google.protobuf.Timestamp
-	12, // 2: server_v1.RunMain.logical_date:type_name -> google.protobuf.Timestamp
-	13, // 3: server_v1.RunMain.params:type_name -> google.protobuf.Struct
-	12, // 4: server_v1.TaskInstanceMain.queued_at:type_name -> google.protobuf.Timestamp
-	12, // 5: server_v1.TaskInstanceMain.started_at:type_name -> google.protobuf.Timestamp
-	12, // 6: server_v1.TaskInstanceMain.finished_at:type_name -> google.protobuf.Timestamp
-	12, // 7: server_v1.TaskInstanceMain.retry_at:type_name -> google.protobuf.Timestamp
-	12, // 8: server_v1.AttemptMain.created_at:type_name -> google.protobuf.Timestamp
-	12, // 9: server_v1.AttemptMain.started_at:type_name -> google.protobuf.Timestamp
-	12, // 10: server_v1.AttemptMain.finished_at:type_name -> google.protobuf.Timestamp
-	13, // 11: server_v1.RunTriggerReq.params:type_name -> google.protobuf.Struct
-	14, // 12: server_v1.RunListReq.list_params:type_name -> common.ListParamsSt
-	15, // 13: server_v1.RunListRep.pagination_info:type_name -> common.PaginationInfoSt
+	13, // 0: server_v1.RunMain.created_at:type_name -> google.protobuf.Timestamp
+	13, // 1: server_v1.RunMain.finished_at:type_name -> google.protobuf.Timestamp
+	13, // 2: server_v1.RunMain.logical_date:type_name -> google.protobuf.Timestamp
+	14, // 3: server_v1.RunMain.params:type_name -> google.protobuf.Struct
+	13, // 4: server_v1.TaskInstanceMain.queued_at:type_name -> google.protobuf.Timestamp
+	13, // 5: server_v1.TaskInstanceMain.started_at:type_name -> google.protobuf.Timestamp
+	13, // 6: server_v1.TaskInstanceMain.finished_at:type_name -> google.protobuf.Timestamp
+	13, // 7: server_v1.TaskInstanceMain.retry_at:type_name -> google.protobuf.Timestamp
+	13, // 8: server_v1.AttemptMain.created_at:type_name -> google.protobuf.Timestamp
+	13, // 9: server_v1.AttemptMain.started_at:type_name -> google.protobuf.Timestamp
+	13, // 10: server_v1.AttemptMain.finished_at:type_name -> google.protobuf.Timestamp
+	14, // 11: server_v1.RunTriggerReq.params:type_name -> google.protobuf.Struct
+	15, // 12: server_v1.RunListReq.list_params:type_name -> common.ListParamsSt
+	16, // 13: server_v1.RunListRep.pagination_info:type_name -> common.PaginationInfoSt
 	0,  // 14: server_v1.RunListRep.results:type_name -> server_v1.RunMain
-	12, // 15: server_v1.RunBackfillReq.from:type_name -> google.protobuf.Timestamp
-	12, // 16: server_v1.RunBackfillReq.to:type_name -> google.protobuf.Timestamp
-	13, // 17: server_v1.RunBackfillReq.params:type_name -> google.protobuf.Struct
+	13, // 15: server_v1.RunBackfillReq.from:type_name -> google.protobuf.Timestamp
+	13, // 16: server_v1.RunBackfillReq.to:type_name -> google.protobuf.Timestamp
+	14, // 17: server_v1.RunBackfillReq.params:type_name -> google.protobuf.Struct
 	0,  // 18: server_v1.RunGetRep.run:type_name -> server_v1.RunMain
 	1,  // 19: server_v1.RunGetRep.tasks:type_name -> server_v1.TaskInstanceMain
 	2,  // 20: server_v1.RunGetRep.attempts:type_name -> server_v1.AttemptMain
-	16, // 21: server_v1.RunGetRep.manifest_tasks:type_name -> server_v1.DagTaskMain
+	17, // 21: server_v1.RunGetRep.manifest_tasks:type_name -> server_v1.DagTaskMain
 	3,  // 22: server_v1.RunService.TriggerRun:input_type -> server_v1.RunTriggerReq
 	5,  // 23: server_v1.RunService.ListRun:input_type -> server_v1.RunListReq
 	7,  // 24: server_v1.RunService.GetRun:input_type -> server_v1.RunGetReq
 	8,  // 25: server_v1.RunService.RetryTask:input_type -> server_v1.RunRetryTaskReq
-	9,  // 26: server_v1.RunService.BackfillRun:input_type -> server_v1.RunBackfillReq
-	4,  // 27: server_v1.RunService.TriggerRun:output_type -> server_v1.RunTriggerRep
-	6,  // 28: server_v1.RunService.ListRun:output_type -> server_v1.RunListRep
-	11, // 29: server_v1.RunService.GetRun:output_type -> server_v1.RunGetRep
-	17, // 30: server_v1.RunService.RetryTask:output_type -> google.protobuf.Empty
-	10, // 31: server_v1.RunService.BackfillRun:output_type -> server_v1.RunBackfillRep
-	27, // [27:32] is the sub-list for method output_type
-	22, // [22:27] is the sub-list for method input_type
+	9,  // 26: server_v1.RunService.CancelRun:input_type -> server_v1.RunCancelReq
+	10, // 27: server_v1.RunService.BackfillRun:input_type -> server_v1.RunBackfillReq
+	4,  // 28: server_v1.RunService.TriggerRun:output_type -> server_v1.RunTriggerRep
+	6,  // 29: server_v1.RunService.ListRun:output_type -> server_v1.RunListRep
+	12, // 30: server_v1.RunService.GetRun:output_type -> server_v1.RunGetRep
+	18, // 31: server_v1.RunService.RetryTask:output_type -> google.protobuf.Empty
+	18, // 32: server_v1.RunService.CancelRun:output_type -> google.protobuf.Empty
+	11, // 33: server_v1.RunService.BackfillRun:output_type -> server_v1.RunBackfillRep
+	28, // [28:34] is the sub-list for method output_type
+	22, // [22:28] is the sub-list for method input_type
 	22, // [22:22] is the sub-list for extension type_name
 	22, // [22:22] is the sub-list for extension extendee
 	0,  // [0:22] is the sub-list for field type_name
@@ -1024,7 +1075,7 @@ func file_server_v1_run_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_v1_run_proto_rawDesc), len(file_server_v1_run_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

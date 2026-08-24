@@ -24,6 +24,7 @@ const (
 	RegistrationNotFound = Err("registration_not_found")
 	RunNotFound          = Err("run_not_found")
 	RunNotFinished       = Err("run_not_finished")
+	RunNotRunning        = Err("run_not_running")
 	TaskNotFound         = Err("task_not_found")
 	TaskNotRetryable     = Err("task_not_retryable")
 	InvalidManifest      = Err("invalid_manifest")

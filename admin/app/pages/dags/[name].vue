@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
-import { getDag, listDagRegistrations, setDagAutoUpdate, setDagPaused } from '~/api/dag.api'
+import { getDag, listDagRegistrations, setDagAutoUpdate, setDagPaused, syncDag } from '~/api/dag.api'
 import type { Dag, DagRegistration, DagTask } from '~/types/dag'
 
 // Карточка дага: схема (граф) и параметры тасков видны сразу после
@@ -76,6 +76,21 @@ async function togglePaused() {
   )
   if (ok !== undefined)
     await load()
+}
+
+// принудительное обновление дага из registry: перерегистрация его текущего
+// образа сейчас, не дожидаясь тика авто-обновления; статус видно в истории
+// регистраций (и бейджем «обновляется»)
+async function sync() {
+  const d = dag.value
+  if (!d)
+    return
+  const ok = await action.run(
+    () => syncDag(d.name),
+    { success: 'Обновление дага поставлено в очередь' },
+  )
+  if (ok !== undefined)
+    await load(true)
 }
 
 async function toggleAutoUpdate() {
@@ -173,6 +188,15 @@ function regStatusLabel(status: DagRegistration['status']): string {
           </UTooltip>
           <UTooltip v-if="canManage" text="Расписание">
             <UButton icon="i-lucide-alarm-clock" color="neutral" variant="ghost" @click="scheduleTarget = dag" />
+          </UTooltip>
+          <UTooltip v-if="isAdmin" text="Обновить из registry сейчас">
+            <UButton
+              icon="i-lucide-cloud-download"
+              color="info"
+              variant="ghost"
+              :disabled="isUpdating"
+              @click="sync"
+            />
           </UTooltip>
           <UTooltip v-if="isAdmin" :text="dag?.auto_update ? 'Выключить авто-обновление образа' : 'Включить авто-обновление образа'">
             <UButton

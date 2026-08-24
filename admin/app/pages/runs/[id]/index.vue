@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
-import { getRun, listRunValues, retryTask } from '~/api/run.api'
+import { cancelRun, getRun, listRunValues, retryTask } from '~/api/run.api'
 import type { DagTask } from '~/types/dag'
 import type { Attempt, Run, TaskInstance, TaskValue } from '~/types/run'
 import type { RunLogSlideover } from '#components'
@@ -76,15 +76,33 @@ function openAttemptLog(a: Attempt) {
 }
 
 // ретрай таска: доступен на завершённом ране для исполнявшихся тасков
-// (failed | success); upstream_failed не исполнялся — ретраить нечего
+// (failed | success | canceled); upstream_failed не исполнялся — ретраить нечего
 const action = useApiAction()
 const retryTarget = ref<TaskInstance | null>(null)
 const { canManageDag } = useAuth()
 
 function canRetry(ti: TaskInstance): boolean {
   return run.value?.status !== 'running'
-    && (ti.status === 'failed' || ti.status === 'success')
+    && (ti.status === 'failed' || ti.status === 'success' || ti.status === 'canceled')
     && canManageDag(run.value?.dag_name)
+}
+
+// принудительная остановка рана: живые таски убиваются, незавершённые
+// получают canceled; успешные остаются — ран можно доиграть ретраем
+const cancelOpen = ref(false)
+
+const canCancel = computed(() =>
+  run.value?.status === 'running' && canManageDag(run.value?.dag_name))
+
+async function confirmCancel() {
+  const ok = await action.run(
+    () => cancelRun(runId),
+    { success: 'Ран остановлен' },
+  )
+  if (ok !== undefined) {
+    cancelOpen.value = false
+    await load()
+  }
 }
 
 async function confirmRetry() {
@@ -169,6 +187,9 @@ const tableUi = { td: 'whitespace-normal' }
           <UBadge v-if="run" :color="runStatusColor(run.status)" variant="subtle" size="lg">
             {{ runStatusLabel(run.status) }}
           </UBadge>
+          <UTooltip v-if="canCancel" text="Остановить ран">
+            <UButton icon="i-lucide-circle-stop" color="error" variant="ghost" @click="cancelOpen = true" />
+          </UTooltip>
           <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load()" />
         </template>
       </UDashboardNavbar>
@@ -357,6 +378,23 @@ const tableUi = { td: 'whitespace-normal' }
       </template>
 
       <RunLogSlideover ref="logRef" :run-id="runId" />
+
+      <!-- подтверждение остановки рана -->
+      <UModal :open="cancelOpen" title="Остановить ран?" @update:open="cancelOpen = false">
+        <template #body>
+          <p>
+            Выполняющиеся таски будут убиты, а незавершённые — получат статус
+            «остановлен». Успешные таски останутся успешными: ран можно будет
+            доиграть ретраем таска.
+          </p>
+        </template>
+        <template #footer>
+          <div class="flex w-full justify-end gap-2">
+            <UButton color="neutral" variant="ghost" label="Отмена" @click="cancelOpen = false" />
+            <UButton color="error" label="Остановить" :loading="action.loading.value" @click="confirmCancel" />
+          </div>
+        </template>
+      </UModal>
 
       <!-- подтверждение ретрая -->
       <UModal :open="retryTarget !== null" title="Ретрай таска?" @update:open="retryTarget = null">

@@ -24,6 +24,7 @@ const (
 	RunService_ListRun_FullMethodName     = "/server_v1.RunService/ListRun"
 	RunService_GetRun_FullMethodName      = "/server_v1.RunService/GetRun"
 	RunService_RetryTask_FullMethodName   = "/server_v1.RunService/RetryTask"
+	RunService_CancelRun_FullMethodName   = "/server_v1.RunService/CancelRun"
 	RunService_BackfillRun_FullMethodName = "/server_v1.RunService/BackfillRun"
 )
 
@@ -44,6 +45,12 @@ type RunServiceClient interface {
 	// очередь, его downstream-подграф сбрасывается в pending, ран снова
 	// running. На выполняющемся ране недоступен (run_not_finished).
 	RetryTask(ctx context.Context, in *RunRetryTaskReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// CancelRun принудительно останавливает выполняющийся ран: живые попытки
+	// убиваются через executor, незавершённые таски и сам ран получают статус
+	// canceled. Уже успешные таски остаются success, поэтому остановленный ран
+	// можно доиграть ретраем таска (RetryTask). Завершённый ран останавливать
+	// нечего (run_not_running).
+	CancelRun(ctx context.Context, in *RunCancelReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// BackfillRun создаёт раны за прошедший период: по рану на каждый тик
 	// cron-расписания дага в [from, to), trigger=backfill, logical_date=тик.
 	// Требует расписания у дага; число тиков за вызов ограничено.
@@ -98,6 +105,16 @@ func (c *runServiceClient) RetryTask(ctx context.Context, in *RunRetryTaskReq, o
 	return out, nil
 }
 
+func (c *runServiceClient) CancelRun(ctx context.Context, in *RunCancelReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, RunService_CancelRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *runServiceClient) BackfillRun(ctx context.Context, in *RunBackfillReq, opts ...grpc.CallOption) (*RunBackfillRep, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RunBackfillRep)
@@ -125,6 +142,12 @@ type RunServiceServer interface {
 	// очередь, его downstream-подграф сбрасывается в pending, ран снова
 	// running. На выполняющемся ране недоступен (run_not_finished).
 	RetryTask(context.Context, *RunRetryTaskReq) (*emptypb.Empty, error)
+	// CancelRun принудительно останавливает выполняющийся ран: живые попытки
+	// убиваются через executor, незавершённые таски и сам ран получают статус
+	// canceled. Уже успешные таски остаются success, поэтому остановленный ран
+	// можно доиграть ретраем таска (RetryTask). Завершённый ран останавливать
+	// нечего (run_not_running).
+	CancelRun(context.Context, *RunCancelReq) (*emptypb.Empty, error)
 	// BackfillRun создаёт раны за прошедший период: по рану на каждый тик
 	// cron-расписания дага в [from, to), trigger=backfill, logical_date=тик.
 	// Требует расписания у дага; число тиков за вызов ограничено.
@@ -150,6 +173,9 @@ func (UnimplementedRunServiceServer) GetRun(context.Context, *RunGetReq) (*RunGe
 }
 func (UnimplementedRunServiceServer) RetryTask(context.Context, *RunRetryTaskReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RetryTask not implemented")
+}
+func (UnimplementedRunServiceServer) CancelRun(context.Context, *RunCancelReq) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelRun not implemented")
 }
 func (UnimplementedRunServiceServer) BackfillRun(context.Context, *RunBackfillReq) (*RunBackfillRep, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BackfillRun not implemented")
@@ -247,6 +273,24 @@ func _RunService_RetryTask_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RunService_CancelRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunCancelReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RunServiceServer).CancelRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RunService_CancelRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RunServiceServer).CancelRun(ctx, req.(*RunCancelReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RunService_BackfillRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RunBackfillReq)
 	if err := dec(in); err != nil {
@@ -287,6 +331,10 @@ var RunService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RetryTask",
 			Handler:    _RunService_RetryTask_Handler,
+		},
+		{
+			MethodName: "CancelRun",
+			Handler:    _RunService_CancelRun_Handler,
 		},
 		{
 			MethodName: "BackfillRun",

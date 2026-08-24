@@ -1,6 +1,6 @@
 // DTO ранов (зеркало api/proto/server_v1/run.proto).
 
-export type RunStatus = 'running' | 'success' | 'failed'
+export type RunStatus = 'running' | 'success' | 'failed' | 'canceled'
 
 export type TaskStatus =
   | 'pending'
@@ -11,6 +11,7 @@ export type TaskStatus =
   | 'success'
   | 'failed'
   | 'upstream_failed'
+  | 'canceled'
 
 export type AttemptStatus = 'starting' | 'running' | 'success' | 'failed'
 

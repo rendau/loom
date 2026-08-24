@@ -72,6 +72,17 @@ service DagService {
     };
   }
 
+  // SyncDag — принудительное обновление дага из registry: перерегистрация
+  // текущего образа дага (pull + describe) прямо сейчас, не дожидаясь тика
+  // авто-обновления. Кладётся в ту же очередь, что и RegisterDag, — статус
+  // виден через Get/ListDagRegistration (source=manual).
+  rpc SyncDag(DagSyncReq) returns (DagSyncRep) {
+    option (google.api.http) = {
+      post: "/dag/{name}/sync"
+      body: "*"
+    };
+  }
+
   // SetDagAutoUpdate включает/выключает авто-обновление дага:
   // control plane периодически сверяет digest тега образа с registry и при
   // изменении перерегистрирует даг автоматически.
@@ -247,6 +258,17 @@ message DagSetScheduleReq {
 message DagSetPausedReq {
   string name = 1;
   bool paused = 2;
+}
+
+// Sync
+
+message DagSyncReq {
+  string name = 1;
+}
+
+message DagSyncRep {
+  // Id записи очереди регистраций — для поллинга статуса.
+  string registration_id = 1;
 }
 
 // SetAutoUpdate

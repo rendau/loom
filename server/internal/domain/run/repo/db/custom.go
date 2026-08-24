@@ -221,6 +221,11 @@ func (r *Repo) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit m
 		taskStatus = model.TaskStatusSuccess
 		retryAt = nil
 	}
+	// остановка рана: попытка неуспешна, но таск не «упал» и ретрая не ждёт
+	if exit.Canceled {
+		taskStatus = model.TaskStatusCanceled
+		retryAt = nil
+	}
 	if retryAt != nil {
 		taskStatus = model.TaskStatusUpForRetry
 	}
@@ -318,7 +323,8 @@ func (r *Repo) RetryTaskSubgraph(ctx context.Context, runId, task string, downst
 	tag, err := r.TxM.GetConnection(ctx).Exec(ctx, `
 		UPDATE run SET status = $1, finished_at = NULL
 		WHERE id = $2 AND status = ANY($3)`,
-		model.RunStatusRunning, runId, []string{model.RunStatusSuccess, model.RunStatusFailed})
+		model.RunStatusRunning, runId,
+		[]string{model.RunStatusSuccess, model.RunStatusFailed, model.RunStatusCanceled})
 	if err != nil {
 		return false, fmt.Errorf("RetryTaskSubgraph run: %w", err)
 	}
@@ -331,7 +337,7 @@ func (r *Repo) RetryTaskSubgraph(ctx context.Context, runId, task string, downst
 		SET status = $1, queued_at = now(), started_at = NULL, retry_at = NULL, finished_at = NULL
 		WHERE run_id = $2 AND task = $3 AND status = ANY($4)`,
 		model.TaskStatusQueued, runId, task,
-		[]string{model.TaskStatusSuccess, model.TaskStatusFailed})
+		[]string{model.TaskStatusSuccess, model.TaskStatusFailed, model.TaskStatusCanceled})
 	if err != nil {
 		return false, fmt.Errorf("RetryTaskSubgraph task: %w", err)
 	}
@@ -351,6 +357,62 @@ func (r *Repo) RetryTaskSubgraph(ctx context.Context, runId, task string, downst
 	}
 
 	return true, nil
+}
+
+// CancelRun останавливает выполняющийся ран: ран и не начавшие исполняться
+// таски (pending | queued | up_for_retry) получают canceled, а живые попытки
+// (starting | running) возвращаются вызывающему — их убивает и финализирует
+// планировщик. Идемпотентен: applied=false — ран уже не выполняется, ничего
+// не изменено. Вызывать в транзакции: замок на строках очереди сериализует
+// остановку с claim'ом планировщика (таск либо уже не попадёт в запуск, либо
+// вернётся живой попыткой).
+func (r *Repo) CancelRun(ctx context.Context, runId string) (bool, []model.AttemptRef, error) {
+	con := r.TxM.GetConnection(ctx)
+
+	tag, err := con.Exec(ctx, `
+		UPDATE run SET status = $1, finished_at = now()
+		WHERE id = $2 AND status = $3`,
+		model.RunStatusCanceled, runId, model.RunStatusRunning)
+	if err != nil {
+		return false, nil, fmt.Errorf("CancelRun run: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil, nil
+	}
+
+	_, err = con.Exec(ctx, `
+		UPDATE task_instance
+		SET status = $1, retry_at = NULL, finished_at = now()
+		WHERE run_id = $2 AND status = ANY($3)`,
+		model.TaskStatusCanceled, runId,
+		[]string{model.TaskStatusPending, model.TaskStatusQueued, model.TaskStatusUpForRetry})
+	if err != nil {
+		return false, nil, fmt.Errorf("CancelRun task_instance: %w", err)
+	}
+
+	// живые попытки читаем после апдейта очереди: таск, забранный на запуск
+	// конкурентным claim'ом, к этому моменту уже виден как starting
+	rows, err := con.Query(ctx, `
+		SELECT task, attempt FROM task_instance
+		WHERE run_id = $1 AND status = ANY($2)`,
+		runId, []string{model.TaskStatusStarting, model.TaskStatusRunning})
+	if err != nil {
+		return false, nil, fmt.Errorf("CancelRun live: %w", err)
+	}
+	defer rows.Close()
+
+	var live []model.AttemptRef
+	for rows.Next() {
+		ref := model.AttemptRef{RunId: runId}
+		if err = rows.Scan(&ref.Task, &ref.Attempt); err != nil {
+			return false, nil, fmt.Errorf("CancelRun live scan: %w", err)
+		}
+		live = append(live, ref)
+	}
+	if err = rows.Err(); err != nil {
+		return false, nil, fmt.Errorf("CancelRun live rows: %w", err)
+	}
+	return true, live, nil
 }
 
 // UpsertTaskValue сохраняет значение таска; повторный пуш по тому же ключу

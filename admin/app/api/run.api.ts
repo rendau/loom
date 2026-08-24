@@ -39,6 +39,12 @@ export function listRunValues(runId: string) {
   return apiFetch<{ values: TaskValue[] }>(`/run/${encodeURIComponent(runId)}/value`)
 }
 
+// Принудительная остановка выполняющегося рана: живые попытки убиваются,
+// незавершённые таски и сам ран получают статус canceled.
+export function cancelRun(runId: string) {
+  return apiFetch<object>(`/run/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: {} })
+}
+
 // Ретрай таска завершённого рана: таск уходит в очередь новой попыткой,
 // его downstream-подграф сбрасывается и выполняется заново.
 export function retryTask(runId: string, task: string) {

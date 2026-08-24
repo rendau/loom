@@ -31,14 +31,16 @@ var authExemptMethods = map[string]struct{}{
 	"/server_v1.AuthService/Login":              {},
 }
 
-// adminOnlyMethods — операции уровня инсталляции: регистрация и удаление
-// дагов, авто-обновление образа, пулы, управление пользователями. Права на
+// adminOnlyMethods — операции уровня инсталляции: регистрация, обновление
+// образа (sync, авто-обновление) и удаление дагов, пулы, управление
+// пользователями. Права на
 // конкретный даг (расписание, триггер, переменные) проверяются в usecase —
 // интерцептору имя дага не видно.
 var adminOnlyMethods = map[string]struct{}{
 	"/server_v1.DagService/RegisterDag":      {},
 	"/server_v1.DagService/DeleteDag":        {},
 	"/server_v1.DagService/SetDagAutoUpdate": {},
+	"/server_v1.DagService/SyncDag":          {},
 	"/server_v1.PoolService/SetPool":         {},
 }
 

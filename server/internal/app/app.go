@@ -29,6 +29,7 @@ import (
 	poolDb "github.com/rendau/loom/server/internal/domain/pool/repo/db"
 	poolService "github.com/rendau/loom/server/internal/domain/pool/service"
 	domainRetention "github.com/rendau/loom/server/internal/domain/retention"
+	runModel "github.com/rendau/loom/server/internal/domain/run/model"
 	runDb "github.com/rendau/loom/server/internal/domain/run/repo/db"
 	runService "github.com/rendau/loom/server/internal/domain/run/service"
 	domainScheduler "github.com/rendau/loom/server/internal/domain/scheduler"
@@ -418,6 +419,10 @@ func (a *App) Exit() {
 type nopScheduler struct{}
 
 func (nopScheduler) Nudge() {}
+
+// CancelAttempts — без executor'а живых попыток не бывает (таски не
+// запускаются), убивать нечего.
+func (nopScheduler) CancelAttempts(context.Context, []runModel.AttemptRef) {}
 
 func errCheck(err error, msg string) {
 	if err != nil {

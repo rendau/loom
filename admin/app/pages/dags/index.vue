@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
-import { listDags, listDagRegistrations, registerDag, setDagAutoUpdate, setDagPaused } from '~/api/dag.api'
+import { listDags, listDagRegistrations, registerDag, setDagAutoUpdate, setDagPaused, syncDag } from '~/api/dag.api'
 import type { Dag, DagRegistration } from '~/types/dag'
 
 const { isAdmin, canManageDag } = useAuth()
@@ -177,6 +177,19 @@ async function toggleAutoUpdate(dag: Dag) {
     await load()
 }
 
+// принудительное обновление дага из registry: перерегистрация текущего
+// образа в общей очереди — статус доезжает тем же поллингом регистраций
+async function sync(dag: Dag) {
+  const ok = await action.run(
+    () => syncDag(dag.name),
+    { success: `Обновление дага ${dag.name} поставлено в очередь` },
+  )
+  if (ok !== undefined) {
+    await loadRegistrations()
+    ensureRegPolling()
+  }
+}
+
 const columns: TableColumn<Dag>[] = [
   { accessorKey: 'name', header: 'Даг' },
   { accessorKey: 'schedule', header: 'Расписание' },
@@ -276,6 +289,16 @@ const columns: TableColumn<Dag>[] = [
             </UTooltip>
             <UTooltip v-if="canManageDag(row.original.name)" text="Расписание">
               <UButton icon="i-lucide-alarm-clock" size="sm" color="neutral" variant="ghost" @click="scheduleTarget = row.original" />
+            </UTooltip>
+            <UTooltip v-if="isAdmin" text="Обновить из registry сейчас">
+              <UButton
+                icon="i-lucide-cloud-download"
+                size="sm"
+                color="info"
+                variant="ghost"
+                :disabled="isUpdating(row.original)"
+                @click="sync(row.original)"
+              />
             </UTooltip>
             <UTooltip v-if="isAdmin" :text="row.original.auto_update ? 'Выключить авто-обновление образа' : 'Включить авто-обновление образа'">
               <UButton

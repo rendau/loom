@@ -88,6 +88,14 @@ func (h *Dag) SetDagPaused(ctx context.Context, req *pb.DagSetPausedReq) (*empty
 	return &emptypb.Empty{}, nil
 }
 
+func (h *Dag) SyncDag(ctx context.Context, req *pb.DagSyncReq) (*pb.DagSyncRep, error) {
+	reg, err := h.usecase.Sync(ctx, req.GetName())
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+	return &pb.DagSyncRep{RegistrationId: reg.Id}, nil
+}
+
 func (h *Dag) SetDagAutoUpdate(ctx context.Context, req *pb.DagSetAutoUpdateReq) (*emptypb.Empty, error) {
 	if err := h.usecase.SetAutoUpdate(ctx, req.GetName(), req.GetAutoUpdate()); err != nil {
 		return nil, encodeErr(err)

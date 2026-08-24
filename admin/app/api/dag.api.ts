@@ -40,6 +40,16 @@ export function getDagRegistration(id: string) {
   return apiFetch<DagRegistration>(`/dag-registration/${encodeURIComponent(id)}`)
 }
 
+// Принудительное обновление дага из registry: перерегистрация его текущего
+// образа сейчас, не дожидаясь тика авто-обновления. Ответ — id записи
+// очереди регистраций (статус поллится там же, где у registerDag).
+export function syncDag(name: string) {
+  return apiFetch<{ registration_id: string }>(
+    `/dag/${encodeURIComponent(name)}/sync`,
+    { method: 'POST', body: {} },
+  )
+}
+
 // Расписание живёт только на control plane (манифест его не содержит);
 // пустая строка schedule снимает расписание.
 export function setDagSchedule(name: string, schedule: string, catchup: boolean) {

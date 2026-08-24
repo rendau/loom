@@ -7,6 +7,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -16,6 +17,7 @@ import (
 
 	json "github.com/goccy/go-json"
 	"github.com/samber/lo"
+	"golang.org/x/sync/errgroup"
 
 	loom "github.com/rendau/loom/sdk"
 	"github.com/rendau/loom/server/internal/domain/dag/manifest"
@@ -29,6 +31,15 @@ import (
 // artifact-сервере, закрытие лог-стрима) отдельным от событийного цикла
 // контекстом.
 const finalizeTimeout = 15 * time.Second
+
+// cancelKillConcurrency — сколько попыток останова рана убиваем
+// параллельно: docker rm / удаление Job'а идут по одной попытке, а
+// остановить ран с десятками живых тасков нужно за один запрос админки.
+const cancelKillConcurrency = 8
+
+// errRunNotActive — таск забран из очереди, но его ран уже не выполняется
+// (остановлен между claim и launch): запускать нечего.
+var errRunNotActive = errors.New("run is not running")
 
 // Политика ретраев: без retry_delay_sec в манифесте пауза перед ретраем —
 // defaultRetryDelay; с каждой попыткой пауза удваивается, но не превышает
@@ -338,15 +349,28 @@ func (s *Scheduler) pass(ctx context.Context) error {
 	}
 
 	for _, c := range claimed {
-		if err = s.launch(ctx, c); err != nil {
-			ref := runModel.AttemptRef{RunId: c.RunId, Task: c.Task, Attempt: c.Attempt}
-			slog.Error("scheduler launch", "run_id", c.RunId, "task", c.Task, "attempt", c.Attempt, "error", err)
-			s.finalize(ref, runModel.ExitInfo{
-				Success: false,
-				Reason:  "launch_failed",
-				Message: err.Error(),
-			})
+		err = s.launch(ctx, c)
+		if err == nil {
+			continue
 		}
+
+		ref := runModel.AttemptRef{RunId: c.RunId, Task: c.Task, Attempt: c.Attempt}
+
+		// ран остановили между claim и launch — попытку не запускаем, а сразу
+		// закрываем как остановленную (иначе таск завис бы в starting)
+		if errors.Is(err, errRunNotActive) {
+			slog.Info("claimed task dropped: run is not running",
+				"run_id", c.RunId, "task", c.Task, "attempt", c.Attempt)
+			s.finalizeCanceled(ref)
+			continue
+		}
+
+		slog.Error("scheduler launch", "run_id", c.RunId, "task", c.Task, "attempt", c.Attempt, "error", err)
+		s.finalize(ref, runModel.ExitInfo{
+			Success: false,
+			Reason:  "launch_failed",
+			Message: err.Error(),
+		})
 	}
 
 	// запуски перевели таски в starting — стримовые потомки могли стать
@@ -516,6 +540,10 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 		return fmt.Errorf("runSvc.Get: %w", err)
 	}
 
+	if run.Status != runModel.RunStatusRunning {
+		return errRunNotActive
+	}
+
 	m, err := manifest.Parse(run.Manifest)
 	if err != nil {
 		return fmt.Errorf("parse run manifest: %w", err)
@@ -646,6 +674,44 @@ func (s *Scheduler) finalize(ref runModel.AttemptRef, exit runModel.ExitInfo) {
 	defer cancel()
 
 	s.finalizeCtx(ctx, ref, exit, s.retryAt(ctx, ref, exit))
+}
+
+// CancelAttempts убивает и финализирует живые попытки остановленного рана
+// (сам ран и его нестартовавшие таски перевёл в canceled usecase). Kill
+// best-effort: не убитая попытка всё равно финализируется, а её запоздалое
+// событие схлопнется идемпотентной финализацией.
+func (s *Scheduler) CancelAttempts(ctx context.Context, refs []runModel.AttemptRef) {
+	if len(refs) == 0 {
+		return
+	}
+
+	eg, egCtx := errgroup.WithContext(ctx)
+	eg.SetLimit(cancelKillConcurrency)
+
+	for _, ref := range refs {
+		eg.Go(func() error {
+			if err := s.executor.Kill(egCtx, ref); err != nil {
+				slog.Warn("executor kill on cancel", "run_id", ref.RunId, "task", ref.Task,
+					"attempt", ref.Attempt, "error", err)
+			}
+			s.finalizeCanceled(ref)
+			return nil
+		})
+	}
+	_ = eg.Wait() // задачи не возвращают ошибок: errgroup здесь — лимит параллелизма
+}
+
+// finalizeCanceled закрывает попытку остановленного рана: ретрай не
+// назначается (ран терминален), таск получает canceled.
+func (s *Scheduler) finalizeCanceled(ref runModel.AttemptRef) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), finalizeTimeout)
+	defer cancel()
+
+	s.finalizeCtx(ctx, ref, runModel.ExitInfo{
+		Reason:   "canceled",
+		Message:  "ран остановлен вручную",
+		Canceled: true,
+	}, nil)
 }
 
 // finalizeLost финализирует попытку, потерянную до старта: немедленный

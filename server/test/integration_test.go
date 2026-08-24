@@ -715,6 +715,116 @@ func TestRetryTaskSuccessSubgraph(t *testing.T) {
 	require.Len(t, attempts, 4, "старые попытки остаются историей")
 }
 
+// Принудительная остановка рана: живая попытка убивается через executor и
+// финализируется (лог закоммичен, артефакты закрыты), не начавшиеся таски
+// получают canceled, ран — canceled. Повторная остановка отклоняется, а
+// остановленный ран можно доиграть ретраем.
+func TestCancelRun(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "cancel-dag",
+		"tasks": [
+			{"name": "a", "retries": 2},
+			{"name": "b", "depends_on": [{"task": "a"}]},
+			{"name": "c", "depends_on": [{"task": "b"}]}
+		]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+
+	a1 := e.waitLaunchedAttempt(t, "a", 1)
+	e.executor.started(a1.Ref)
+
+	require.NoError(t, e.runUsecase.Cancel(context.Background(), runId))
+
+	assert.Equal(t, runModel.RunStatusCanceled, e.runStatus(t, runId))
+	assert.Equal(t, map[string]string{
+		"a": runModel.TaskStatusCanceled,
+		"b": runModel.TaskStatusCanceled,
+		"c": runModel.TaskStatusCanceled,
+	}, e.taskStatuses(t, runId))
+
+	alive, err := e.executor.ListAlive(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, alive, "попытка убита в executor'е")
+
+	// попытка финализирована: failed с reason=canceled, ретрай не назначен
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	require.NoError(t, err)
+	require.Len(t, attempts, 1)
+	assert.Equal(t, runModel.AttemptStatusFailed, attempts[0].Status)
+	assert.Equal(t, "canceled", attempts[0].ExitReason)
+
+	assert.Contains(t, e.artifact.finishedRefs(), a1.Ref, "артефакты попытки закрыты")
+	entries := readLog(t, e.tasklog, a1.Ref)
+	require.NotEmpty(t, entries)
+	assert.Contains(t, entries[len(entries)-1].Line, "canceled")
+
+	// ретраи не «дозревают»: таск остаётся canceled
+	time.Sleep(150 * time.Millisecond)
+	assert.Equal(t, runModel.TaskStatusCanceled, e.taskStatuses(t, runId)["a"])
+
+	// повторная остановка — уже нечего останавливать
+	err = e.runUsecase.Cancel(context.Background(), runId)
+	assert.ErrorIs(t, err, errs.RunNotRunning)
+
+	// остановленный ран доигрывается ретраем
+	require.NoError(t, e.runUsecase.RetryTask(context.Background(), runId, "a"))
+	a2 := e.waitLaunchedAttempt(t, "a", 2)
+	e.executor.started(a2.Ref)
+	e.executor.finished(a2.Ref, true, 0, "")
+	for _, task := range []string{"b", "c"} {
+		spec := e.waitLaunchedAttempt(t, task, 1)
+		e.executor.started(spec.Ref)
+		e.executor.finished(spec.Ref, true, 0, "")
+	}
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+}
+
+// Остановка рана освобождает слоты пула: таск, ждавший в очереди, не
+// запускается, а сразу становится canceled.
+func TestCancelRunFreesQueue(t *testing.T) {
+	e := newEnv(t)
+	require.NoError(t, e.poolSvc.Set(context.Background(), "tiny", 1))
+
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "cancel-queue",
+		"tasks": [
+			{"name": "a", "pool": "tiny"},
+			{"name": "b", "pool": "tiny"}
+		]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+
+	// единственный слот занимает первый таск, второй ждёт в очереди
+	first := e.waitLaunched(t, "a")
+	e.executor.started(first.Ref)
+
+	require.NoError(t, e.runUsecase.Cancel(context.Background(), runId))
+
+	assert.Equal(t, runModel.RunStatusCanceled, e.runStatus(t, runId))
+	assert.Equal(t, map[string]string{
+		"a": runModel.TaskStatusCanceled,
+		"b": runModel.TaskStatusCanceled,
+	}, e.taskStatuses(t, runId))
+
+	// очередь остановленного рана не запускается даже после освобождения слота
+	time.Sleep(150 * time.Millisecond)
+	assert.Len(t, e.executor.launchedForRun(runId), 1)
+}
+
+// Остановка несуществующего рана — object_not_found, а не «уже завершён».
+func TestCancelRunNotFound(t *testing.T) {
+	e := newEnv(t)
+	err := e.runUsecase.Cancel(context.Background(), "nope")
+	assert.ErrorIs(t, err, errs.RunNotFound)
+}
+
 // Попытка, работающая дольше timeout_sec, убивается сторожевым таймером
 // планировщика и финализируется с reason=timeout.
 func TestSchedulerTaskTimeout(t *testing.T) {

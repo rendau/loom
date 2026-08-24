@@ -35,6 +35,7 @@ type RepoDbI interface {
 	ListStaleAttempts(ctx context.Context, olderThan time.Time) ([]model.StaleAttempt, error)
 	MarkAttemptRunning(ctx context.Context, ref model.AttemptRef) (bool, error)
 	FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit model.ExitInfo, retryAt *time.Time) (bool, *time.Time, error)
+	SetAttemptPeakMemory(ctx context.Context, ref model.AttemptRef, peakBytes int64) error
 }
 
 type TxManagerI interface {

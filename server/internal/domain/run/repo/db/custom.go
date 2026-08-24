@@ -255,6 +255,21 @@ func (r *Repo) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exit m
 	return true, startedAt, nil
 }
 
+// SetAttemptPeakMemory поднимает пик памяти попытки до значения семпла:
+// greatest делает запись идемпотентной, поздний семпл после финализации
+// значение не занизит.
+func (r *Repo) SetAttemptPeakMemory(ctx context.Context, ref model.AttemptRef, peakBytes int64) error {
+	_, err := r.TxM.GetConnection(ctx).Exec(ctx, `
+		UPDATE attempt
+		SET peak_memory_bytes = greatest(coalesce(peak_memory_bytes, 0), $4)
+		WHERE run_id = $1 AND task = $2 AND attempt = $3`,
+		ref.RunId, ref.Task, ref.Attempt, peakBytes)
+	if err != nil {
+		return fmt.Errorf("SetAttemptPeakMemory: %w", err)
+	}
+	return nil
+}
+
 // ListStaleAttempts возвращает незавершённые попытки, созданные раньше
 // olderThan — кандидатов на зомби-детект.
 func (r *Repo) ListStaleAttempts(ctx context.Context, olderThan time.Time) ([]model.StaleAttempt, error) {

@@ -4,12 +4,14 @@ import (
 	"context"
 
 	"github.com/rendau/loom/server/internal/domain/dag/model"
+	dagregModel "github.com/rendau/loom/server/internal/domain/dagreg/model"
 )
 
 type ServiceI interface {
 	List(ctx context.Context, pars *model.ListReq) ([]*model.Main, int64, error)
 	Get(ctx context.Context, name string, errNE bool) (*model.Main, bool, error)
 	Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest, autoUpdate *bool) (*model.Main, error)
+	SetSchedule(ctx context.Context, name, schedule string, catchup bool) error
 	SetPaused(ctx context.Context, name string, paused bool) error
 	SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error
 	Delete(ctx context.Context, name string) error
@@ -34,4 +36,16 @@ type ManifestSinkI interface {
 // таск с неизвестным пулом навсегда завис бы в очереди.
 type PoolCheckerI interface {
 	CheckExist(ctx context.Context, names []string) error
+}
+
+// AuthzI — проверка прав вызывающего на даг (расписание, пауза).
+type AuthzI interface {
+	RequireDag(ctx context.Context, dagName string) error
+}
+
+// RegistrationsI — очередь асинхронных регистраций дагов (domain/dagreg).
+type RegistrationsI interface {
+	Enqueue(ctx context.Context, spec dagregModel.EnqueueSpec) (*dagregModel.Main, error)
+	Get(ctx context.Context, id string) (*dagregModel.Main, error)
+	List(ctx context.Context, req *dagregModel.ListReq) ([]*dagregModel.Main, error)
 }

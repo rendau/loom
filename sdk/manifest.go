@@ -11,8 +11,6 @@ import (
 type Manifest struct {
 	SDKVersion    string         `json:"sdk_version"`
 	Name          string         `json:"name"`
-	Schedule      string         `json:"schedule,omitempty"`
-	Catchup       bool           `json:"catchup,omitempty"`
 	MaxActiveRuns int            `json:"max_active_runs,omitempty"`
 	Tasks         []TaskManifest `json:"tasks"`
 }
@@ -29,12 +27,20 @@ type TaskManifest struct {
 	Pool          string             `json:"pool,omitempty"`
 	Priority      int                `json:"priority,omitempty"`
 	Secrets       []SecretManifest   `json:"secrets,omitempty"`
+	Variables     []VariableManifest `json:"variables,omitempty"`
 }
 
 // SecretManifest — инъекция секрета control plane в env контейнера таска.
 type SecretManifest struct {
 	Env    string `json:"env"`
 	Secret string `json:"secret"`
+}
+
+// VariableManifest — инъекция переменной control plane в env контейнера
+// таска (значение, в отличие от секрета, видно в админке).
+type VariableManifest struct {
+	Env      string `json:"env"`
+	Variable string `json:"variable"`
 }
 
 type DepManifest struct {
@@ -53,8 +59,6 @@ func (d *DAG) Manifest() Manifest {
 	return Manifest{
 		SDKVersion:    Version,
 		Name:          d.name,
-		Schedule:      d.schedule,
-		Catchup:       d.catchup,
 		MaxActiveRuns: d.maxActiveRuns,
 		Tasks: lo.Map(d.order, func(name string, _ int) TaskManifest {
 			t := d.tasks[name]
@@ -72,6 +76,11 @@ func (d *DAG) Manifest() Manifest {
 			if len(t.secrets) > 0 {
 				m.Secrets = lo.Map(t.secrets, func(s secretRef, _ int) SecretManifest {
 					return SecretManifest{Env: s.env, Secret: s.secret}
+				})
+			}
+			if len(t.variables) > 0 {
+				m.Variables = lo.Map(t.variables, func(v variableRef, _ int) VariableManifest {
+					return VariableManifest{Env: v.env, Variable: v.variable}
 				})
 			}
 			if t.resources != (ResourceSpec{}) {

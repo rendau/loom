@@ -1,6 +1,7 @@
 // Package service — секреты для env-инъекции в поды тасков.
-// API write-only: значение можно записать и удалить, прочитать наружу
-// нельзя — расшифровывает только сам control plane при Launch попытки.
+// Скоупы: dag_name = "" — глобальный, иначе локальный для дага; локальный
+// перекрывает глобальный при резолве в Launch. Значение наружу отдаёт
+// только GetValue — ролевые ограничения на нём живут в usecase.
 package service
 
 import (
@@ -46,8 +47,10 @@ func New(repoDb RepoDbI, keyPhrase string) (*Service, error) {
 	return s, nil
 }
 
-func (s *Service) List(ctx context.Context) ([]*model.Meta, error) {
-	items, err := s.repoDb.ListMeta(ctx)
+// List — метаданные секретов; dagName nil — все скоупы, "" — только
+// глобальные, имя дага — только его локальные.
+func (s *Service) List(ctx context.Context, dagName *string) ([]*model.Meta, error) {
+	items, err := s.repoDb.ListMeta(ctx, dagName)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.ListMeta: %w", err)
 	}
@@ -55,7 +58,7 @@ func (s *Service) List(ctx context.Context) ([]*model.Meta, error) {
 }
 
 // Set создаёт секрет или перезаписывает значение существующего.
-func (s *Service) Set(ctx context.Context, name string, value []byte) error {
+func (s *Service) Set(ctx context.Context, dagName, name string, value []byte) error {
 	if !nameRe.MatchString(name) {
 		return errs.ErrFull{Err: errs.InvalidRequest, Desc: fmt.Sprintf("недопустимое имя секрета %q", name)}
 	}
@@ -71,14 +74,14 @@ func (s *Service) Set(ctx context.Context, name string, value []byte) error {
 	if err != nil {
 		return err
 	}
-	if err = s.repoDb.Set(ctx, name, stored); err != nil {
+	if err = s.repoDb.Set(ctx, dagName, name, stored); err != nil {
 		return fmt.Errorf("repoDb.Set: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) Delete(ctx context.Context, name string) error {
-	found, err := s.repoDb.Delete(ctx, name)
+func (s *Service) Delete(ctx context.Context, dagName, name string) error {
+	found, err := s.repoDb.Delete(ctx, dagName, name)
 	if err != nil {
 		return fmt.Errorf("repoDb.Delete: %w", err)
 	}
@@ -88,11 +91,30 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
+// GetValue — расшифрованное значение секрета точного скоупа (просмотр из
+// админки; ролевые ограничения — в usecase).
+func (s *Service) GetValue(ctx context.Context, dagName, name string) ([]byte, error) {
+	blob, found, err := s.repoDb.GetValue(ctx, dagName, name)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.GetValue: %w", err)
+	}
+	if !found {
+		return nil, errs.SecretNotFound
+	}
+
+	value, err := s.decrypt(blob)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt secret %q: %w", name, err)
+	}
+	return value, nil
+}
+
 // ResolveValues возвращает расшифрованные значения секретов для инъекции в
-// env попытки; любой отсутствующий секрет — ошибка (попытка не должна
-// стартовать с пустой переменной).
-func (s *Service) ResolveValues(ctx context.Context, names []string) (map[string][]byte, error) {
-	stored, err := s.repoDb.GetValues(ctx, names)
+// env попытки дага (локальный скоуп перекрывает глобальный); любой
+// отсутствующий секрет — ошибка (попытка не должна стартовать с пустой
+// переменной).
+func (s *Service) ResolveValues(ctx context.Context, dagName string, names []string) (map[string][]byte, error) {
+	stored, err := s.repoDb.GetValues(ctx, dagName, names)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.GetValues: %w", err)
 	}

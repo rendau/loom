@@ -96,6 +96,9 @@ message AttemptMain {
   optional google.protobuf.Timestamp finished_at = 6;
   optional int32 exit_code = 7;
   string exit_reason = 8; // например OOMKilled, Error, launch_failed
+  // Пик памяти по семплам executor'а (docker stats / metrics-server);
+  // приблизителен, отсутствует — не измерено.
+  optional int64 peak_memory_bytes = 9;
 }
 
 // Trigger

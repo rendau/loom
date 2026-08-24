@@ -9,6 +9,7 @@ import (
 
 type ServiceI interface {
 	List(ctx context.Context, pars *model.ListReq) ([]*model.Main, int64, error)
+	Get(ctx context.Context, id string, errNE bool) (*model.Main, bool, error)
 	GetDetails(ctx context.Context, id string) (*model.Main, []dagModel.Task, []*model.TaskInstance, []*model.Attempt, error)
 	Trigger(ctx context.Context, dag *dagModel.Main, spec model.TriggerSpec) (string, error)
 	RetryTask(ctx context.Context, runId, task string) error
@@ -19,6 +20,11 @@ type ServiceI interface {
 
 type DagServiceI interface {
 	Get(ctx context.Context, name string, errNE bool) (*dagModel.Main, bool, error)
+}
+
+// AuthzI — проверка прав вызывающего на даг (триггер, backfill, ретрай).
+type AuthzI interface {
+	RequireDag(ctx context.Context, dagName string) error
 }
 
 // SchedulerI — тычок планировщику: не ждать тика после триггера рана.

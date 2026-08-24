@@ -19,6 +19,7 @@ type RunServiceI interface {
 	ListStaleAttempts(ctx context.Context, olderThan time.Time) ([]runModel.StaleAttempt, error)
 	MarkAttemptRunning(ctx context.Context, ref runModel.AttemptRef) (bool, error)
 	FinalizeAttempt(ctx context.Context, ref runModel.AttemptRef, exit runModel.ExitInfo, retryAt *time.Time) (bool, *time.Time, error)
+	SetAttemptPeakMemory(ctx context.Context, ref runModel.AttemptRef, peakBytes int64) error
 	FinishRun(ctx context.Context, runId, status string) (bool, error)
 	Trigger(ctx context.Context, dag *dagModel.Main, spec runModel.TriggerSpec) (string, error)
 	CountActiveTaskInstances(ctx context.Context) (map[string]int64, error)
@@ -49,11 +50,17 @@ type ArtifactI interface {
 	FinishAttempt(ctx context.Context, ref runModel.AttemptRef) error
 }
 
-// SecretResolverI — расшифровка значений секретов для env попытки;
-// отсутствующий секрет — ошибка (Launch не должен стартовать попытку с
-// пустой переменной).
+// SecretResolverI — расшифровка значений секретов для env попытки (скоуп
+// дага: локальный перекрывает глобальный); отсутствующий секрет — ошибка
+// (Launch не должен стартовать попытку с пустой переменной).
 type SecretResolverI interface {
-	ResolveValues(ctx context.Context, names []string) (map[string][]byte, error)
+	ResolveValues(ctx context.Context, dagName string, names []string) (map[string][]byte, error)
+}
+
+// VariableResolverI — значения переменных для env попытки; семантика скоупа
+// и отсутствия — как у секретов.
+type VariableResolverI interface {
+	ResolveValues(ctx context.Context, dagName string, names []string) (map[string]string, error)
 }
 
 // TaskLogI — финализация лог-стрима попытки (на artifact-сервере) с

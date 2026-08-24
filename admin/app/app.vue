@@ -3,6 +3,5 @@
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>
-    <AuthTokenModal />
   </UApp>
 </template>

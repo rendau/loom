@@ -23,11 +23,27 @@ func NewDag(uc *dagUsc.Usecase) *Dag {
 }
 
 func (h *Dag) RegisterDag(ctx context.Context, req *pb.DagRegisterReq) (*pb.DagRegisterRep, error) {
-	result, err := h.usecase.Register(ctx, req.GetImage(), req.AutoUpdate)
+	reg, err := h.usecase.Register(ctx, dto.DecodeDagRegisterReq(req))
 	if err != nil {
 		return nil, encodeErr(err)
 	}
-	return &pb.DagRegisterRep{Dag: dto.EncodeDagMain(result, 0)}, nil
+	return &pb.DagRegisterRep{RegistrationId: reg.Id}, nil
+}
+
+func (h *Dag) ListDagRegistration(ctx context.Context, req *pb.DagRegistrationListReq) (*pb.DagRegistrationListRep, error) {
+	items, err := h.usecase.ListRegistrations(ctx, dto.DecodeDagRegistrationListReq(req))
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+	return &pb.DagRegistrationListRep{Results: lo.Map(items, dto.EncodeDagRegistrationMain)}, nil
+}
+
+func (h *Dag) GetDagRegistration(ctx context.Context, req *pb.DagRegistrationGetReq) (*pb.DagRegistrationMain, error) {
+	item, err := h.usecase.GetRegistration(ctx, req.GetId())
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+	return dto.EncodeDagRegistrationMain(item, 0), nil
 }
 
 func (h *Dag) ListDag(ctx context.Context, req *pb.DagListReq) (*pb.DagListRep, error) {
@@ -56,6 +72,13 @@ func (h *Dag) GetDag(ctx context.Context, req *pb.DagGetReq) (*pb.DagMain, error
 		return nil, encodeErr(err)
 	}
 	return dto.EncodeDagMain(item, 0), nil
+}
+
+func (h *Dag) SetDagSchedule(ctx context.Context, req *pb.DagSetScheduleReq) (*emptypb.Empty, error) {
+	if err := h.usecase.SetSchedule(ctx, req.GetName(), req.GetSchedule(), req.GetCatchup()); err != nil {
+		return nil, encodeErr(err)
+	}
+	return &emptypb.Empty{}, nil
 }
 
 func (h *Dag) SetDagPaused(ctx context.Context, req *pb.DagSetPausedReq) (*emptypb.Empty, error) {

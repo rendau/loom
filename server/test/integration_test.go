@@ -40,6 +40,8 @@ import (
 	secretDb "github.com/rendau/loom/server/internal/domain/secret/repo/db"
 	secretService "github.com/rendau/loom/server/internal/domain/secret/service"
 	tasklogModel "github.com/rendau/loom/server/internal/domain/tasklog/model"
+	variableDb "github.com/rendau/loom/server/internal/domain/variable/repo/db"
+	variableService "github.com/rendau/loom/server/internal/domain/variable/service"
 	"github.com/rendau/loom/server/internal/errs"
 	runUsc "github.com/rendau/loom/server/internal/usecase/run"
 )
@@ -130,6 +132,10 @@ func (e *fakeExecutor) finished(ref runModel.AttemptRef, success bool, exitCode 
 	}}
 }
 
+func (e *fakeExecutor) metrics(ref runModel.AttemptRef, peakBytes int64) {
+	e.events <- runModel.ExecEvent{Ref: ref, Type: runModel.ExecEventMetrics, PeakMemoryBytes: &peakBytes}
+}
+
 type fakeArtifact struct {
 	mu          sync.Mutex
 	finished    []runModel.AttemptRef
@@ -197,16 +203,17 @@ func (f *fakeTasklog) deletedRuns() []string {
 // ── окружение ───────────────────────────────────────────
 
 type env struct {
-	pool       *pgxpool.Pool
-	dagSvc     *dagService.Service
-	runSvc     *runService.Service
-	poolSvc    *poolService.Service
-	secretSvc  *secretService.Service
-	tasklog    *fakeTasklog
-	executor   *fakeExecutor
-	artifact   *fakeArtifact
-	scheduler  *domainScheduler.Scheduler
-	runUsecase *runUsc.Usecase
+	pool        *pgxpool.Pool
+	dagSvc      *dagService.Service
+	runSvc      *runService.Service
+	poolSvc     *poolService.Service
+	secretSvc   *secretService.Service
+	variableSvc *variableService.Service
+	tasklog     *fakeTasklog
+	executor    *fakeExecutor
+	artifact    *fakeArtifact
+	scheduler   *domainScheduler.Scheduler
+	runUsecase  *runUsc.Usecase
 }
 
 func newEnv(t *testing.T) *env {
@@ -227,7 +234,9 @@ func newEnv(t *testing.T) *env {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
-	_, err = pool.Exec(context.Background(), `TRUNCATE attempt, run_value, task_instance, run, dag, pool, secret`)
+	_, err = pool.Exec(context.Background(),
+		`TRUNCATE attempt, run_value, task_instance, run, dag, dag_registration, pool, secret,
+			variable, app_user, session, user_dag`)
 	require.NoError(t, err)
 
 	txm := mobone.NewTransactionManager(pool)
@@ -238,6 +247,7 @@ func newEnv(t *testing.T) *env {
 	poolSvc := poolService.New(poolDb.New(base))
 	secretSvc, err := secretService.New(secretDb.New(base), "test-secret-key")
 	require.NoError(t, err)
+	variableSvc := variableService.New(variableDb.New(base))
 
 	// сид дефолтного пула после TRUNCATE
 	_, err = pool.Exec(context.Background(),
@@ -248,7 +258,7 @@ func newEnv(t *testing.T) *env {
 	executor := newFakeExecutor()
 	artifact := &fakeArtifact{}
 
-	scheduler := domainScheduler.New(runSvc, dagSvc, executor, artifact, tasklog, secretSvc,
+	scheduler := domainScheduler.New(runSvc, dagSvc, executor, artifact, tasklog, secretSvc, variableSvc,
 		domainScheduler.Config{
 			Tick:          30 * time.Millisecond,
 			CronTick:      50 * time.Millisecond,
@@ -261,18 +271,25 @@ func newEnv(t *testing.T) *env {
 	t.Cleanup(scheduler.Stop)
 
 	return &env{
-		pool:       pool,
-		dagSvc:     dagSvc,
-		runSvc:     runSvc,
-		poolSvc:    poolSvc,
-		secretSvc:  secretSvc,
-		tasklog:    tasklog,
-		executor:   executor,
-		artifact:   artifact,
-		scheduler:  scheduler,
-		runUsecase: runUsc.New(runSvc, dagSvc, scheduler),
+		pool:        pool,
+		dagSvc:      dagSvc,
+		runSvc:      runSvc,
+		poolSvc:     poolSvc,
+		secretSvc:   secretSvc,
+		variableSvc: variableSvc,
+		tasklog:     tasklog,
+		executor:    executor,
+		artifact:    artifact,
+		scheduler:   scheduler,
+		runUsecase:  runUsc.New(runSvc, dagSvc, scheduler, allowAllAuthz{}),
 	}
 }
+
+// allowAllAuthz — тесты работают с usecase напрямую, без аутентификации:
+// права на даг не ограничиваем (как у внутренних вызовов control plane).
+type allowAllAuthz struct{}
+
+func (allowAllAuthz) RequireDag(context.Context, string) error { return nil }
 
 // registerDag регистрирует даг по сырому манифесту (как из `describe`).
 func (e *env) registerDag(t *testing.T, rawManifest string) string {
@@ -800,11 +817,11 @@ func TestSchedulerCronTrigger(t *testing.T) {
 	dagName := e.registerDag(t, `{
 		"sdk_version": "0.1.0",
 		"name": "cron-dag",
-		"schedule": "* * * * *",
 		"tasks": [{"name": "a"}]
 	}`)
+	require.NoError(t, e.dagSvc.SetSchedule(context.Background(), dagName, "* * * * *", false))
 
-	// регистрация назначила ближайшее срабатывание в будущем
+	// установка расписания назначила ближайшее срабатывание в будущем
 	dag, _, err := e.dagSvc.Get(context.Background(), dagName, true)
 	require.NoError(t, err)
 	require.False(t, dag.NextRunAt.IsZero())
@@ -906,10 +923,9 @@ func TestSchedulerCatchup(t *testing.T) {
 	dagName := e.registerDag(t, `{
 		"sdk_version": "0.1.0",
 		"name": "catchup-dag",
-		"schedule": "@hourly",
-		"catchup": true,
 		"tasks": [{"name": "a"}]
 	}`)
+	require.NoError(t, e.dagSvc.SetSchedule(context.Background(), dagName, "@hourly", true))
 
 	// имитируем простой: три часа пропущенных тиков
 	var backlogStart time.Time
@@ -963,9 +979,9 @@ func TestBackfill(t *testing.T) {
 	dagName := e.registerDag(t, `{
 		"sdk_version": "0.1.0",
 		"name": "backfill-dag",
-		"schedule": "@daily",
 		"tasks": [{"name": "a"}]
 	}`)
+	require.NoError(t, e.dagSvc.SetSchedule(context.Background(), dagName, "@daily", false))
 
 	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	to := from.AddDate(0, 0, 3)
@@ -1133,11 +1149,12 @@ func TestMaxActiveRuns(t *testing.T) {
 	e.waitRunStatus(t, run2, runModel.RunStatusSuccess)
 }
 
-// Секреты: значение шифруется в БД и инъектится в env попытки;
-// отсутствующий секрет валит запуск (launch_failed).
+// Секреты: значение шифруется в БД и инъектится в env попытки; локальный
+// скоуп дага перекрывает глобальный; отсутствующий секрет валит запуск
+// (launch_failed); значение читается через GetValue.
 func TestSecrets(t *testing.T) {
 	e := newEnv(t)
-	require.NoError(t, e.secretSvc.Set(context.Background(), "db-password", []byte("s3cr3t-value")))
+	require.NoError(t, e.secretSvc.Set(context.Background(), "", "db-password", []byte("s3cr3t-value")))
 
 	// в БД значение зашифровано, плейнтекста нет
 	var stored []byte
@@ -1161,11 +1178,33 @@ func TestSecrets(t *testing.T) {
 	e.executor.finished(a.Ref, true, 0, "")
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	// список секретов — только метаданные
-	metas, err := e.secretSvc.List(context.Background())
+	// локальный секрет дага перекрывает глобальный с тем же именем
+	require.NoError(t, e.secretSvc.Set(context.Background(), dagName, "db-password", []byte("local-value")))
+	runId2, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
-	require.Len(t, metas, 1)
-	assert.Equal(t, "db-password", metas[0].Name)
+	require.Eventually(t, func() bool {
+		return len(e.executor.launchedForRun(runId2)) == 1
+	}, waitTimeout, 10*time.Millisecond)
+	a2 := e.executor.launchedForRun(runId2)[0]
+	assert.Equal(t, "local-value", a2.Env["DB_PASSWORD"], "локальный скоуп перекрывает глобальный")
+	e.executor.started(a2.Ref)
+	e.executor.finished(a2.Ref, true, 0, "")
+	e.waitRunStatus(t, runId2, runModel.RunStatusSuccess)
+
+	// список секретов — только метаданные, оба скоупа
+	metas, err := e.secretSvc.List(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, metas, 2)
+
+	// GetValue отдаёт расшифрованное значение точного скоупа
+	value, err := e.secretSvc.GetValue(context.Background(), "", "db-password")
+	require.NoError(t, err)
+	assert.Equal(t, "s3cr3t-value", string(value))
+	value, err = e.secretSvc.GetValue(context.Background(), dagName, "db-password")
+	require.NoError(t, err)
+	assert.Equal(t, "local-value", string(value))
+	_, err = e.secretSvc.GetValue(context.Background(), "", "ghost")
+	assert.ErrorIs(t, err, errs.SecretNotFound)
 
 	// отсутствующий секрет валит запуск: попытка failed с launch_failed
 	ghostDag := e.registerDag(t, `{
@@ -1182,9 +1221,106 @@ func TestSecrets(t *testing.T) {
 	require.Len(t, attempts, 1)
 	assert.Equal(t, "launch_failed", attempts[0].ExitReason)
 
-	// удаление секрета
-	require.NoError(t, e.secretSvc.Delete(context.Background(), "db-password"))
-	assert.ErrorIs(t, e.secretSvc.Delete(context.Background(), "db-password"), errs.SecretNotFound)
+	// удаление секрета — по скоупу
+	require.NoError(t, e.secretSvc.Delete(context.Background(), "", "db-password"))
+	assert.ErrorIs(t, e.secretSvc.Delete(context.Background(), "", "db-password"), errs.SecretNotFound)
+	require.NoError(t, e.secretSvc.Delete(context.Background(), dagName, "db-password"))
+}
+
+// Переменные: значение инъектится в env попытки, локальный скоуп дага
+// перекрывает глобальный; отсутствующая переменная валит запуск.
+func TestVariables(t *testing.T) {
+	e := newEnv(t)
+	require.NoError(t, e.variableSvc.Set(context.Background(), "", "api-url", "https://global.example"))
+
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "variable-dag",
+		"tasks": [{"name": "a", "variables": [{"env": "API_URL", "variable": "api-url"}]}]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+
+	a := e.waitLaunched(t, "a")
+	assert.Equal(t, "https://global.example", a.Env["API_URL"], "значение переменной в env попытки")
+	e.executor.started(a.Ref)
+	e.executor.finished(a.Ref, true, 0, "")
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+
+	// локальная переменная дага перекрывает глобальную
+	require.NoError(t, e.variableSvc.Set(context.Background(), dagName, "api-url", "https://local.example"))
+	runId2, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return len(e.executor.launchedForRun(runId2)) == 1
+	}, waitTimeout, 10*time.Millisecond)
+	a2 := e.executor.launchedForRun(runId2)[0]
+	assert.Equal(t, "https://local.example", a2.Env["API_URL"])
+	e.executor.started(a2.Ref)
+	e.executor.finished(a2.Ref, true, 0, "")
+	e.waitRunStatus(t, runId2, runModel.RunStatusSuccess)
+
+	// список: значения видны, скоуп различим
+	vars, err := e.variableSvc.List(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, vars, 2)
+
+	// отсутствующая переменная валит запуск
+	ghostDag := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "ghost-variable-dag",
+		"tasks": [{"name": "a", "variables": [{"env": "MISSING", "variable": "ghost"}]}]
+	}`)
+	ghostRun, err := e.runUsecase.Trigger(context.Background(), ghostDag, nil)
+	require.NoError(t, err)
+
+	e.waitRunStatus(t, ghostRun, runModel.RunStatusFailed)
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), ghostRun)
+	require.NoError(t, err)
+	require.Len(t, attempts, 1)
+	assert.Equal(t, "launch_failed", attempts[0].ExitReason)
+
+	// удаление — по скоупу
+	require.NoError(t, e.variableSvc.Delete(context.Background(), dagName, "api-url"))
+	assert.ErrorIs(t, e.variableSvc.Delete(context.Background(), dagName, "api-url"), errs.VariableNotFound)
+}
+
+// Метрики потребления: metrics-события executor'а фиксируют пик памяти
+// попытки (greatest — меньший поздний семпл значение не занижает), пик
+// переживает финализацию и отдаётся в деталях рана.
+func TestAttemptPeakMemory(t *testing.T) {
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "memory-dag",
+		"tasks": [{"name": "a"}]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+
+	a := e.waitLaunched(t, "a")
+	e.executor.started(a.Ref)
+
+	e.executor.metrics(a.Ref, 100<<20)
+	e.executor.metrics(a.Ref, 250<<20)
+	e.executor.metrics(a.Ref, 200<<20) // меньший семпл пик не занижает
+
+	require.Eventually(t, func() bool {
+		attempt, _, gErr := e.runSvc.GetAttempt(context.Background(), a.Ref, true)
+		require.NoError(t, gErr)
+		return attempt.PeakMemoryBytes != nil && *attempt.PeakMemoryBytes == 250<<20
+	}, waitTimeout, 10*time.Millisecond, "пик памяти не зафиксировался")
+
+	e.executor.finished(a.Ref, true, 0, "")
+	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+
+	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	require.NoError(t, err)
+	require.Len(t, attempts, 1)
+	require.NotNil(t, attempts[0].PeakMemoryBytes)
+	assert.EqualValues(t, 250<<20, *attempts[0].PeakMemoryBytes)
 }
 
 // Retention: завершённый ран с истёкшим TTL удаляется целиком — артефакты
@@ -1205,7 +1341,7 @@ func TestRetentionSweep(t *testing.T) {
 	e.executor.finished(a.Ref, true, 0, "")
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	retention := domainRetention.New(e.runSvc, e.artifact, e.tasklog, time.Hour, time.Hour)
+	retention := domainRetention.New(e.runSvc, e.artifact, e.tasklog, nil, time.Hour, time.Hour)
 
 	// ран моложе TTL — не удаляется
 	deleted, err := retention.Sweep(context.Background())

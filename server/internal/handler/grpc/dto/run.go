@@ -86,12 +86,13 @@ func EncodeAttemptMain(v *domainModel.Attempt, _ int) *pb.AttemptMain {
 	}
 
 	result := &pb.AttemptMain{
-		Task:       v.Task,
-		Attempt:    v.Attempt,
-		Status:     v.Status,
-		CreatedAt:  timestamppb.New(v.CreatedAt),
-		ExitCode:   v.ExitCode,
-		ExitReason: v.ExitReason,
+		Task:            v.Task,
+		Attempt:         v.Attempt,
+		Status:          v.Status,
+		CreatedAt:       timestamppb.New(v.CreatedAt),
+		ExitCode:        v.ExitCode,
+		ExitReason:      v.ExitReason,
+		PeakMemoryBytes: v.PeakMemoryBytes,
 	}
 	if !v.StartedAt.IsZero() {
 		result.StartedAt = timestamppb.New(v.StartedAt)

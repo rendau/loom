@@ -1,17 +1,33 @@
 <script setup lang="ts">
-import type { NavigationMenuItem } from '@nuxt/ui'
+import type { DropdownMenuItem, NavigationMenuItem } from '@nuxt/ui'
 
-const navItems: NavigationMenuItem[][] = [[
-  { label: 'Даги', icon: 'i-lucide-workflow', to: '/dags' },
-  { label: 'Раны', icon: 'i-lucide-list', to: '/runs' },
-  { label: 'Пулы', icon: 'i-lucide-layers', to: '/pools' },
-  { label: 'Секреты', icon: 'i-lucide-key-round', to: '/secrets' },
-]]
+const { me, isAdmin, logout } = useAuth()
 
-// смена admin-токена вручную — та же модалка, что и по 401
-function openTokenModal() {
-  authNeeded.value = true
-}
+const navItems = computed<NavigationMenuItem[][]>(() => {
+  const items: NavigationMenuItem[] = [
+    { label: 'Дашборд', icon: 'i-lucide-layout-dashboard', to: '/' },
+    { label: 'Даги', icon: 'i-lucide-workflow', to: '/dags' },
+    { label: 'Раны', icon: 'i-lucide-list', to: '/runs' },
+    { label: 'Пулы', icon: 'i-lucide-layers', to: '/pools' },
+    { label: 'Переменные', icon: 'i-lucide-variable', to: '/variables' },
+    { label: 'Секреты', icon: 'i-lucide-key-round', to: '/secrets' },
+  ]
+  if (isAdmin.value)
+    items.push({ label: 'Пользователи', icon: 'i-lucide-users', to: '/users' })
+  return [items]
+})
+
+const userMenuItems = computed<DropdownMenuItem[][]>(() => [[
+  {
+    label: me.value?.username ?? '',
+    // роль подписью, чтобы было видно права текущей сессии
+    description: me.value?.role === 'admin' ? 'администратор' : 'пользователь',
+    icon: 'i-lucide-user',
+    type: 'label' as const,
+  },
+], [
+  { label: 'Выйти', icon: 'i-lucide-log-out', onSelect: () => logout() },
+]])
 </script>
 
 <template>
@@ -28,7 +44,7 @@ function openTokenModal() {
       }"
     >
       <template #header="{ collapsed }">
-        <NuxtLink v-if="!collapsed" to="/dags" class="flex items-center gap-2 font-bold text-highlighted">
+        <NuxtLink v-if="!collapsed" to="/" class="flex items-center gap-2 font-bold text-highlighted">
           <UIcon name="i-lucide-shell" class="size-5 text-primary" />
           loom
         </NuxtLink>
@@ -44,14 +60,15 @@ function openTokenModal() {
       </template>
 
       <template #footer="{ collapsed }">
-        <UButton
-          icon="i-lucide-key-square"
-          :label="collapsed ? undefined : 'Admin-токен'"
-          color="neutral"
-          variant="ghost"
-          block
-          @click="openTokenModal()"
-        />
+        <UDropdownMenu :items="userMenuItems" class="w-full">
+          <UButton
+            icon="i-lucide-circle-user"
+            :label="collapsed ? undefined : (me?.username ?? 'Профиль')"
+            color="neutral"
+            variant="ghost"
+            block
+          />
+        </UDropdownMenu>
       </template>
     </UDashboardSidebar>
 

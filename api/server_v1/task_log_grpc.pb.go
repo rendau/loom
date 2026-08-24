@@ -30,9 +30,10 @@ const (
 // Хранятся логи на artifact-сервере (artifact_v1.TaskLogService), control
 // plane проксирует чтение — у админки и HTTP-gateway одна точка входа.
 type TaskLogServiceClient interface {
-	// ReadTaskLog читает лог попытки с начала; при follow=true стрим живёт до
-	// завершения попытки, отдавая новые строки по мере поступления (live-логи
-	// в админке).
+	// ReadTaskLog читает лог попытки (по умолчанию с начала; after_seq
+	// пропускает уже полученные строки — докачка после обрыва); при
+	// follow=true стрим живёт до завершения попытки, отдавая новые строки по
+	// мере поступления (live-логи в админке).
 	ReadTaskLog(ctx context.Context, in *ReadTaskLogRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadTaskLogResponse], error)
 }
 
@@ -71,9 +72,10 @@ type TaskLogService_ReadTaskLogClient = grpc.ServerStreamingClient[ReadTaskLogRe
 // Хранятся логи на artifact-сервере (artifact_v1.TaskLogService), control
 // plane проксирует чтение — у админки и HTTP-gateway одна точка входа.
 type TaskLogServiceServer interface {
-	// ReadTaskLog читает лог попытки с начала; при follow=true стрим живёт до
-	// завершения попытки, отдавая новые строки по мере поступления (live-логи
-	// в админке).
+	// ReadTaskLog читает лог попытки (по умолчанию с начала; after_seq
+	// пропускает уже полученные строки — докачка после обрыва); при
+	// follow=true стрим живёт до завершения попытки, отдавая новые строки по
+	// мере поступления (live-логи в админке).
 	ReadTaskLog(*ReadTaskLogRequest, grpc.ServerStreamingServer[ReadTaskLogResponse]) error
 	mustEmbedUnimplementedTaskLogServiceServer()
 }

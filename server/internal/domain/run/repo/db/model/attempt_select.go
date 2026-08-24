@@ -8,28 +8,30 @@ import (
 )
 
 type AttemptSelect struct {
-	RunId      string
-	Task       string
-	Attempt    int32
-	Status     string
-	CreatedAt  time.Time
-	StartedAt  sql.NullTime
-	FinishedAt sql.NullTime
-	ExitCode   sql.NullInt32
-	ExitReason string
+	RunId           string
+	Task            string
+	Attempt         int32
+	Status          string
+	CreatedAt       time.Time
+	StartedAt       sql.NullTime
+	FinishedAt      sql.NullTime
+	ExitCode        sql.NullInt32
+	ExitReason      string
+	PeakMemoryBytes sql.NullInt64
 }
 
 func (m *AttemptSelect) ListColumnMap() map[string]any {
 	return map[string]any{
-		"run_id":      &m.RunId,
-		"task":        &m.Task,
-		"attempt":     &m.Attempt,
-		"status":      &m.Status,
-		"created_at":  &m.CreatedAt,
-		"started_at":  &m.StartedAt,
-		"finished_at": &m.FinishedAt,
-		"exit_code":   &m.ExitCode,
-		"exit_reason": &m.ExitReason,
+		"run_id":            &m.RunId,
+		"task":              &m.Task,
+		"attempt":           &m.Attempt,
+		"status":            &m.Status,
+		"created_at":        &m.CreatedAt,
+		"started_at":        &m.StartedAt,
+		"finished_at":       &m.FinishedAt,
+		"exit_code":         &m.ExitCode,
+		"exit_reason":       &m.ExitReason,
+		"peak_memory_bytes": &m.PeakMemoryBytes,
 	}
 }
 
@@ -56,6 +58,9 @@ func EncodeAttemptSelect(v *AttemptSelect, _ int) *domainModel.Attempt {
 	}
 	if v.ExitCode.Valid {
 		result.ExitCode = new(v.ExitCode.Int32)
+	}
+	if v.PeakMemoryBytes.Valid {
+		result.PeakMemoryBytes = new(v.PeakMemoryBytes.Int64)
 	}
 	return result
 }

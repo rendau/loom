@@ -1,7 +1,8 @@
 // Package dagsync — авто-обновление дагов (аналог keel poll):
-// периодический digest-чек тега в registry для дагов с auto_update и полная
-// перерегистрация при изменении. Сломанный новый образ запись дага не
-// трогает — ошибка логируется и повторится следующим тиком.
+// периодический digest-чек тега в registry для дагов с auto_update; при
+// изменении перерегистрация ставится в очередь dagreg (источник auto) — её
+// статус виден в админке. Сломанный новый образ запись дага не трогает —
+// регистрация завершится failed и повторится следующим digest-чеком.
 package dagsync
 
 import (
@@ -25,30 +26,30 @@ type DigestResolverI interface {
 	ResolveDigest(ctx context.Context, image string) (string, error)
 }
 
-// RegistrarI — обычная полная перерегистрация дага (describe → валидация →
-// сохранение); autoUpdate nil — не трогать флаг.
-type RegistrarI interface {
-	Register(ctx context.Context, image string, autoUpdate *bool) (*dagModel.Main, error)
+// EnqueuerI — постановка перерегистрации в очередь dagreg: сам pull +
+// describe выполняет её воркер, дедуп повторных постановок — на очереди.
+type EnqueuerI interface {
+	EnqueueAuto(ctx context.Context, image, dagName string) error
 }
 
 type Service struct {
-	dagSvc    DagServiceI
-	resolver  DigestResolverI
-	registrar RegistrarI
-	tick      time.Duration
+	dagSvc   DagServiceI
+	resolver DigestResolverI
+	enqueuer EnqueuerI
+	tick     time.Duration
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 	wg        sync.WaitGroup
 }
 
-func New(dagSvc DagServiceI, resolver DigestResolverI, registrar RegistrarI, tick time.Duration) *Service {
+func New(dagSvc DagServiceI, resolver DigestResolverI, enqueuer EnqueuerI, tick time.Duration) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Service{
 		dagSvc:    dagSvc,
 		resolver:  resolver,
-		registrar: registrar,
+		enqueuer:  enqueuer,
 		tick:      tick,
 		ctx:       ctx,
 		ctxCancel: cancel,
@@ -129,12 +130,10 @@ func (s *Service) syncDag(ctx context.Context, dag *dagModel.Main) error {
 	slog.Info("dag image changed, re-registering", "dag", dag.Name, "image", dag.Image,
 		"old_digest", current, "new_digest", latest)
 
-	if _, err = s.registrar.Register(ctx, dag.Image, nil); err != nil {
-		return fmt.Errorf("re-register: %w", err)
+	if err = s.enqueuer.EnqueueAuto(ctx, dag.Image, dag.Name); err != nil {
+		return fmt.Errorf("enqueue re-register: %w", err)
 	}
 	metricSyncUpdates.Inc()
-
-	slog.Info("dag auto-updated", "dag", dag.Name, "image", dag.Image, "digest", latest)
 	return nil
 }
 

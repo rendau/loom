@@ -26,7 +26,7 @@ func (h *TaskLog) ReadTaskLog(req *pb.ReadTaskLogRequest, stream pb.TaskLogServi
 		Attempt: req.GetAttempt(),
 	}
 
-	err := h.usecase.Read(stream.Context(), key, req.GetFollow(), func(entries []tasklogModel.Entry) error {
+	err := h.usecase.Read(stream.Context(), key, req.GetAfterSeq(), req.GetFollow(), func(entries []tasklogModel.Entry) error {
 		return stream.Send(&pb.ReadTaskLogResponse{Entries: dto.EncodeTaskLogEntries(entries)})
 	})
 	if err != nil {

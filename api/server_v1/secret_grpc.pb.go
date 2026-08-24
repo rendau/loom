@@ -20,9 +20,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SecretService_ListSecret_FullMethodName   = "/server_v1.SecretService/ListSecret"
-	SecretService_SetSecret_FullMethodName    = "/server_v1.SecretService/SetSecret"
-	SecretService_DeleteSecret_FullMethodName = "/server_v1.SecretService/DeleteSecret"
+	SecretService_ListSecret_FullMethodName     = "/server_v1.SecretService/ListSecret"
+	SecretService_SetSecret_FullMethodName      = "/server_v1.SecretService/SetSecret"
+	SecretService_DeleteSecret_FullMethodName   = "/server_v1.SecretService/DeleteSecret"
+	SecretService_GetSecretValue_FullMethodName = "/server_v1.SecretService/GetSecretValue"
 )
 
 // SecretServiceClient is the client API for SecretService service.
@@ -30,14 +31,18 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // SecretService — секреты для env-инъекции в поды тасков.
-// API write-only: значение можно записать и удалить, но не прочитать —
-// расшифровывает только control plane при запуске попытки.
+// Скоуп: dag_name = "" — глобальный, иначе локальный для дага; локальный
+// перекрывает глобальный с тем же именем при запуске попытки.
+// Списки отдают только метаданные; значение — через GetSecretValue (RBAC).
 type SecretServiceClient interface {
 	// ListSecret возвращает метаданные секретов (без значений).
-	ListSecret(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*SecretListRep, error)
+	ListSecret(ctx context.Context, in *SecretListReq, opts ...grpc.CallOption) (*SecretListRep, error)
 	// SetSecret создаёт секрет или перезаписывает значение существующего.
 	SetSecret(ctx context.Context, in *SecretSetReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	DeleteSecret(ctx context.Context, in *SecretDeleteReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// GetSecretValue возвращает расшифрованное значение секрета («посмотреть
+	// по кнопке» в админке). Доступ ограничивается ролями.
+	GetSecretValue(ctx context.Context, in *SecretGetValueReq, opts ...grpc.CallOption) (*SecretValueRep, error)
 }
 
 type secretServiceClient struct {
@@ -48,7 +53,7 @@ func NewSecretServiceClient(cc grpc.ClientConnInterface) SecretServiceClient {
 	return &secretServiceClient{cc}
 }
 
-func (c *secretServiceClient) ListSecret(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*SecretListRep, error) {
+func (c *secretServiceClient) ListSecret(ctx context.Context, in *SecretListReq, opts ...grpc.CallOption) (*SecretListRep, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SecretListRep)
 	err := c.cc.Invoke(ctx, SecretService_ListSecret_FullMethodName, in, out, cOpts...)
@@ -78,19 +83,33 @@ func (c *secretServiceClient) DeleteSecret(ctx context.Context, in *SecretDelete
 	return out, nil
 }
 
+func (c *secretServiceClient) GetSecretValue(ctx context.Context, in *SecretGetValueReq, opts ...grpc.CallOption) (*SecretValueRep, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SecretValueRep)
+	err := c.cc.Invoke(ctx, SecretService_GetSecretValue_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SecretServiceServer is the server API for SecretService service.
 // All implementations must embed UnimplementedSecretServiceServer
 // for forward compatibility.
 //
 // SecretService — секреты для env-инъекции в поды тасков.
-// API write-only: значение можно записать и удалить, но не прочитать —
-// расшифровывает только control plane при запуске попытки.
+// Скоуп: dag_name = "" — глобальный, иначе локальный для дага; локальный
+// перекрывает глобальный с тем же именем при запуске попытки.
+// Списки отдают только метаданные; значение — через GetSecretValue (RBAC).
 type SecretServiceServer interface {
 	// ListSecret возвращает метаданные секретов (без значений).
-	ListSecret(context.Context, *emptypb.Empty) (*SecretListRep, error)
+	ListSecret(context.Context, *SecretListReq) (*SecretListRep, error)
 	// SetSecret создаёт секрет или перезаписывает значение существующего.
 	SetSecret(context.Context, *SecretSetReq) (*emptypb.Empty, error)
 	DeleteSecret(context.Context, *SecretDeleteReq) (*emptypb.Empty, error)
+	// GetSecretValue возвращает расшифрованное значение секрета («посмотреть
+	// по кнопке» в админке). Доступ ограничивается ролями.
+	GetSecretValue(context.Context, *SecretGetValueReq) (*SecretValueRep, error)
 	mustEmbedUnimplementedSecretServiceServer()
 }
 
@@ -101,7 +120,7 @@ type SecretServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedSecretServiceServer struct{}
 
-func (UnimplementedSecretServiceServer) ListSecret(context.Context, *emptypb.Empty) (*SecretListRep, error) {
+func (UnimplementedSecretServiceServer) ListSecret(context.Context, *SecretListReq) (*SecretListRep, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSecret not implemented")
 }
 func (UnimplementedSecretServiceServer) SetSecret(context.Context, *SecretSetReq) (*emptypb.Empty, error) {
@@ -109,6 +128,9 @@ func (UnimplementedSecretServiceServer) SetSecret(context.Context, *SecretSetReq
 }
 func (UnimplementedSecretServiceServer) DeleteSecret(context.Context, *SecretDeleteReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteSecret not implemented")
+}
+func (UnimplementedSecretServiceServer) GetSecretValue(context.Context, *SecretGetValueReq) (*SecretValueRep, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSecretValue not implemented")
 }
 func (UnimplementedSecretServiceServer) mustEmbedUnimplementedSecretServiceServer() {}
 func (UnimplementedSecretServiceServer) testEmbeddedByValue()                       {}
@@ -132,7 +154,7 @@ func RegisterSecretServiceServer(s grpc.ServiceRegistrar, srv SecretServiceServe
 }
 
 func _SecretService_ListSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
+	in := new(SecretListReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -144,7 +166,7 @@ func _SecretService_ListSecret_Handler(srv interface{}, ctx context.Context, dec
 		FullMethod: SecretService_ListSecret_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SecretServiceServer).ListSecret(ctx, req.(*emptypb.Empty))
+		return srv.(SecretServiceServer).ListSecret(ctx, req.(*SecretListReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -185,6 +207,24 @@ func _SecretService_DeleteSecret_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SecretService_GetSecretValue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SecretGetValueReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SecretServiceServer).GetSecretValue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SecretService_GetSecretValue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SecretServiceServer).GetSecretValue(ctx, req.(*SecretGetValueReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SecretService_ServiceDesc is the grpc.ServiceDesc for SecretService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -203,6 +243,10 @@ var SecretService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteSecret",
 			Handler:    _SecretService_DeleteSecret_Handler,
+		},
+		{
+			MethodName: "GetSecretValue",
+			Handler:    _SecretService_GetSecretValue_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

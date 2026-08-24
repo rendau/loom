@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import { apiErrorMessage } from '~/api/client'
 import { listRuns } from '~/api/run.api'
 import type { Run } from '~/types/run'
 
@@ -10,14 +11,21 @@ const totalCount = ref(0)
 const page = ref(1) // UPagination — 1-based, API — 0-based
 const loading = ref(false)
 
-const dagFilter = ref('')
-const statusFilter = ref<string | undefined>(undefined)
+// фильтр по дагу инициализируется из query (?dag_name=...) — так на раны
+// конкретного дага ведут ссылки с его карточки
+const route = useRoute()
+const dagFilter = ref(String(route.query.dag_name ?? ''))
+const statusFilter = ref<string | undefined>(
+  typeof route.query.status === 'string' ? route.query.status : undefined,
+)
 const statusOptions = [
   { label: 'Все статусы', value: undefined },
   { label: 'выполняется', value: 'running' },
   { label: 'успех', value: 'success' },
   { label: 'провал', value: 'failed' },
 ]
+
+const toast = useToast()
 
 async function load() {
   loading.value = true
@@ -35,6 +43,9 @@ async function load() {
     runs.value = rep.results
     totalCount.value = Number(rep.pagination_info.total_count)
   }
+  catch (error) {
+    toast.add({ title: 'Ошибка загрузки ранов', description: apiErrorMessage(error), color: 'error' })
+  }
   finally {
     loading.value = false
   }
@@ -42,7 +53,14 @@ async function load() {
 
 onMounted(load)
 watch([page], load)
-watch([dagFilter, statusFilter], () => {
+
+// текстовый фильтр — с debounce (иначе запрос на каждый символ)
+const reloadFiltered = debounceFn(() => {
+  page.value = 1
+  load()
+})
+watch(dagFilter, reloadFiltered)
+watch(statusFilter, () => {
   page.value = 1
   load()
 })

@@ -15,12 +15,29 @@ import "common/common.proto";
 // `describe`, валидирует полученный JSON-манифест и сохраняет даг, пиннуя
 // его к digest образа на момент регистрации.
 service DagService {
-  // RegisterDag регистрирует (или перерегистрирует — новая версия образа)
-  // даг по url docker-образа. Имя дага берётся из манифеста.
+  // RegisterDag ставит регистрацию (или перерегистрацию — новая версия
+  // образа) дага в очередь и сразу возвращает id записи регистрации:
+  // pull + describe выполняются асинхронно, статус — через
+  // Get/ListDagRegistration. Имя дага берётся из манифеста.
   rpc RegisterDag(DagRegisterReq) returns (DagRegisterRep) {
     option (google.api.http) = {
       post: "/dag"
       body: "*"
+    };
+  }
+
+  // ListDagRegistration — записи очереди регистраций, новые первыми:
+  // активные (pending|running) и недавно завершённые (старые чистятся по
+  // TTL). source=auto — перерегистрация авто-обновления по digest.
+  rpc ListDagRegistration(DagRegistrationListReq) returns (DagRegistrationListRep) {
+    option (google.api.http) = {
+      get: "/dag-registration"
+    };
+  }
+
+  rpc GetDagRegistration(DagRegistrationGetReq) returns (DagRegistrationMain) {
+    option (google.api.http) = {
+      get: "/dag-registration/{id}"
     };
   }
 
@@ -33,6 +50,16 @@ service DagService {
   rpc GetDag(DagGetReq) returns (DagMain) {
     option (google.api.http) = {
       get: "/dag/{name}"
+    };
+  }
+
+  // SetDagSchedule задаёт cron-расписание и catchup дага. Расписание живёт
+  // только на control plane (манифест дага его не содержит); пустая строка
+  // снимает расписание.
+  rpc SetDagSchedule(DagSetScheduleReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      put: "/dag/{name}/schedule"
+      body: "*"
     };
   }
 
@@ -105,6 +132,20 @@ message DagTaskMain {
   optional DagTaskResources resources = 6;
   string pool = 7;           // пул слотов; пусто — default
   int32 priority = 8;        // больше — раньше из очереди
+  // Инъекции секретов в env контейнера таска (имена, не значения).
+  repeated DagTaskEnvSecret secrets = 9;
+  // Инъекции переменных в env контейнера таска.
+  repeated DagTaskEnvVariable variables = 10;
+}
+
+message DagTaskEnvSecret {
+  string env = 1;    // имя env-переменной в контейнере
+  string secret = 2; // имя секрета control plane
+}
+
+message DagTaskEnvVariable {
+  string env = 1;      // имя env-переменной в контейнере
+  string variable = 2; // имя переменной control plane
 }
 
 message DagTaskDepMain {
@@ -127,10 +168,50 @@ message DagRegisterReq {
   // Авто-обновление; отсутствует — сохранить текущее значение
   // (перерегистрация не сбрасывает флаг), у нового дага — false.
   optional bool auto_update = 2;
+  // Желаемые настройки нового дага; к уже существующему (перерегистрация)
+  // не применяются — его настройками управляют отдельные ручки.
+  optional string schedule = 3; // cron; пусто/отсутствует — без расписания
+  optional bool catchup = 4;
+  optional bool paused = 5; // true — оставить на ручном запуске
 }
 
 message DagRegisterRep {
-  DagMain dag = 1;
+  // Id записи очереди регистраций — для поллинга статуса.
+  string registration_id = 1;
+}
+
+// Registrations
+
+message DagRegistrationMain {
+  string id = 1;
+  string image = 2;
+  string source = 3; // manual | auto (авто-обновление по digest)
+  string status = 4; // pending | running | success | failed
+  string error = 5;  // причина failed
+  // Имя дага: у manual пусто до успешного describe, у auto известно сразу.
+  string dag_name = 6;
+  optional string schedule = 7;
+  optional bool catchup = 8;
+  optional bool paused = 9;
+  optional bool auto_update = 10;
+  google.protobuf.Timestamp created_at = 11;
+  optional google.protobuf.Timestamp started_at = 12;
+  optional google.protobuf.Timestamp finished_at = 13;
+}
+
+message DagRegistrationListReq {
+  optional string dag_name = 1;
+  // true — только незавершённые (pending | running).
+  optional bool active = 2;
+  int64 limit = 3; // 0 — дефолт сервера (50)
+}
+
+message DagRegistrationListRep {
+  repeated DagRegistrationMain results = 1;
+}
+
+message DagRegistrationGetReq {
+  string id = 1;
 }
 
 // List
@@ -149,6 +230,16 @@ message DagListRep {
 
 message DagGetReq {
   string name = 1;
+}
+
+// SetSchedule
+
+message DagSetScheduleReq {
+  string name = 1;
+  // Cron-расписание (5 полей или @daily и т.п.); пустая строка — снять.
+  string schedule = 2;
+  // Наверстывать пропущенные тики расписания.
+  bool catchup = 3;
 }
 
 // SetPaused

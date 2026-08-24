@@ -8,6 +8,7 @@ import (
 
 // Main — зарегистрированный даг. Tasks/SdkVersion — распарсенный манифест,
 // Manifest — его исходный JSON (снапшотится в ран при триггере).
+// Schedule/Catchup задаются через админку, не манифестом.
 type Main struct {
 	Name        string
 	Image       string
@@ -22,11 +23,11 @@ type Main struct {
 	// деплоя, не манифеста; хранится в БД.
 	AutoUpdate bool
 	SdkVersion string
-	Tasks         []Task
-	Manifest      []byte
-	NextRunAt     time.Time // zero — без расписания / не инициализировано
-	CreatedAt     time.Time
-	ModifiedAt    time.Time // zero — не изменялся
+	Tasks      []Task
+	Manifest   []byte
+	NextRunAt  time.Time // zero — без расписания / не инициализировано
+	CreatedAt  time.Time
+	ModifiedAt time.Time // zero — не изменялся
 }
 
 type Task struct {
@@ -40,13 +41,21 @@ type Task struct {
 	Pool          string // пул слотов; пусто — "default"
 	Priority      int    // больше — раньше из очереди
 	Secrets       []SecretRef
+	Variables     []VariableRef
 }
 
 // SecretRef — инъекция секрета control plane в env контейнера таска
-//.
+// .
 type SecretRef struct {
 	Env    string
 	Secret string
+}
+
+// VariableRef — инъекция переменной control plane в env контейнера таска
+// (значение, в отличие от секрета, видно в админке).
+type VariableRef struct {
+	Env      string
+	Variable string
 }
 
 // TaskResources — ресурсы контейнера попытки (kubernetes quantities).
@@ -66,8 +75,6 @@ type Dep struct {
 type Manifest struct {
 	SdkVersion    string
 	Name          string
-	Schedule      string
-	Catchup       bool
 	MaxActiveRuns int
 	Tasks         []Task
 }
@@ -77,6 +84,7 @@ type Edit struct {
 	Image       *string
 	ImageDigest *string
 	Schedule    *string
+	Catchup     *bool
 	Paused      *bool
 	AutoUpdate  *bool
 	Manifest    *[]byte

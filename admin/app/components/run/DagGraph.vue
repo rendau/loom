@@ -5,11 +5,12 @@ import type { TaskInstance, TaskStatus } from '~/types/run'
 // Граф дага со статусами тасков. Раскладка слоистая: колонка таска — его
 // ранг (длиннейший путь от корня), порядок внутри колонки — барицентр
 // зависимостей. Рёбра — кривые Безье, стримовые (ко-старт) — пунктиром.
-// Клик по таску с попытками открывает лог.
+// Клик по таску с попытками открывает лог. Без tasks (карточка дага до
+// запуска) — нейтральная раскраска, узлы некликабельны.
 
 const props = defineProps<{
   manifestTasks: DagTask[] // структура графа из снапшота манифеста рана
-  tasks: TaskInstance[] // статусы task instance'ов
+  tasks?: TaskInstance[] // статусы task instance'ов; нет — режим «схема дага»
 }>()
 
 const emit = defineEmits<{ openLog: [task: TaskInstance] }>()
@@ -36,7 +37,7 @@ interface GraphEdge {
 
 const layout = computed(() => {
   const byName = new Map(props.manifestTasks.map(t => [t.name, t]))
-  const tiByName = new Map(props.tasks.map(t => [t.task, t]))
+  const tiByName = new Map((props.tasks ?? []).map(t => [t.task, t]))
 
   // ранг = длиннейший путь от корня; seen — защита от цикла (сервер
   // валидирует ацикличность, но падать на битых данных не хотим)
@@ -142,7 +143,7 @@ function nodeFill(status?: TaskStatus): string {
 
 function statusText(ti?: TaskInstance): string {
   if (!ti)
-    return '—'
+    return props.tasks ? '—' : ''
   const label = taskStatusLabel(ti.status)
   return ti.attempt > 1 ? `${label} #${ti.attempt}` : label
 }
@@ -163,7 +164,7 @@ function onNodeClick(n: GraphNode) {
 
 <template>
   <div>
-    <div class="overflow-x-auto rounded-lg border border-default p-2">
+    <div class="max-h-[420px] overflow-auto rounded-lg border border-default p-2">
       <svg :width="layout.width" :height="layout.height" class="block">
         <defs>
           <marker
@@ -177,6 +178,11 @@ function onNodeClick(n: GraphNode) {
           >
             <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--ui-border-accented)" />
           </marker>
+          <!-- подписи узлов клипаются по ширине узла: truncate по символам —
+               эвристика, широкий шрифт вылезал бы за рамку -->
+          <clipPath id="dag-node-text-clip">
+            <rect x="0" y="0" :width="NODE_W - 16" :height="NODE_H" />
+          </clipPath>
         </defs>
 
         <path
@@ -195,9 +201,13 @@ function onNodeClick(n: GraphNode) {
           :key="n.name"
           :transform="`translate(${n.x}, ${n.y})`"
           :class="clickable(n) ? 'cursor-pointer' : ''"
+          :role="clickable(n) ? 'button' : undefined"
+          :tabindex="clickable(n) ? 0 : undefined"
+          :aria-label="clickable(n) ? `Лог таска ${n.name}` : undefined"
           @click="onNodeClick(n)"
+          @keydown.enter.prevent="onNodeClick(n)"
         >
-          <title>{{ n.name }} — {{ statusText(n.ti) }}</title>
+          <title>{{ n.name }}{{ statusText(n.ti) ? ` — ${statusText(n.ti)}` : '' }}</title>
           <rect
             :width="NODE_W"
             :height="NODE_H"
@@ -207,12 +217,14 @@ function onNodeClick(n: GraphNode) {
             stroke-width="1.5"
             :class="n.ti?.status === 'running' || n.ti?.status === 'starting' ? 'animate-pulse' : ''"
           />
-          <text x="12" y="21" font-size="13" font-weight="500" fill="var(--ui-text-highlighted)">
-            {{ truncate(n.name) }}
-          </text>
-          <text x="12" y="39" font-size="11" :fill="n.ti ? statusVar(n.ti.status) : 'var(--ui-text-muted)'">
-            {{ statusText(n.ti) }}
-          </text>
+          <g clip-path="url(#dag-node-text-clip)">
+            <text x="12" :y="statusText(n.ti) ? 21 : 31" font-size="13" font-weight="500" fill="var(--ui-text-highlighted)">
+              {{ truncate(n.name) }}
+            </text>
+            <text v-if="statusText(n.ti)" x="12" y="39" font-size="11" :fill="n.ti ? statusVar(n.ti.status) : 'var(--ui-text-muted)'">
+              {{ statusText(n.ti) }}
+            </text>
+          </g>
         </g>
       </svg>
     </div>

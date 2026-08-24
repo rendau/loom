@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package server_v1;
+
+option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// AuthService — вход в админку. Сессия — opaque-токен в заголовке
+// `Authorization: Bearer <token>`; в БД хранится только его хэш.
+// GetAuthStatus/CreateFirstAdmin/Login доступны без токена.
+service AuthService {
+  // GetAuthStatus сообщает, заведён ли хоть один пользователь: пока нет —
+  // админка показывает экран первичной настройки.
+  rpc GetAuthStatus(google.protobuf.Empty) returns (AuthStatusRep) {
+    option (google.api.http) = {
+      get: "/auth/status"
+    };
+  }
+
+  // CreateFirstAdmin создаёт первого администратора; работает только пока
+  // пользователей нет (гонка инстансов исключается блокировкой таблицы).
+  rpc CreateFirstAdmin(AuthCreateFirstAdminReq) returns (AuthLoginRep) {
+    option (google.api.http) = {
+      post: "/auth/first-admin"
+      body: "*"
+    };
+  }
+
+  rpc Login(AuthLoginReq) returns (AuthLoginRep) {
+    option (google.api.http) = {
+      post: "/auth/login"
+      body: "*"
+    };
+  }
+
+  rpc Logout(google.protobuf.Empty) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/auth/logout"
+      body: "*"
+    };
+  }
+
+  // GetMe — текущий пользователь и его права (роль, назначенные даги).
+  rpc GetMe(google.protobuf.Empty) returns (UserMain) {
+    option (google.api.http) = {
+      get: "/auth/me"
+    };
+  }
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message UserMain {
+  string id = 1;
+  string username = 2;
+  string role = 3; // admin | user
+  // Назначенные даги: их пользователь может менять (расписание, пауза,
+  // переменные/секреты дага, триггер/ретрай/backfill). У admin — пусто:
+  // ему доступны все.
+  repeated string dag_names = 4;
+  google.protobuf.Timestamp created_at = 5;
+  optional google.protobuf.Timestamp modified_at = 6;
+}
+
+message AuthStatusRep {
+  bool users_exist = 1;
+}
+
+message AuthCreateFirstAdminReq {
+  string username = 1;
+  string password = 2;
+}
+
+message AuthLoginReq {
+  string username = 1;
+  string password = 2;
+}
+
+message AuthLoginRep {
+  string token = 1;
+  UserMain user = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}

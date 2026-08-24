@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"crypto/subtle"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -11,17 +10,41 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonPb "github.com/rendau/loom/api/common"
+	"github.com/rendau/loom/server/internal/authctx"
+	userModel "github.com/rendau/loom/server/internal/domain/user/model"
 	"github.com/rendau/loom/server/internal/errs"
 )
 
-// Админские RPC защищаются статическим bearer-токеном (ADMIN_TOKEN).
-// Task-facing ручки исключены — Push/PullTaskValue открыты внутри кластера,
-// PushDagManifest — одноразовый describe_id. Новые RPC защищены по
-// умолчанию.
+// Админские RPC требуют сессии пользователя (`Authorization: Bearer
+// <token>` — токен выдаёт AuthService.Login). Исключения:
+//   - task-facing ручки: Push/PullTaskValue открыты внутри кластера,
+//     PushDagManifest — одноразовый describe_id;
+//   - вход и первичная настройка: без них залогиниться было бы нельзя.
+//
+// Новые RPC защищены по умолчанию.
 var authExemptMethods = map[string]struct{}{
 	"/server_v1.DagService/PushDagManifest":     {},
 	"/server_v1.TaskValueService/PushTaskValue": {},
 	"/server_v1.TaskValueService/PullTaskValue": {},
+	"/server_v1.AuthService/GetAuthStatus":      {},
+	"/server_v1.AuthService/CreateFirstAdmin":   {},
+	"/server_v1.AuthService/Login":              {},
+}
+
+// adminOnlyMethods — операции уровня инсталляции: регистрация и удаление
+// дагов, авто-обновление образа, пулы, управление пользователями. Права на
+// конкретный даг (расписание, триггер, переменные) проверяются в usecase —
+// интерцептору имя дага не видно.
+var adminOnlyMethods = map[string]struct{}{
+	"/server_v1.DagService/RegisterDag":      {},
+	"/server_v1.DagService/DeleteDag":        {},
+	"/server_v1.DagService/SetDagAutoUpdate": {},
+	"/server_v1.PoolService/SetPool":         {},
+}
+
+// AuthenticatorI — проверка токена сессии (реализует user-сервис).
+type AuthenticatorI interface {
+	Authenticate(ctx context.Context, token string) (userModel.AuthInfo, error)
 }
 
 func authRequired(fullMethod string) bool {
@@ -33,46 +56,86 @@ func authRequired(fullMethod string) bool {
 	return !exempt
 }
 
-// checkAdminToken сверяет metadata authorization (`Bearer <token>`; gateway
-// пробрасывает HTTP-заголовок Authorization автоматически).
-func checkAdminToken(ctx context.Context, token string) error {
+func adminRequired(fullMethod string) bool {
+	if strings.HasPrefix(fullMethod, "/server_v1.UserService/") {
+		return true
+	}
+	_, ok := adminOnlyMethods[fullMethod]
+	return ok
+}
+
+// BearerToken достаёт токен из metadata (gateway пробрасывает HTTP-заголовок
+// Authorization автоматически).
+func BearerToken(ctx context.Context) string {
 	md, _ := metadata.FromIncomingContext(ctx)
 	const prefix = "bearer "
 	for _, v := range md.Get("authorization") {
-		if len(v) > len(prefix) && strings.EqualFold(v[:len(prefix)], prefix) &&
-			subtle.ConstantTimeCompare([]byte(v[len(prefix):]), []byte(token)) == 1 {
-			return nil
+		if len(v) > len(prefix) && strings.EqualFold(v[:len(prefix)], prefix) {
+			return v[len(prefix):]
 		}
 	}
+	return ""
+}
 
-	st := status.New(codes.Unauthenticated, "admin token required")
+// authenticate проверяет сессию и кладёт вызывающего в контекст.
+func authenticate(ctx context.Context, auth AuthenticatorI, fullMethod string) (context.Context, error) {
+	token := BearerToken(ctx)
+	if token == "" {
+		return nil, authErr(codes.Unauthenticated, errs.NotAuthorized, "требуется вход")
+	}
+
+	info, err := auth.Authenticate(ctx, token)
+	if err != nil {
+		return nil, authErr(codes.Unauthenticated, errs.NotAuthorized, "сессия недействительна")
+	}
+	if adminRequired(fullMethod) && !info.IsAdmin() {
+		return nil, authErr(codes.PermissionDenied, errs.PermissionDenied, "требуются права администратора")
+	}
+	return authctx.With(ctx, info), nil
+}
+
+func authErr(code codes.Code, errCode errs.Err, message string) error {
+	st := status.New(code, message)
 	if detailed, err := st.WithDetails(&commonPb.ErrorRep{
-		Code:    errs.NotAuthorized.Error(),
-		Message: "admin token required",
+		Code:    errCode.Error(),
+		Message: message,
 	}); err == nil {
 		st = detailed
 	}
 	return st.Err()
 }
 
-func GrpcInterceptorAuth(token string) grpc.UnaryServerInterceptor {
+func GrpcInterceptorAuth(auth AuthenticatorI) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if authRequired(info.FullMethod) {
-			if err := checkAdminToken(ctx, token); err != nil {
+			authedCtx, err := authenticate(ctx, auth, info.FullMethod)
+			if err != nil {
 				return nil, err
 			}
+			ctx = authedCtx
 		}
 		return handler(ctx, req)
 	}
 }
 
-func GrpcStreamInterceptorAuth(token string) grpc.StreamServerInterceptor {
+func GrpcStreamInterceptorAuth(auth AuthenticatorI) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		if authRequired(info.FullMethod) {
-			if err := checkAdminToken(ss.Context(), token); err != nil {
-				return err
-			}
+		if !authRequired(info.FullMethod) {
+			return handler(srv, ss)
 		}
-		return handler(srv, ss)
+
+		authedCtx, err := authenticate(ss.Context(), auth, info.FullMethod)
+		if err != nil {
+			return err
+		}
+		return handler(srv, &wrappedStream{ServerStream: ss, ctx: authedCtx})
 	}
 }
+
+// wrappedStream подменяет контекст стрима на аутентифицированный.
+type wrappedStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (w *wrappedStream) Context() context.Context { return w.ctx }

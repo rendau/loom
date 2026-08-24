@@ -1,6 +1,6 @@
 import { apiFetch } from '~/api/client'
 import type { ListParams, PaginationInfo } from '~/types/common'
-import type { Dag } from '~/types/dag'
+import type { Dag, DagRegistration } from '~/types/dag'
 
 export type DagListQuery = {
   list_params: ListParams
@@ -15,11 +15,35 @@ export function getDag(name: string) {
   return apiFetch<Dag>(`/dag/${encodeURIComponent(name)}`)
 }
 
-// Регистрация (или перерегистрация — новая версия образа) дага по url
-// docker-образа; имя дага берётся из манифеста. auto_update undefined —
-// сохранить текущее значение флага (перерегистрация его не сбрасывает).
-export function registerDag(image: string, autoUpdate?: boolean) {
-  return apiFetch<{ dag: Dag }>('/dag', { method: 'POST', body: { image, auto_update: autoUpdate } })
+export interface DagRegisterBody {
+  image: string
+  // auto_update undefined — сохранить текущее значение флага
+  // (перерегистрация его не сбрасывает).
+  auto_update?: boolean
+  // Желаемые настройки нового дага; к существующему не применяются.
+  schedule?: string
+  catchup?: boolean
+  paused?: boolean
+}
+
+// Регистрация асинхронная: ответ — id записи очереди, статус поллится
+// через listDagRegistrations/getDagRegistration.
+export function registerDag(body: DagRegisterBody) {
+  return apiFetch<{ registration_id: string }>('/dag', { method: 'POST', body: { ...body } })
+}
+
+export function listDagRegistrations(query: { dag_name?: string, active?: boolean, limit?: number } = {}) {
+  return apiFetch<{ results: DagRegistration[] }>('/dag-registration', { query: { ...query } })
+}
+
+export function getDagRegistration(id: string) {
+  return apiFetch<DagRegistration>(`/dag-registration/${encodeURIComponent(id)}`)
+}
+
+// Расписание живёт только на control plane (манифест его не содержит);
+// пустая строка schedule снимает расписание.
+export function setDagSchedule(name: string, schedule: string, catchup: boolean) {
+  return apiFetch<object>(`/dag/${encodeURIComponent(name)}/schedule`, { method: 'PUT', body: { schedule, catchup } })
 }
 
 export function setDagPaused(name: string, paused: boolean) {

@@ -21,8 +21,11 @@ const loadError = ref('')
 
 const values = ref<TaskValue[]>([])
 
-async function load() {
-  loading.value = true
+// background — фоновый рефреш поллинга: без спиннера, чтобы кнопка
+// обновления не мигала каждые 3 секунды
+async function load(background = false) {
+  if (!background)
+    loading.value = true
   try {
     const rep = await getRun(runId)
     run.value = rep.run
@@ -38,7 +41,8 @@ async function load() {
     loadError.value = apiErrorMessage(error)
   }
   finally {
-    loading.value = false
+    if (!background)
+      loading.value = false
   }
 }
 
@@ -53,7 +57,7 @@ onMounted(async () => {
   await load()
   pollTimer = setInterval(() => {
     if (run.value?.status === 'running')
-      load()
+      load(true)
   }, 3000)
 })
 onBeforeUnmount(() => clearInterval(pollTimer))
@@ -75,9 +79,12 @@ function openAttemptLog(a: Attempt) {
 // (failed | success); upstream_failed не исполнялся — ретраить нечего
 const action = useApiAction()
 const retryTarget = ref<TaskInstance | null>(null)
+const { canManageDag } = useAuth()
 
 function canRetry(ti: TaskInstance): boolean {
-  return run.value?.status !== 'running' && (ti.status === 'failed' || ti.status === 'success')
+  return run.value?.status !== 'running'
+    && (ti.status === 'failed' || ti.status === 'success')
+    && canManageDag(run.value?.dag_name)
 }
 
 async function confirmRetry() {
@@ -101,8 +108,32 @@ const taskColumns: TableColumn<TaskInstance>[] = [
   { accessorKey: 'started_at', header: 'Старт' },
   { accessorKey: 'finished_at', header: 'Завершён' },
   { id: 'duration', header: 'Длительность' },
+  { id: 'memory', header: 'Пик памяти' },
   { id: 'actions', header: '' },
 ]
+
+// пик памяти текущей попытки таска (attempts содержит все попытки)
+const peakByTask = computed(() => {
+  const result: Record<string, number> = {}
+  for (const a of attempts.value) {
+    const ti = tasks.value.find(t => t.task === a.task)
+    if (!ti || a.attempt !== ti.attempt || a.peak_memory_bytes === undefined)
+      continue
+    result[a.task] = Number(a.peak_memory_bytes)
+  }
+  return result
+})
+
+// агрегаты рана: max и сумма пиков по текущим попыткам тасков
+const memorySummary = computed(() => {
+  const peaks = Object.values(peakByTask.value)
+  if (peaks.length === 0)
+    return null
+  return {
+    max: Math.max(...peaks),
+    sum: peaks.reduce((s, v) => s + v, 0),
+  }
+})
 
 const attemptColumns: TableColumn<Attempt>[] = [
   { accessorKey: 'task', header: 'Таск' },
@@ -110,9 +141,21 @@ const attemptColumns: TableColumn<Attempt>[] = [
   { accessorKey: 'status', header: 'Статус' },
   { accessorKey: 'created_at', header: 'Создана' },
   { accessorKey: 'finished_at', header: 'Завершена' },
+  { id: 'memory', header: 'Пик памяти' },
   { id: 'exit', header: 'Исход' },
   { id: 'actions', header: '' },
 ]
+
+const valueColumns: TableColumn<TaskValue>[] = [
+  { accessorKey: 'task', header: 'Таск' },
+  { accessorKey: 'key', header: 'Ключ' },
+  { accessorKey: 'value', header: 'Значение' },
+  { accessorKey: 'modified_at', header: 'Обновлено' },
+]
+
+// снятие whitespace-nowrap темы UTable: длинные русские статусы и значения
+// должны переноситься, а не растягивать таблицу в горизонтальный скролл
+const tableUi = { td: 'whitespace-normal' }
 </script>
 
 <template>
@@ -126,16 +169,17 @@ const attemptColumns: TableColumn<Attempt>[] = [
           <UBadge v-if="run" :color="runStatusColor(run.status)" variant="subtle" size="lg">
             {{ runStatusLabel(run.status) }}
           </UBadge>
-          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load" />
+          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load()" />
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <UAlert v-if="loadError" color="error" variant="subtle" :title="loadError" class="mb-4" />
+      <UAlert v-if="loadError" color="error" variant="subtle" :title="loadError" />
 
       <template v-if="run">
-        <div class="mb-6 grid grid-cols-2 gap-x-8 gap-y-1 text-sm lg:grid-cols-4">
+        <!-- вертикальный ритм секций — только gap слота #body, без mb-* -->
+        <div class="grid grid-cols-2 gap-x-8 gap-y-1 text-sm lg:grid-cols-4">
           <div>
             <div class="text-muted">Даг</div>
             <div class="font-medium">{{ run.dag_name }}</div>
@@ -156,28 +200,47 @@ const attemptColumns: TableColumn<Attempt>[] = [
             <div class="text-muted">Длительность</div>
             <div>{{ formatDuration(run.created_at, run.finished_at) }}</div>
           </div>
-          <div class="col-span-2 lg:col-span-3">
+          <div>
+            <div class="text-muted">Ран</div>
+            <CopyText :text="runId" mono />
+          </div>
+          <div v-if="memorySummary">
+            <div class="text-muted">Память (max / Σ пиков)</div>
+            <div>{{ formatBytes(memorySummary.max) }} / {{ formatBytes(memorySummary.sum) }}</div>
+          </div>
+          <div class="col-span-2">
             <div class="text-muted">Образ</div>
-            <div class="truncate font-mono text-xs">{{ run.image }}</div>
+            <CopyText :text="run.image" mono />
           </div>
           <div v-if="run.params" class="col-span-2 lg:col-span-4">
-            <div class="text-muted">Параметры</div>
-            <pre class="mt-1 max-h-40 overflow-auto rounded-md border border-default bg-muted/30 p-2 font-mono text-xs">{{ JSON.stringify(run.params, null, 2) }}</pre>
+            <UCollapsible>
+              <UButton
+                label="Параметры рана"
+                color="neutral"
+                variant="link"
+                trailing-icon="i-lucide-chevron-down"
+                class="group p-0"
+                :ui="{ trailingIcon: 'transition-transform duration-200 group-data-[state=open]:rotate-180' }"
+              />
+              <template #content>
+                <pre class="mt-1 max-h-64 overflow-auto rounded-md border border-default bg-muted/30 p-2 font-mono text-xs">{{ JSON.stringify(run.params, null, 2) }}</pre>
+              </template>
+            </UCollapsible>
           </div>
         </div>
 
-        <template v-if="manifestTasks.length">
+        <section v-if="manifestTasks.length">
           <h3 class="mb-2 font-semibold text-highlighted">Граф</h3>
           <RunDagGraph
             :manifest-tasks="manifestTasks"
             :tasks="tasks"
-            class="mb-6"
             @open-log="openTaskLog"
           />
-        </template>
+        </section>
 
-        <h3 class="mb-2 font-semibold text-highlighted">Таски</h3>
-        <UTable :data="tasks" :columns="taskColumns" class="mb-6">
+        <section>
+          <h3 class="mb-2 font-semibold text-highlighted">Таски</h3>
+          <UTable :data="tasks" :columns="taskColumns" :ui="tableUi">
           <template #task-cell="{ row }">
             <span class="font-medium">{{ row.original.task }}</span>
           </template>
@@ -203,56 +266,57 @@ const attemptColumns: TableColumn<Attempt>[] = [
           <template #duration-cell="{ row }">
             {{ formatDuration(row.original.started_at, row.original.finished_at) }}
           </template>
+          <template #memory-cell="{ row }">
+            {{ formatBytes(peakByTask[row.original.task]) }}
+          </template>
           <template #actions-cell="{ row }">
             <div class="flex justify-end gap-1">
-              <UButton
-                v-if="canRetry(row.original)"
-                icon="i-lucide-rotate-ccw"
-                size="sm"
-                color="neutral"
-                variant="ghost"
-                label="Ретрай"
-                @click="retryTarget = row.original"
-              />
-              <UButton
-                v-if="row.original.attempt >= 1"
-                icon="i-lucide-scroll-text"
-                size="sm"
-                color="neutral"
-                variant="ghost"
-                label="Лог"
-                @click="openTaskLog(row.original)"
-              />
+              <UTooltip v-if="canRetry(row.original)" text="Ретрай таска">
+                <UButton
+                  icon="i-lucide-rotate-ccw"
+                  size="sm"
+                  color="neutral"
+                  variant="ghost"
+                  @click="retryTarget = row.original"
+                />
+              </UTooltip>
+              <UTooltip v-if="row.original.attempt >= 1" text="Лог таска">
+                <UButton
+                  icon="i-lucide-scroll-text"
+                  size="sm"
+                  color="neutral"
+                  variant="ghost"
+                  @click="openTaskLog(row.original)"
+                />
+              </UTooltip>
             </div>
           </template>
-        </UTable>
+          </UTable>
+        </section>
 
-        <template v-if="values.length">
+        <section v-if="values.length">
           <h3 class="mb-2 font-semibold text-highlighted">Значения</h3>
-          <div class="mb-6 overflow-x-auto rounded-lg border border-default">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="border-b border-default text-left text-muted">
-                  <th class="px-3 py-2 font-medium">Таск</th>
-                  <th class="px-3 py-2 font-medium">Ключ</th>
-                  <th class="px-3 py-2 font-medium">Значение</th>
-                  <th class="px-3 py-2 font-medium">Обновлено</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="v in values" :key="`${v.task}/${v.key}`" class="border-b border-default last:border-0">
-                  <td class="px-3 py-2 font-medium">{{ v.task }}</td>
-                  <td class="px-3 py-2 font-mono text-xs">{{ v.key }}</td>
-                  <td class="max-w-lg break-all px-3 py-2 font-mono text-xs">{{ formatValue(v.value) }}</td>
-                  <td class="px-3 py-2 text-muted">{{ formatDateTime(v.modified_at) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </template>
+          <UTable :data="values" :columns="valueColumns" :ui="tableUi">
+            <template #task-cell="{ row }">
+              <span class="font-medium">{{ row.original.task }}</span>
+            </template>
+            <template #key-cell="{ row }">
+              <span class="font-mono text-xs">{{ row.original.key }}</span>
+            </template>
+            <template #value-cell="{ row }">
+              <div class="max-w-lg break-all font-mono text-xs" :title="formatValue(row.original.value)">
+                {{ formatValue(row.original.value) }}
+              </div>
+            </template>
+            <template #modified_at-cell="{ row }">
+              {{ formatDateTime(row.original.modified_at) }}
+            </template>
+          </UTable>
+        </section>
 
-        <h3 class="mb-2 font-semibold text-highlighted">Попытки</h3>
-        <UTable :data="attempts" :columns="attemptColumns">
+        <section>
+          <h3 class="mb-2 font-semibold text-highlighted">Попытки</h3>
+          <UTable :data="attempts" :columns="attemptColumns" :ui="tableUi">
           <template #status-cell="{ row }">
             <UBadge :color="attemptStatusColor(row.original.status)" variant="subtle">
               {{ row.original.status }}
@@ -263,6 +327,9 @@ const attemptColumns: TableColumn<Attempt>[] = [
           </template>
           <template #finished_at-cell="{ row }">
             {{ formatDateTime(row.original.finished_at) }}
+          </template>
+          <template #memory-cell="{ row }">
+            {{ formatBytes(row.original.peak_memory_bytes) }}
           </template>
           <template #exit-cell="{ row }">
             <span class="font-mono text-xs">
@@ -275,16 +342,18 @@ const attemptColumns: TableColumn<Attempt>[] = [
             </span>
           </template>
           <template #actions-cell="{ row }">
-            <UButton
-              icon="i-lucide-scroll-text"
-              size="sm"
-              color="neutral"
-              variant="ghost"
-              label="Лог"
-              @click="openAttemptLog(row.original)"
-            />
+            <UTooltip text="Лог попытки">
+              <UButton
+                icon="i-lucide-scroll-text"
+                size="sm"
+                color="neutral"
+                variant="ghost"
+                @click="openAttemptLog(row.original)"
+              />
+            </UTooltip>
           </template>
-        </UTable>
+          </UTable>
+        </section>
       </template>
 
       <RunLogSlideover ref="logRef" :run-id="runId" />

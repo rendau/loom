@@ -16,8 +16,6 @@ var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 
 type DAG struct {
 	name          string
-	schedule      string
-	catchup       bool
 	maxActiveRuns int
 	tasks         map[string]*Task
 	order         []string // порядок объявления тасков
@@ -41,19 +39,6 @@ func New(name string, opts ...DAGOption) *DAG {
 }
 
 type DAGOption func(*DAG)
-
-// Schedule задаёт cron-расписание дага.
-func Schedule(cronExpr string) DAGOption {
-	return func(d *DAG) { d.schedule = cronExpr }
-}
-
-// Catchup включает наверстывание пропущенных тиков расписания: после простоя
-// control plane создаёт ран на каждый пропущенный тик (logical_date = тик).
-// Без этой опции пропущенные тики теряются, расписание продолжается от
-// «сейчас». Имеет смысл для инкрементальных по датам пайплайнов.
-func Catchup() DAGOption {
-	return func(d *DAG) { d.catchup = true }
-}
 
 // MaxActiveRuns ограничивает число одновременно выполняющихся ранов дага
 // (0 — без лимита): лишние раны ждут своей очереди, их таски не стартуют.
@@ -124,19 +109,30 @@ func (d *DAG) Validate() error {
 			errs = append(errs, fmt.Errorf("task %q: invalid pool name %q", name, t.pool))
 		}
 
+		// env-инъекции секретов и переменных делят одно пространство имён —
+		// seenEnv общий
 		seenEnv := map[string]bool{}
-		for _, s := range t.secrets {
+		checkEnv := func(kind, env string) {
 			switch {
-			case !envNameRe.MatchString(s.env):
-				errs = append(errs, fmt.Errorf("task %q: invalid secret env name %q", name, s.env))
-			case strings.HasPrefix(s.env, "LOOM_"):
-				errs = append(errs, fmt.Errorf("task %q: secret env %q conflicts with LOOM_* contract", name, s.env))
-			case seenEnv[s.env]:
-				errs = append(errs, fmt.Errorf("task %q: duplicate secret env %q", name, s.env))
+			case !envNameRe.MatchString(env):
+				errs = append(errs, fmt.Errorf("task %q: invalid %s env name %q", name, kind, env))
+			case strings.HasPrefix(env, "LOOM_"):
+				errs = append(errs, fmt.Errorf("task %q: %s env %q conflicts with LOOM_* contract", name, kind, env))
+			case seenEnv[env]:
+				errs = append(errs, fmt.Errorf("task %q: duplicate env %q", name, env))
 			}
-			seenEnv[s.env] = true
+			seenEnv[env] = true
+		}
+		for _, s := range t.secrets {
+			checkEnv("secret", s.env)
 			if !nameRe.MatchString(s.secret) {
 				errs = append(errs, fmt.Errorf("task %q: invalid secret name %q", name, s.secret))
+			}
+		}
+		for _, v := range t.variables {
+			checkEnv("variable", v.env)
+			if !nameRe.MatchString(v.variable) {
+				errs = append(errs, fmt.Errorf("task %q: invalid variable name %q", name, v.variable))
 			}
 		}
 	}

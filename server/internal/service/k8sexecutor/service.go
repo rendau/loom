@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -20,9 +21,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	k8sResource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	listersv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 
 	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
@@ -50,19 +54,35 @@ type Service struct {
 	// пусто — без секрета.
 	pullSecret string
 
+	// metricsClient/metricsTick — семплинг потребления памяти попыток через
+	// metrics.k8s.io (metrics-server); tick <= 0 — выключен.
+	metricsClient metricsclient.Interface
+	metricsTick   time.Duration
+	podLister     listersv1.PodLister
+	// peaks — зафиксированные пики памяти живых попыток: событие metrics
+	// эмитится только при росте.
+	peaksMu sync.Mutex
+	peaks   map[runModel.AttemptRef]int64
+
 	events  chan runModel.ExecEvent
 	factory informers.SharedInformerFactory
 	stopCh  chan struct{}
+	wg      sync.WaitGroup
 }
 
-func New(clientset kubernetes.Interface, namespace string, jobTTL time.Duration, pullSecret string) *Service {
+func New(clientset kubernetes.Interface, metricsClient metricsclient.Interface, namespace string,
+	jobTTL time.Duration, pullSecret string, metricsTick time.Duration,
+) *Service {
 	return &Service{
-		clientset:  clientset,
-		namespace:  namespace,
-		jobTTL:     jobTTL,
-		pullSecret: pullSecret,
-		events:    make(chan runModel.ExecEvent, eventsBuffer),
-		stopCh:    make(chan struct{}),
+		clientset:     clientset,
+		namespace:     namespace,
+		jobTTL:        jobTTL,
+		pullSecret:    pullSecret,
+		metricsClient: metricsClient,
+		metricsTick:   metricsTick,
+		peaks:         map[runModel.AttemptRef]int64{},
+		events:        make(chan runModel.ExecEvent, eventsBuffer),
+		stopCh:        make(chan struct{}),
 	}
 }
 
@@ -78,7 +98,10 @@ func (s *Service) Start() error {
 		}),
 	)
 
-	podInformer := s.factory.Core().V1().Pods().Informer()
+	pods := s.factory.Core().V1().Pods()
+	s.podLister = pods.Lister()
+
+	podInformer := pods.Informer()
 	_, err := podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(obj any) { s.handlePod(obj, false) },
 		UpdateFunc: func(_, obj any) { s.handlePod(obj, false) },
@@ -93,11 +116,18 @@ func (s *Service) Start() error {
 		return fmt.Errorf("pod informer cache sync failed")
 	}
 
+	if s.metricsClient != nil && s.metricsTick > 0 {
+		s.wg.Go(s.metricsLoop)
+	} else {
+		slog.Info("k8s executor memory sampling disabled (K8S_METRICS_TICK=0)")
+	}
+
 	return nil
 }
 
 func (s *Service) Stop() {
 	close(s.stopCh)
+	s.wg.Wait()
 	if s.factory != nil {
 		s.factory.Shutdown()
 	}
@@ -244,6 +274,103 @@ func containerResources(r *dagModel.TaskResources) (corev1.ResourceRequirements,
 	}
 
 	return result, nil
+}
+
+// ── семплинг потребления памяти (metrics.k8s.io) ────────
+
+// metricsLoop периодически снимает PodMetrics loom-подов и эмитит
+// metrics-событие при росте пика памяти попытки. Гранулярность
+// metrics-server 15–60s — у короткоживущих тасков пик может не измериться.
+// Отсутствующий/недоступный metrics-server не спамит логи: после ошибки
+// семплер замолкает на 10 тиков и пробует снова.
+func (s *Service) metricsLoop() {
+	ticker := time.NewTicker(s.metricsTick)
+	defer ticker.Stop()
+
+	var quietUntil time.Time
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+		}
+
+		if time.Now().Before(quietUntil) {
+			continue
+		}
+		if err := s.sampleMetrics(); err != nil {
+			quietUntil = time.Now().Add(10 * s.metricsTick)
+			slog.Warn("k8s executor memory sampling failed (metrics-server unavailable?)",
+				"error", err, "retry_after", 10*s.metricsTick)
+		}
+	}
+}
+
+func (s *Service) sampleMetrics() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	list, err := s.metricsClient.MetricsV1beta1().PodMetricses(s.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: managedByLabelKey + "=" + managedByLabelValue,
+	})
+	if err != nil {
+		return fmt.Errorf("list pod metrics: %w", err)
+	}
+
+	for _, pm := range list.Items {
+		pod, gErr := s.podLister.Pods(s.namespace).Get(pm.Name)
+		if gErr != nil {
+			continue // под уже исчез из кэша
+		}
+		ref, ok := podRef(pod)
+		if !ok {
+			continue
+		}
+
+		var usage int64
+		for _, c := range pm.Containers {
+			usage += c.Usage.Memory().Value()
+		}
+		s.notePeak(ref, usage)
+	}
+
+	// прюнинг пиков — по живым подам informer'а, а не по списку метрик:
+	// metrics-server может временно не отдавать под
+	alive := map[runModel.AttemptRef]bool{}
+	if pods, lErr := s.podLister.Pods(s.namespace).List(labels.Everything()); lErr == nil {
+		for _, pod := range pods {
+			if ref, ok := podRef(pod); ok {
+				alive[ref] = true
+			}
+		}
+		s.prunePeaks(alive)
+	}
+	return nil
+}
+
+// notePeak поднимает пик попытки и эмитит metrics-событие только при росте.
+func (s *Service) notePeak(ref runModel.AttemptRef, usage int64) {
+	s.peaksMu.Lock()
+	grew := usage > s.peaks[ref]
+	if grew {
+		s.peaks[ref] = usage
+	}
+	s.peaksMu.Unlock()
+
+	if grew {
+		s.emit(runModel.ExecEvent{Ref: ref, Type: runModel.ExecEventMetrics, PeakMemoryBytes: &usage})
+	}
+}
+
+// prunePeaks выбрасывает пики исчезнувших попыток.
+func (s *Service) prunePeaks(alive map[runModel.AttemptRef]bool) {
+	s.peaksMu.Lock()
+	defer s.peaksMu.Unlock()
+	for ref := range s.peaks {
+		if !alive[ref] {
+			delete(s.peaks, ref)
+		}
+	}
 }
 
 // handlePod транслирует состояние пода в события попытки. Дубли (resync

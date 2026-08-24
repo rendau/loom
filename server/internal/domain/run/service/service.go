@@ -375,6 +375,16 @@ func (s *Service) FinalizeAttempt(ctx context.Context, ref model.AttemptRef, exi
 	return applied, startedAt, nil
 }
 
+// SetAttemptPeakMemory поднимает зафиксированный пик памяти попытки до
+// значения семпла (greatest — идемпотентно, поздний семпл после финализации
+// безвреден).
+func (s *Service) SetAttemptPeakMemory(ctx context.Context, ref model.AttemptRef, peakBytes int64) error {
+	if err := s.repoDb.SetAttemptPeakMemory(ctx, ref, peakBytes); err != nil {
+		return fmt.Errorf("repoDb.SetAttemptPeakMemory: %w", err)
+	}
+	return nil
+}
+
 // PromoteRetries возвращает в очередь up_for_retry-таски с истёкшим backoff.
 func (s *Service) PromoteRetries(ctx context.Context) (int64, error) {
 	n, err := s.repoDb.PromoteRetries(ctx)

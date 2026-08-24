@@ -35,6 +35,26 @@ export function formatTimestampMs(ms: string | number): string {
   return Number.isFinite(n) ? timeFmt.format(new Date(n)) : '—'
 }
 
+// formatBytes — человекочитаемый объём памяти («256.0 MiB»). Значения от
+// gateway (int64) приходят строками — принимаем и их.
+export function formatBytes(bytes?: string | number | null): string {
+  const n = Number(bytes)
+  if (bytes === undefined || bytes === null || !Number.isFinite(n))
+    return '—'
+  if (n < 1024)
+    return `${n} B`
+  const units = ['KiB', 'MiB', 'GiB', 'TiB']
+  let value = n
+  let unit = 'B'
+  for (const u of units) {
+    if (value < 1024)
+      break
+    value /= 1024
+    unit = u
+  }
+  return `${value.toFixed(1)} ${unit}`
+}
+
 // formatDuration — длительность между двумя моментами, «1м 23с».
 export function formatDuration(fromIso?: string, toIso?: string): string {
   if (!fromIso || !toIso)

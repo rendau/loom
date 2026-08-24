@@ -15,8 +15,6 @@ import (
 type manifestDTO struct {
 	SdkVersion    string         `json:"sdk_version"`
 	Name          string         `json:"name"`
-	Schedule      string         `json:"schedule"`
-	Catchup       bool           `json:"catchup"`
 	MaxActiveRuns int            `json:"max_active_runs"`
 	Tasks         []manifestTask `json:"tasks"`
 }
@@ -31,11 +29,17 @@ type manifestTask struct {
 	Pool          string             `json:"pool"`
 	Priority      int                `json:"priority"`
 	Secrets       []manifestSecret   `json:"secrets"`
+	Variables     []manifestVariable `json:"variables"`
 }
 
 type manifestSecret struct {
 	Env    string `json:"env"`
 	Secret string `json:"secret"`
+}
+
+type manifestVariable struct {
+	Env      string `json:"env"`
+	Variable string `json:"variable"`
 }
 
 type manifestDep struct {
@@ -59,8 +63,6 @@ func Parse(raw []byte) (*dagModel.Manifest, error) {
 	return &dagModel.Manifest{
 		SdkVersion:    m.SdkVersion,
 		Name:          m.Name,
-		Schedule:      m.Schedule,
-		Catchup:       m.Catchup,
 		MaxActiveRuns: m.MaxActiveRuns,
 		Tasks:         lo.Map(m.Tasks, encodeManifestTask),
 	}, nil
@@ -77,6 +79,9 @@ func encodeManifestTask(v manifestTask, _ int) dagModel.Task {
 		Priority:      v.Priority,
 		Secrets: lo.Map(v.Secrets, func(s manifestSecret, _ int) dagModel.SecretRef {
 			return dagModel.SecretRef{Env: s.Env, Secret: s.Secret}
+		}),
+		Variables: lo.Map(v.Variables, func(vr manifestVariable, _ int) dagModel.VariableRef {
+			return dagModel.VariableRef{Env: vr.Env, Variable: vr.Variable}
 		}),
 	}
 	if v.Resources != nil {

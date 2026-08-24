@@ -12,6 +12,7 @@ type Upsert struct {
 	Image       *string
 	ImageDigest *string
 	Schedule    *string
+	Catchup     *bool
 	Paused      *bool
 	AutoUpdate  *bool
 	Manifest    *[]byte
@@ -28,6 +29,9 @@ func (m *Upsert) CreateColumnMap() map[string]any {
 	}
 	if m.Schedule != nil {
 		result["schedule"] = *m.Schedule
+	}
+	if m.Catchup != nil {
+		result["catchup"] = *m.Catchup
 	}
 	if m.Paused != nil {
 		result["paused"] = *m.Paused
@@ -65,6 +69,7 @@ func DecodeUpsert(v *domainModel.Edit) *Upsert {
 		Image:       v.Image,
 		ImageDigest: v.ImageDigest,
 		Schedule:    v.Schedule,
+		Catchup:     v.Catchup,
 		Paused:      v.Paused,
 		AutoUpdate:  v.AutoUpdate,
 		Manifest:    v.Manifest,

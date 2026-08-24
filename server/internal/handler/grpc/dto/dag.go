@@ -46,6 +46,12 @@ func EncodeDagTaskMain(v domainModel.Task, _ int) *pb.DagTaskMain {
 		TimeoutSec:    int32(v.TimeoutSec),
 		Pool:          v.Pool,
 		Priority:      int32(v.Priority),
+		Secrets: lo.Map(v.Secrets, func(s domainModel.SecretRef, _ int) *pb.DagTaskEnvSecret {
+			return &pb.DagTaskEnvSecret{Env: s.Env, Secret: s.Secret}
+		}),
+		Variables: lo.Map(v.Variables, func(vr domainModel.VariableRef, _ int) *pb.DagTaskEnvVariable {
+			return &pb.DagTaskEnvVariable{Env: vr.Env, Variable: vr.Variable}
+		}),
 	}
 	if v.Resources != nil {
 		result.Resources = &pb.DagTaskResources{

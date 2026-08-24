@@ -29,11 +29,13 @@ func (u *Usecase) validateAttempt(ctx context.Context, key model.AttemptKey) err
 	return nil
 }
 
-func (u *Usecase) Read(ctx context.Context, key model.AttemptKey, follow bool, fn func([]model.Entry) error) error {
+// Read отдаёт строки лога батчами в fn; afterSeq пропускает уже полученные
+// клиентом строки (докачка follow-стрима админки после обрыва).
+func (u *Usecase) Read(ctx context.Context, key model.AttemptKey, afterSeq int64, follow bool, fn func([]model.Entry) error) error {
 	if err := u.validateAttempt(ctx, key); err != nil {
 		return err
 	}
-	if err := u.svc.ReadTaskLog(ctx, key, follow, fn); err != nil {
+	if err := u.svc.ReadTaskLog(ctx, key, afterSeq, follow, fn); err != nil {
 		return fmt.Errorf("svc.ReadTaskLog: %w", err)
 	}
 	return nil

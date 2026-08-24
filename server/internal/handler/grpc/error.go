@@ -36,9 +36,16 @@ func encodeErr(err error) error {
 
 	var code codes.Code
 	switch errCode {
-	case errs.DagNotFound, errs.RunNotFound, errs.TaskNotFound, errs.AttemptNotFound,
-		errs.ValueNotFound, errs.PoolNotFound, errs.SecretNotFound, errs.ObjectNotFound:
+	case errs.DagNotFound, errs.RegistrationNotFound, errs.RunNotFound, errs.TaskNotFound,
+		errs.AttemptNotFound, errs.ValueNotFound, errs.PoolNotFound, errs.SecretNotFound,
+		errs.VariableNotFound, errs.UserNotFound, errs.ObjectNotFound:
 		code = codes.NotFound
+	case errs.NotAuthorized, errs.InvalidCredentials:
+		code = codes.Unauthenticated
+	case errs.PermissionDenied:
+		code = codes.PermissionDenied
+	case errs.UserExists:
+		code = codes.AlreadyExists
 	case errs.AttemptLogAborted:
 		code = codes.Aborted
 	case errs.LogAlreadyPushed, errs.RunNotFinished, errs.TaskNotRetryable, errs.AttemptOutdated:

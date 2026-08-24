@@ -9,7 +9,7 @@ import (
 
 // ServiceI — чтение логов с artifact-сервера (artifactcli).
 type ServiceI interface {
-	ReadTaskLog(ctx context.Context, key model.AttemptKey, follow bool, fn func([]model.Entry) error) error
+	ReadTaskLog(ctx context.Context, key model.AttemptKey, afterSeq int64, follow bool, fn func([]model.Entry) error) error
 }
 
 type RunServiceI interface {

@@ -64,6 +64,9 @@ var Conf = struct {
 	// pull приватных образов дагов: подставляется в imagePullSecrets подов
 	// попыток и describe-Job'ов; пусто — без секрета (публичные образы).
 	K8sImagePullSecret string `env:"K8S_IMAGE_PULL_SECRET"`
+	// K8sMetricsTick — период семплинга памяти подов попыток через
+	// metrics.k8s.io (нужен metrics-server); 0 — выключено.
+	K8sMetricsTick time.Duration `env:"K8S_METRICS_TICK" envDefault:"15s"`
 
 	// SchedTick — период планировщика; события executor'а будят его раньше.
 	SchedTick time.Duration `env:"SCHED_TICK" envDefault:"2s"`
@@ -86,14 +89,20 @@ var Conf = struct {
 	// DagSyncTick — период авто-обновления дагов: digest-чек
 	// тега в registry для дагов с auto_update; 0 — выключено.
 	DagSyncTick time.Duration `env:"DAG_SYNC_TICK" envDefault:"5m"`
+
+	// DagRegTick — период воркера очереди регистраций дагов (Enqueue будит
+	// его раньше).
+	DagRegTick time.Duration `env:"DAG_REG_TICK" envDefault:"2s"`
+	// DagRegStale — возраст running-регистрации, после которого она
+	// считается брошенной (инстанс умер посреди describe) и падает в failed;
+	// должен покрывать pull + describe.
+	DagRegStale time.Duration `env:"DAG_REG_STALE" envDefault:"30m"`
+	// DagRegTTL — сколько хранить завершённые записи регистраций; 0 — вечно.
+	DagRegTTL time.Duration `env:"DAG_REG_TTL" envDefault:"720h"`
 	// RegistryAuthFile — путь к docker config.json с кредами registry для
 	// digest-чека приватных образов; пусто — anonymous-доступ.
 	RegistryAuthFile string `env:"REGISTRY_AUTH_FILE"`
 
-	// AdminToken — статический bearer-токен админских RPC (Dag/Run/Pool/
-	// Secret, ReadTaskLog, ListTaskValues); пусто — auth выключен (dev).
-	// Task-facing ручки под ним не живут.
-	AdminToken string `env:"ADMIN_TOKEN"`
 	// SecretKey — парольная фраза шифрования секретов (AES-256-GCM, ключ —
 	// SHA-256 от фразы); пусто — секреты хранятся открытым текстом (dev).
 	SecretKey string `env:"SECRET_KEY"`

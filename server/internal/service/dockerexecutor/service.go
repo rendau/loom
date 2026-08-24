@@ -41,6 +41,11 @@ type Service struct {
 	network  string
 	pollTick time.Duration
 
+	// peaks — зафиксированные пики памяти живых попыток: событие metrics
+	// эмитится только при росте пика.
+	peaksMu sync.Mutex
+	peaks   map[runModel.AttemptRef]int64
+
 	events    chan runModel.ExecEvent
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -54,6 +59,7 @@ func New(bin, network string, pollTick time.Duration) *Service {
 		bin:       bin,
 		network:   network,
 		pollTick:  pollTick,
+		peaks:     map[runModel.AttemptRef]int64{},
 		events:    make(chan runModel.ExecEvent, eventsBuffer),
 		ctx:       ctx,
 		ctxCancel: cancel,
@@ -62,6 +68,7 @@ func New(bin, network string, pollTick time.Duration) *Service {
 
 func (s *Service) Start() error {
 	s.wg.Go(s.pollLoop)
+	s.wg.Go(s.statsLoop)
 	return nil
 }
 
@@ -182,11 +189,140 @@ func (s *Service) reapExited(ctx context.Context) error {
 	return nil
 }
 
+// ── семплинг потребления памяти ─────────────────────────
+
+// statsLoop периодически снимает `docker stats` живых контейнеров и эмитит
+// metrics-событие при росте пика памяти попытки. Пик семплированный —
+// короткие спайки между тиками теряются.
+func (s *Service) statsLoop() {
+	ticker := time.NewTicker(s.pollTick)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		if err := s.sampleStats(s.ctx); err != nil && s.ctx.Err() == nil {
+			slog.Warn("docker executor stats", "error", err)
+		}
+	}
+}
+
+func (s *Service) sampleStats(ctx context.Context) error {
+	infos, err := s.listContainers(ctx, false)
+	if err != nil {
+		return err
+	}
+
+	running := lo.Filter(infos, func(c containerInfo, _ int) bool { return c.State.Running })
+	alive := map[runModel.AttemptRef]bool{}
+	// docker stats печатает короткий id — маппим префиксом
+	byShortId := map[string]runModel.AttemptRef{}
+	for _, c := range running {
+		ref, ok := c.ref()
+		if !ok {
+			continue
+		}
+		alive[ref] = true
+		byShortId[c.Id[:min(12, len(c.Id))]] = ref
+	}
+	s.prunePeaks(alive)
+	if len(byShortId) == 0 {
+		return nil
+	}
+
+	args := append([]string{"stats", "--no-stream", "--format", "{{json .}}"}, lo.Keys(byShortId)...)
+	out, err := s.docker(ctx, args...)
+	if err != nil {
+		// контейнер мог завершиться между ps и stats
+		if strings.Contains(out, "No such container") {
+			return nil
+		}
+		return fmt.Errorf("docker stats: %w: %s", err, out)
+	}
+
+	for line := range strings.Lines(out) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var row struct {
+			Container string `json:"Container"`
+			MemUsage  string `json:"MemUsage"`
+		}
+		if err = json.Unmarshal([]byte(line), &row); err != nil {
+			continue
+		}
+		ref, ok := byShortId[row.Container]
+		if !ok {
+			continue
+		}
+		if usage, uOk := parseMemUsage(row.MemUsage); uOk {
+			s.notePeak(ref, usage)
+		}
+	}
+	return nil
+}
+
+// notePeak поднимает пик попытки и эмитит metrics-событие только при росте.
+func (s *Service) notePeak(ref runModel.AttemptRef, usage int64) {
+	s.peaksMu.Lock()
+	grew := usage > s.peaks[ref]
+	if grew {
+		s.peaks[ref] = usage
+	}
+	s.peaksMu.Unlock()
+
+	if grew {
+		s.emit(runModel.ExecEvent{Ref: ref, Type: runModel.ExecEventMetrics, PeakMemoryBytes: &usage})
+	}
+}
+
+// prunePeaks выбрасывает пики исчезнувших попыток (контейнер завершён).
+func (s *Service) prunePeaks(alive map[runModel.AttemptRef]bool) {
+	s.peaksMu.Lock()
+	defer s.peaksMu.Unlock()
+	for ref := range s.peaks {
+		if !alive[ref] {
+			delete(s.peaks, ref)
+		}
+	}
+}
+
+// parseMemUsage разбирает «88.4MiB / 3.8GiB» из docker stats — берём usage
+// до слэша; юниты go-units (двоичные KiB/MiB/... и десятичные kB/MB/...).
+func parseMemUsage(memUsage string) (int64, bool) {
+	usagePart, _, _ := strings.Cut(memUsage, "/")
+	usagePart = strings.TrimSpace(usagePart)
+
+	i := 0
+	for i < len(usagePart) && (usagePart[i] >= '0' && usagePart[i] <= '9' || usagePart[i] == '.') {
+		i++
+	}
+	value, err := strconv.ParseFloat(usagePart[:i], 64)
+	if err != nil {
+		return 0, false
+	}
+
+	mult, ok := map[string]float64{
+		"B": 1, "KiB": 1 << 10, "MiB": 1 << 20, "GiB": 1 << 30, "TiB": 1 << 40,
+		"kB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12,
+	}[strings.TrimSpace(usagePart[i:])]
+	if !ok {
+		return 0, false
+	}
+	return int64(value * mult), true
+}
+
 // ── docker CLI ──────────────────────────────────────────
 
 type containerInfo struct {
 	Id    string `json:"Id"`
 	State struct {
+		Running   bool  `json:"Running"`
 		ExitCode  int32 `json:"ExitCode"`
 		OOMKilled bool  `json:"OOMKilled"`
 	} `json:"State"`

@@ -14,7 +14,6 @@ func validManifest() *model.Manifest {
 	return &model.Manifest{
 		SdkVersion: "0.1.0",
 		Name:       "demo-etl",
-		Schedule:   "@daily",
 		Tasks: []model.Task{
 			{Name: "extract"},
 			{Name: "transform", DependsOn: []model.Dep{{Task: "extract", Streamed: true}}},
@@ -72,7 +71,6 @@ func TestValidateManifest_Invalid(t *testing.T) {
 		{"cycle", func(m *model.Manifest) {
 			m.Tasks[0].DependsOn = []model.Dep{{Task: "load"}}
 		}},
-		{"bad schedule", func(m *model.Manifest) { m.Schedule = "not-a-cron" }},
 		{"negative retries", func(m *model.Manifest) { m.Tasks[0].Retries = -1 }},
 		{"retries over limit", func(m *model.Manifest) { m.Tasks[0].Retries = maxTaskRetries + 1 }},
 		{"negative retry delay", func(m *model.Manifest) { m.Tasks[0].RetryDelaySec = -1 }},

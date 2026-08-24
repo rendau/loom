@@ -15,10 +15,11 @@ type Usecase struct {
 	svc       ServiceI
 	dagSvc    DagServiceI
 	scheduler SchedulerI
+	authz     AuthzI
 }
 
-func New(svc ServiceI, dagSvc DagServiceI, scheduler SchedulerI) *Usecase {
-	return &Usecase{svc: svc, dagSvc: dagSvc, scheduler: scheduler}
+func New(svc ServiceI, dagSvc DagServiceI, scheduler SchedulerI, authz AuthzI) *Usecase {
+	return &Usecase{svc: svc, dagSvc: dagSvc, scheduler: scheduler, authz: authz}
 }
 
 func (u *Usecase) List(ctx context.Context, pars *model.ListReq) ([]*model.Main, int64, error) {
@@ -49,6 +50,9 @@ func (u *Usecase) Trigger(ctx context.Context, dagName string, params []byte) (s
 	if dagName == "" {
 		return "", errs.IdRequired
 	}
+	if err := u.authz.RequireDag(ctx, dagName); err != nil {
+		return "", err
+	}
 
 	dag, _, err := u.dagSvc.Get(ctx, dagName, true)
 	if err != nil {
@@ -77,6 +81,9 @@ func (u *Usecase) Backfill(ctx context.Context, dagName string, from, to time.Ti
 	}
 	if from.IsZero() || to.IsZero() || !from.Before(to) {
 		return nil, errs.ErrFull{Err: errs.InvalidRequest, Desc: "требуется период from < to"}
+	}
+	if err := u.authz.RequireDag(ctx, dagName); err != nil {
+		return nil, err
 	}
 
 	dag, _, err := u.dagSvc.Get(ctx, dagName, true)
@@ -163,6 +170,14 @@ func (u *Usecase) ListValues(ctx context.Context, runId string) ([]*model.TaskVa
 func (u *Usecase) RetryTask(ctx context.Context, runId, task string) error {
 	if runId == "" || task == "" {
 		return errs.IdRequired
+	}
+
+	run, _, err := u.svc.Get(ctx, runId, true)
+	if err != nil {
+		return fmt.Errorf("svc.Get: %w", err)
+	}
+	if err = u.authz.RequireDag(ctx, run.DagName); err != nil {
+		return err
 	}
 
 	if err := u.svc.RetryTask(ctx, runId, task); err != nil {

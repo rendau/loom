@@ -5,7 +5,9 @@ create table dag (
     name         text primary key,
     image        text        not null, -- url образа, как задан при регистрации (тег)
     image_digest text        not null, -- закреплённый digest (repo@sha256:...)
+    -- расписание и catchup задаются через админку (не манифестом)
     schedule     text        not null default '',
+    catchup      boolean     not null default false,
     paused       boolean     not null default false,
     auto_update  boolean     not null default false, -- poll-синк новой версии образа (решение №30)
     manifest     jsonb       not null, -- манифест `describe` как есть
@@ -13,6 +15,32 @@ create table dag (
     created_at   timestamptz not null default now(),
     modified_at  timestamptz
 );
+
+-- Очередь регистраций дагов: pull + describe выполняются асинхронно
+-- (админка поллит статусы), обработка — FOR UPDATE SKIP LOCKED.
+-- source=auto — перерегистрация dagsync (обновление по digest тега).
+create table dag_registration (
+    id          text primary key,
+    image       text not null,
+    source      text not null,                   -- manual | auto
+    -- желаемые настройки: применяются только к НОВОМУ дагу
+    schedule    text,
+    catchup     boolean,
+    paused      boolean,
+    auto_update boolean,
+    status      text not null default 'pending', -- pending | running | success | failed
+    error       text not null default '',
+    dag_name    text not null default '',        -- manual: известен только после describe
+    created_at  timestamptz not null default now(),
+    started_at  timestamptz,
+    finished_at timestamptz
+);
+
+-- claim-запрос воркера и выборка активных для админки
+create index dag_registration_active_idx on dag_registration (created_at)
+    where status in ('pending', 'running');
+-- история регистраций дага (карточка дага)
+create index dag_registration_dag_idx on dag_registration (dag_name, created_at desc);
 
 create table run (
     id           text primary key,
@@ -69,13 +97,59 @@ create index task_instance_active_pool_idx on task_instance (pool) where status 
 -- возврат ретраев в очередь по расписанию backoff'а
 create index task_instance_retry_idx on task_instance (retry_at) where status = 'up_for_retry';
 
+-- Пользователи админки: admin — полный доступ (включая глобальные
+-- переменные/секреты и управление пользователями); user — чтение всего +
+-- изменение назначенных ему дагов (user_dag). Пароль — bcrypt.
+create table app_user ( -- "user" зарезервировано в PG
+    id            text primary key,
+    username      text not null unique,
+    password_hash text not null,
+    role          text not null, -- admin | user
+    created_at    timestamptz not null default now(),
+    modified_at   timestamptz
+);
+
+-- Сессии: opaque-токен, в БД только его sha256 (утечка дампа не даёт
+-- войти); истёкшие чистит retention-цикл.
+create table session (
+    token_hash text primary key,
+    user_id    text not null references app_user (id) on delete cascade,
+    created_at timestamptz not null default now(),
+    expires_at timestamptz not null
+);
+
+create index session_expires_idx on session (expires_at);
+
+-- Назначенные пользователю даги: право менять их расписание, пользователей
+-- переменные/секреты, триггерить и ретраить раны.
+create table user_dag (
+    user_id  text not null references app_user (id) on delete cascade,
+    dag_name text not null references dag (name) on delete cascade,
+    primary key (user_id, dag_name)
+);
+
 -- Секреты для env-инъекции в поды (решение №27): значение шифруется
--- AES-256-GCM при заданном SECRET_KEY; наружу через API не отдаётся.
+-- AES-256-GCM при заданном SECRET_KEY; наружу — только через GetSecretValue
+-- (RBAC). Скоуп: dag_name = '' — глобальный; локальный (dag_name = имя
+-- дага) перекрывает глобальный с тем же именем при резолве в launch.
 create table secret (
-    name        text  primary key,
+    dag_name    text  not null default '',
+    name        text  not null,
     value       bytea not null,
     created_at  timestamptz not null default now(),
-    modified_at timestamptz
+    modified_at timestamptz,
+    primary key (dag_name, name)
+);
+
+-- Переменные для env-инъекции в поды тасков: как секреты, но значение
+-- хранится открыто и видно в админке. Скоупы те же.
+create table variable (
+    dag_name    text not null default '',
+    name        text not null,
+    value       text not null,
+    created_at  timestamptz not null default now(),
+    modified_at timestamptz,
+    primary key (dag_name, name)
 );
 
 -- Мелкие значения тасков (аналог XCom, решение №25): скоуп (run, task, key),
@@ -99,6 +173,10 @@ create table attempt (
     finished_at timestamptz,
     exit_code   int,
     exit_reason text not null default '',
+    -- пиковое потребление памяти по семплам executor'а (docker stats /
+    -- metrics-server): приблизительно — короткие спайки между семплами
+    -- теряются; null — не измерено
+    peak_memory_bytes bigint,
     primary key (run_id, task, attempt),
     foreign key (run_id, task) references task_instance (run_id, task) on delete cascade
 );

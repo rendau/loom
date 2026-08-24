@@ -67,7 +67,7 @@ export function apiErrorMessage(error: unknown): string {
   return String(error)
 }
 
-// authHeaders — общие заголовки запроса с admin-токеном (если задан);
+// authHeaders — общие заголовки запроса с токеном сессии (если есть);
 // используется и стриминговым чтением логов (log.api.ts).
 export function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = { Accept: 'application/json' }
@@ -89,8 +89,13 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
     })
   }
   catch (error) {
-    if (error instanceof FetchError && error.statusCode === 401)
-      authNeeded.value = true
+    // 401 — сессия истекла или отозвана: сбрасываем токен, гард уведёт на /login
+    if (error instanceof FetchError && error.statusCode === 401) {
+      setAuthToken('')
+      sessionExpired.value = true
+      if (import.meta.client && !window.location.pathname.startsWith('/login'))
+        await navigateTo('/login')
+    }
     throw error
   }
 }

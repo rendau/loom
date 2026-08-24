@@ -22,17 +22,17 @@ func (f *fakeResolver) ResolveDigest(context.Context, string) (string, error) {
 	return f.digest, f.err
 }
 
-type fakeRegistrar struct {
+type fakeEnqueuer struct {
 	err   error
 	calls int
 }
 
-func (f *fakeRegistrar) Register(_ context.Context, _ string, autoUpdate *bool) (*dagModel.Main, error) {
-	if autoUpdate != nil {
-		panic("dagsync must not touch auto_update flag")
+func (f *fakeEnqueuer) EnqueueAuto(_ context.Context, _, dagName string) error {
+	if dagName == "" {
+		panic("dagsync must pass known dag name")
 	}
 	f.calls++
-	return nil, f.err
+	return f.err
 }
 
 func dag(image, pinned string) *dagModel.Main {
@@ -44,26 +44,26 @@ func TestSyncDag(t *testing.T) {
 
 	t.Run("digest unchanged — no re-register", func(t *testing.T) {
 		resolver := &fakeResolver{digest: "sha256:aaa"}
-		registrar := &fakeRegistrar{}
-		s := New(nil, resolver, registrar, 0)
+		enqueuer := &fakeEnqueuer{}
+		s := New(nil, resolver, enqueuer, 0)
 
 		require.NoError(t, s.syncDag(ctx, dag("reg/d:latest", "reg/d@sha256:aaa")))
 		assert.Equal(t, 1, resolver.calls)
-		assert.Equal(t, 0, registrar.calls)
+		assert.Equal(t, 0, enqueuer.calls)
 	})
 
-	t.Run("digest changed — re-register", func(t *testing.T) {
+	t.Run("digest changed — re-register enqueued", func(t *testing.T) {
 		resolver := &fakeResolver{digest: "sha256:bbb"}
-		registrar := &fakeRegistrar{}
-		s := New(nil, resolver, registrar, 0)
+		enqueuer := &fakeEnqueuer{}
+		s := New(nil, resolver, enqueuer, 0)
 
 		require.NoError(t, s.syncDag(ctx, dag("reg/d:latest", "reg/d@sha256:aaa")))
-		assert.Equal(t, 1, registrar.calls)
+		assert.Equal(t, 1, enqueuer.calls)
 	})
 
 	t.Run("pinned image ref — skipped", func(t *testing.T) {
 		resolver := &fakeResolver{}
-		s := New(nil, resolver, &fakeRegistrar{}, 0)
+		s := New(nil, resolver, &fakeEnqueuer{}, 0)
 
 		require.NoError(t, s.syncDag(ctx, dag("reg/d@sha256:aaa", "reg/d@sha256:aaa")))
 		assert.Equal(t, 0, resolver.calls)
@@ -71,25 +71,25 @@ func TestSyncDag(t *testing.T) {
 
 	t.Run("unpinned registration — skipped", func(t *testing.T) {
 		resolver := &fakeResolver{}
-		s := New(nil, resolver, &fakeRegistrar{}, 0)
+		s := New(nil, resolver, &fakeEnqueuer{}, 0)
 
 		require.NoError(t, s.syncDag(ctx, dag("reg/d:latest", "reg/d:latest")))
 		assert.Equal(t, 0, resolver.calls)
 	})
 
-	t.Run("resolver error — propagated, no re-register", func(t *testing.T) {
+	t.Run("resolver error — propagated, no enqueue", func(t *testing.T) {
 		resolver := &fakeResolver{err: fmt.Errorf("boom")}
-		registrar := &fakeRegistrar{}
-		s := New(nil, resolver, registrar, 0)
+		enqueuer := &fakeEnqueuer{}
+		s := New(nil, resolver, enqueuer, 0)
 
 		require.Error(t, s.syncDag(ctx, dag("reg/d:latest", "reg/d@sha256:aaa")))
-		assert.Equal(t, 0, registrar.calls)
+		assert.Equal(t, 0, enqueuer.calls)
 	})
 
-	t.Run("broken new image — register error propagated", func(t *testing.T) {
+	t.Run("enqueue error — propagated", func(t *testing.T) {
 		resolver := &fakeResolver{digest: "sha256:bbb"}
-		registrar := &fakeRegistrar{err: fmt.Errorf("invalid manifest")}
-		s := New(nil, resolver, registrar, 0)
+		enqueuer := &fakeEnqueuer{err: fmt.Errorf("db down")}
+		s := New(nil, resolver, enqueuer, 0)
 
 		require.Error(t, s.syncDag(ctx, dag("reg/d:latest", "reg/d@sha256:aaa")))
 	})

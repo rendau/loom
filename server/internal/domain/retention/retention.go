@@ -29,10 +29,17 @@ type TaskLogI interface {
 	DeleteRunTaskLogs(ctx context.Context, runId string) error
 }
 
+// SessionCleanerI — чистка истёкших сессий админки (тем же циклом, что и
+// TTL ранов: обе операции — фоновая уборка).
+type SessionCleanerI interface {
+	CleanupSessions(ctx context.Context) (int64, error)
+}
+
 type Service struct {
 	runSvc   RunServiceI
 	artifact ArtifactI
 	tasklog  TaskLogI
+	sessions SessionCleanerI
 	ttl      time.Duration
 	tick     time.Duration
 
@@ -41,13 +48,16 @@ type Service struct {
 	wg        sync.WaitGroup
 }
 
-func New(runSvc RunServiceI, artifact ArtifactI, tasklog TaskLogI, ttl, tick time.Duration) *Service {
+func New(runSvc RunServiceI, artifact ArtifactI, tasklog TaskLogI, sessions SessionCleanerI,
+	ttl, tick time.Duration,
+) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Service{
 		runSvc:    runSvc,
 		artifact:  artifact,
 		tasklog:   tasklog,
+		sessions:  sessions,
 		ttl:       ttl,
 		tick:      tick,
 		ctx:       ctx,
@@ -55,11 +65,11 @@ func New(runSvc RunServiceI, artifact ArtifactI, tasklog TaskLogI, ttl, tick tim
 	}
 }
 
-// Start запускает цикл очистки; ttl <= 0 — retention выключен.
+// Start запускает цикл очистки; ttl <= 0 — TTL ранов выключен (сессии
+// чистятся всё равно).
 func (s *Service) Start() {
 	if s.ttl <= 0 {
-		slog.Info("run retention disabled")
-		return
+		slog.Info("run retention disabled (sessions cleanup still runs)")
 	}
 
 	slog.Info("run retention started", "ttl", s.ttl, "tick", s.tick)
@@ -82,8 +92,15 @@ func (s *Service) loop() {
 		case <-ticker.C:
 		}
 
-		if _, err := s.Sweep(s.ctx); err != nil && s.ctx.Err() == nil {
-			slog.Error("retention sweep", "error", err)
+		if s.ttl > 0 {
+			if _, err := s.Sweep(s.ctx); err != nil && s.ctx.Err() == nil {
+				slog.Error("retention sweep", "error", err)
+			}
+		}
+		if s.sessions != nil {
+			if _, err := s.sessions.CleanupSessions(s.ctx); err != nil && s.ctx.Err() == nil {
+				slog.Error("sessions cleanup", "error", err)
+			}
 		}
 	}
 }

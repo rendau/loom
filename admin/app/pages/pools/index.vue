@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import { apiErrorMessage } from '~/api/client'
 import { listPools, setPool } from '~/api/pool.api'
 import type { Pool } from '~/types/pool'
 
@@ -7,15 +8,22 @@ import type { Pool } from '~/types/pool'
 // пула. Удаления нет — на пул могут ссылаться манифесты; slots = 0 ставит
 // пул на паузу.
 
+const { isAdmin } = useAuth()
+
 const pools = ref<Pool[]>([])
 const loading = ref(false)
 const action = useApiAction()
+
+const toast = useToast()
 
 async function load() {
   loading.value = true
   try {
     const rep = await listPools()
     pools.value = rep.results ?? []
+  }
+  catch (error) {
+    toast.add({ title: 'Ошибка загрузки пулов', description: apiErrorMessage(error), color: 'error' })
   }
   finally {
     loading.value = false
@@ -70,7 +78,7 @@ const columns: TableColumn<Pool>[] = [
       <UDashboardNavbar title="Пулы">
         <template #right>
           <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load" />
-          <UButton icon="i-lucide-plus" label="Создать" @click="openCreate" />
+          <UButton v-if="isAdmin" icon="i-lucide-plus" label="Создать" @click="openCreate" />
         </template>
       </UDashboardNavbar>
     </template>
@@ -95,7 +103,7 @@ const columns: TableColumn<Pool>[] = [
         </template>
 
         <template #actions-cell="{ row }">
-          <div class="flex justify-end">
+          <div v-if="isAdmin" class="flex justify-end">
             <UButton
               icon="i-lucide-pencil"
               size="sm"

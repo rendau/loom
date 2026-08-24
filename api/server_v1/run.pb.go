@@ -240,17 +240,20 @@ func (x *TaskInstanceMain) GetRetryAt() *timestamppb.Timestamp {
 }
 
 type AttemptMain struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Task          string                 `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
-	Attempt       int32                  `protobuf:"varint,2,opt,name=attempt,proto3" json:"attempt,omitempty"`
-	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"` // starting | running | success | failed
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
-	FinishedAt    *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=finished_at,json=finishedAt,proto3,oneof" json:"finished_at,omitempty"`
-	ExitCode      *int32                 `protobuf:"varint,7,opt,name=exit_code,json=exitCode,proto3,oneof" json:"exit_code,omitempty"`
-	ExitReason    string                 `protobuf:"bytes,8,opt,name=exit_reason,json=exitReason,proto3" json:"exit_reason,omitempty"` // например OOMKilled, Error, launch_failed
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Task       string                 `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
+	Attempt    int32                  `protobuf:"varint,2,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	Status     string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"` // starting | running | success | failed
+	CreatedAt  *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	StartedAt  *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
+	FinishedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=finished_at,json=finishedAt,proto3,oneof" json:"finished_at,omitempty"`
+	ExitCode   *int32                 `protobuf:"varint,7,opt,name=exit_code,json=exitCode,proto3,oneof" json:"exit_code,omitempty"`
+	ExitReason string                 `protobuf:"bytes,8,opt,name=exit_reason,json=exitReason,proto3" json:"exit_reason,omitempty"` // например OOMKilled, Error, launch_failed
+	// Пик памяти по семплам executor'а (docker stats / metrics-server);
+	// приблизителен, отсутствует — не измерено.
+	PeakMemoryBytes *int64 `protobuf:"varint,9,opt,name=peak_memory_bytes,json=peakMemoryBytes,proto3,oneof" json:"peak_memory_bytes,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *AttemptMain) Reset() {
@@ -337,6 +340,13 @@ func (x *AttemptMain) GetExitReason() string {
 		return x.ExitReason
 	}
 	return ""
+}
+
+func (x *AttemptMain) GetPeakMemoryBytes() int64 {
+	if x != nil && x.PeakMemoryBytes != nil {
+		return *x.PeakMemoryBytes
+	}
+	return 0
 }
 
 type RunTriggerReq struct {
@@ -862,7 +872,7 @@ const file_server_v1_run_proto_rawDesc = "" +
 	"_queued_atB\r\n" +
 	"\v_started_atB\x0e\n" +
 	"\f_finished_atB\v\n" +
-	"\t_retry_at\"\x80\x03\n" +
+	"\t_retry_at\"\xc7\x03\n" +
 	"\vAttemptMain\x12\x12\n" +
 	"\x04task\x18\x01 \x01(\tR\x04task\x12\x18\n" +
 	"\aattempt\x18\x02 \x01(\x05R\aattempt\x12\x16\n" +
@@ -875,11 +885,13 @@ const file_server_v1_run_proto_rawDesc = "" +
 	"finishedAt\x88\x01\x01\x12 \n" +
 	"\texit_code\x18\a \x01(\x05H\x02R\bexitCode\x88\x01\x01\x12\x1f\n" +
 	"\vexit_reason\x18\b \x01(\tR\n" +
-	"exitReasonB\r\n" +
+	"exitReason\x12/\n" +
+	"\x11peak_memory_bytes\x18\t \x01(\x03H\x03R\x0fpeakMemoryBytes\x88\x01\x01B\r\n" +
 	"\v_started_atB\x0e\n" +
 	"\f_finished_atB\f\n" +
 	"\n" +
-	"_exit_code\"[\n" +
+	"_exit_codeB\x14\n" +
+	"\x12_peak_memory_bytes\"[\n" +
 	"\rRunTriggerReq\x12\x19\n" +
 	"\bdag_name\x18\x01 \x01(\tR\adagName\x12/\n" +
 	"\x06params\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x06params\"&\n" +

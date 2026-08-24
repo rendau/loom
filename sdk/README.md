@@ -24,7 +24,7 @@ import (
 )
 
 func main() {
-	dag := loom.New("demo", loom.Schedule("0 3 * * *"))
+	dag := loom.New("demo")
 
 	extract := dag.Task("extract", func(_ context.Context, rt *loom.Runtime) error {
 		out, err := rt.Output("numbers") // io.Writer; Close опционален
@@ -73,11 +73,14 @@ go run . run --params='{"day":"x"}'  # с параметрами рана
 
 ## Ключевые опции
 
-- **Дага**: `Schedule(cron)`, `Catchup()`, `MaxActiveRuns(n)`.
+- **Дага**: `MaxActiveRuns(n)`. Cron-расписание и catchup в коде не задаются —
+  ими управляет админка control plane после регистрации дага.
 - **Таска**: `After(dep)` — ждать успеха отправителя; `AfterStreamed(dep)` —
   ко-старт и чтение по мере записи; `Retries(n)`, `RetryDelay(d)`,
   `Timeout(d)`, `Resources(spec)`, `Pool(name)`, `Priority(n)`,
-  `Secret(envName, secretName)`.
+  `Secret(envName, secretName)`, `Variable(envName, varName)` — инъекции
+  секретов и переменных control plane в env контейнера (в локальном режиме
+  не инжектятся — задавайте окружением процесса).
 - **Runtime**: `Output`/`Input` — стримы артефактов; `PushValue`/`PullValue` —
   мелкие значения (аналог XCom, ≤64KB); `Params`/`BindParams` — параметры
   рана; `LogicalDate` — «дата данных»; `Log()` — логгер (в распределённом

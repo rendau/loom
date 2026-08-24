@@ -132,13 +132,13 @@ type errReadFn struct{ err error }
 
 func (e errReadFn) Error() string { return e.err.Error() }
 
-// ReadTaskLog читает лог попытки с artifact-сервера, отдавая строки батчами
-// в fn; при follow=true — до финализации лога. Обрыв соединения (рестарт
-// artifact-сервера) переживается реконнектом с продолжением с последней
-// отданной строки (after_seq) — читатель не замечает рестарта и не получает
-// дублей.
-func (s *Service) ReadTaskLog(ctx context.Context, key tasklogModel.AttemptKey, follow bool, fn func([]tasklogModel.Entry) error) error {
-	var seq int64
+// ReadTaskLog читает лог попытки с artifact-сервера начиная со строки
+// afterSeq+1, отдавая строки батчами в fn; при follow=true — до финализации
+// лога. Обрыв соединения (рестарт artifact-сервера) переживается
+// реконнектом с продолжением с последней отданной строки (after_seq) —
+// читатель не замечает рестарта и не получает дублей.
+func (s *Service) ReadTaskLog(ctx context.Context, key tasklogModel.AttemptKey, afterSeq int64, follow bool, fn func([]tasklogModel.Entry) error) error {
+	seq := afterSeq
 	delay := readReconnectMinDelay
 
 	for {

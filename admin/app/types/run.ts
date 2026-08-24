@@ -56,4 +56,6 @@ export interface Attempt {
   finished_at?: string
   exit_code?: number
   exit_reason: string
+  // Пик памяти по семплам executor'а; int64 в protojson — строка.
+  peak_memory_bytes?: string
 }

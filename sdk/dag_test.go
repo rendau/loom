@@ -15,7 +15,7 @@ func nopTask(context.Context, *Runtime) error {
 
 func TestValidate(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
-		d := New("ok_dag", Schedule("0 3 * * *"))
+		d := New("ok_dag")
 		a := d.Task("a", nopTask)
 		b := d.Task("b", nopTask, After(a))
 		d.Task("c", nopTask, AfterStreamed(b))
@@ -82,7 +82,7 @@ func TestValidate(t *testing.T) {
 }
 
 func TestManifest(t *testing.T) {
-	d := New("etl", Schedule("0 3 * * *"))
+	d := New("etl")
 	a := d.Task("extract", nopTask,
 		Retries(2), RetryDelay(45*time.Second), Timeout(10*time.Minute),
 		Resources(ResourceSpec{CPURequest: "250m", MemoryLimit: "512Mi"}))
@@ -93,7 +93,6 @@ func TestManifest(t *testing.T) {
 
 	assert.Equal(t, Version, m.SDKVersion)
 	assert.Equal(t, "etl", m.Name)
-	assert.Equal(t, "0 3 * * *", m.Schedule)
 	require.Len(t, m.Tasks, 3)
 
 	assert.Equal(t, TaskManifest{

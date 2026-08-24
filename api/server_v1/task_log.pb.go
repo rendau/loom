@@ -142,11 +142,13 @@ func (x *TaskLogEntry) GetLine() string {
 }
 
 type ReadTaskLogRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	Task          string                 `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
-	Attempt       int32                  `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"`
-	Follow        bool                   `protobuf:"varint,4,opt,name=follow,proto3" json:"follow,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	RunId   string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	Task    string                 `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
+	Attempt int32                  `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	Follow  bool                   `protobuf:"varint,4,opt,name=follow,proto3" json:"follow,omitempty"`
+	// Сколько первых строк пропустить (клиент уже получил их до обрыва).
+	AfterSeq      int64 `protobuf:"varint,5,opt,name=after_seq,json=afterSeq,proto3" json:"after_seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -209,6 +211,13 @@ func (x *ReadTaskLogRequest) GetFollow() bool {
 	return false
 }
 
+func (x *ReadTaskLogRequest) GetAfterSeq() int64 {
+	if x != nil {
+		return x.AfterSeq
+	}
+	return 0
+}
+
 type ReadTaskLogResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Entries       []*TaskLogEntry        `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
@@ -262,12 +271,13 @@ const file_server_v1_task_log_proto_rawDesc = "" +
 	"\n" +
 	"ts_unix_ms\x18\x01 \x01(\x03R\btsUnixMs\x120\n" +
 	"\x06source\x18\x02 \x01(\x0e2\x18.server_v1.TaskLogSourceR\x06source\x12\x12\n" +
-	"\x04line\x18\x03 \x01(\tR\x04line\"q\n" +
+	"\x04line\x18\x03 \x01(\tR\x04line\"\x8e\x01\n" +
 	"\x12ReadTaskLogRequest\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x12\n" +
 	"\x04task\x18\x02 \x01(\tR\x04task\x12\x18\n" +
 	"\aattempt\x18\x03 \x01(\x05R\aattempt\x12\x16\n" +
-	"\x06follow\x18\x04 \x01(\bR\x06follow\"H\n" +
+	"\x06follow\x18\x04 \x01(\bR\x06follow\x12\x1b\n" +
+	"\tafter_seq\x18\x05 \x01(\x03R\bafterSeq\"H\n" +
 	"\x13ReadTaskLogResponse\x121\n" +
 	"\aentries\x18\x01 \x03(\v2\x17.server_v1.TaskLogEntryR\aentries*\x9d\x01\n" +
 	"\rTaskLogSource\x12\x1f\n" +

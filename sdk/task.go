@@ -22,11 +22,17 @@ type Task struct {
 	pool       string
 	priority   int
 	secrets    []secretRef
+	variables  []variableRef
 }
 
 type secretRef struct {
 	env    string // имя env-переменной в контейнере таска
 	secret string // имя секрета на control plane
+}
+
+type variableRef struct {
+	env      string // имя env-переменной в контейнере таска
+	variable string // имя переменной на control plane
 }
 
 type taskDep struct {
@@ -113,4 +119,15 @@ func Priority(n int) TaskOption {
 // игнорируется — задавайте переменную окружением процесса.
 func Secret(envName, secretName string) TaskOption {
 	return func(t *Task) { t.secrets = append(t.secrets, secretRef{env: envName, secret: secretName}) }
+}
+
+// Variable инъектит переменную control plane в env контейнера таска:
+// значение переменной varName попадёт в envName. В отличие от секрета,
+// значение переменной видно в админке. Скоуп резолвится на control plane:
+// локальная переменная дага перекрывает глобальную с тем же именем;
+// отсутствующая на момент запуска переменная валит попытку (launch_failed).
+// Читайте значение обычным os.Getenv. В локальном режиме игнорируется —
+// задавайте переменную окружением процесса.
+func Variable(envName, varName string) TaskOption {
+	return func(t *Task) { t.variables = append(t.variables, variableRef{env: envName, variable: varName}) }
 }

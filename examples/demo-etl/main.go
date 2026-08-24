@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	dag := loom.New("demo_etl", loom.Schedule("0 3 * * *"))
+	dag := loom.New("demo_etl")
 
 	extract := dag.Task("extract", func(_ context.Context, rt *loom.Runtime) error {
 		out, err := rt.Output("orders")

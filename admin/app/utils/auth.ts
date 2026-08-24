@@ -1,13 +1,14 @@
-// Admin-токен API (env ADMIN_TOKEN на server; пусто — auth выключен, dev):
-// хранится в localStorage, api-клиент подставляет его заголовком
-// Authorization: Bearer. authNeeded — флаг «сервер ответил 401»: app.vue
-// показывает модалку ввода токена (AuthTokenModal).
+// Сессия админки: opaque-токен от AuthService.Login в localStorage;
+// api-клиент подставляет его заголовком Authorization: Bearer.
+// sessionExpired — флаг «сервер ответил 401»: middleware уводит на /login.
 
-const TOKEN_KEY = 'loom-admin-token'
+const TOKEN_KEY = 'loom-session'
 
-export const authNeeded = ref(false)
+export const sessionExpired = ref(false)
 
 export function getAuthToken(): string {
+  if (import.meta.server)
+    return ''
   return localStorage.getItem(TOKEN_KEY) ?? ''
 }
 

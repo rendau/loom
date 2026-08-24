@@ -1,8 +1,13 @@
 # loom admin
 
 Админка loom: Nuxt 4 SPA (`ssr: false`) + Nuxt UI v4 поверх gateway API
-control plane (grpc-gateway, порт 8082). Даги, раны, статусы тасков и
-попыток, live-логи (follow).
+control plane (grpc-gateway, порт 8082). Дашборд, даги (карточка со схемой
+до первого запуска), раны с метриками, live-логи (follow, разбор
+logfmt/JSON/ANSI), переменные и секреты со скоупами, пользователи.
+
+Вход — по логину и паролю (сессия хранится в localStorage). Пока в системе
+нет ни одного пользователя, админка открывает экран первичной настройки
+(`/setup`) — там создаётся первый администратор.
 
 ## Разработка
 
@@ -38,9 +43,13 @@ gateway, каким его видит браузер). В деве `/config.js` 
 app/
   api/         # тонкие типизированные вызовы gateway (client.ts — flattenQuery)
   types/       # DTO (зеркало api/proto/server_v1)
-  composables/ # useApiAction (loading + тосты)
-  utils/       # config (рантайм-конфиг), format (даты), status (цвета/подписи)
-  layouts/     # default (UDashboardGroup/Sidebar)
-  pages/       # /dags, /runs, /runs/[id]
-  components/  # run/LogSlideover — просмотр лога попытки со стримом follow
+  composables/ # useApiAction (loading + тосты), useAuth (сессия и права)
+  utils/       # config (рантайм-конфиг), format (даты, байты), status,
+               # logparse (logfmt/JSON/ANSI), auth (токен сессии)
+  middleware/  # auth.global — гард сессии (/login, /setup)
+  layouts/     # default (UDashboardGroup/Sidebar), auth (вход без сайдбара)
+  pages/       # / (дашборд), /dags, /dags/[name], /runs, /runs/[id],
+               # /runs/[id]/log, /variables, /secrets, /pools, /users
+  components/  # dag/* — модалки дага; run/LogViewer — просмотр лога;
+               # dashboard/* — карточки и SVG-графики
 ```

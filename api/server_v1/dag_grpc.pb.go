@@ -20,13 +20,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DagService_RegisterDag_FullMethodName      = "/server_v1.DagService/RegisterDag"
-	DagService_ListDag_FullMethodName          = "/server_v1.DagService/ListDag"
-	DagService_GetDag_FullMethodName           = "/server_v1.DagService/GetDag"
-	DagService_SetDagPaused_FullMethodName     = "/server_v1.DagService/SetDagPaused"
-	DagService_SetDagAutoUpdate_FullMethodName = "/server_v1.DagService/SetDagAutoUpdate"
-	DagService_DeleteDag_FullMethodName        = "/server_v1.DagService/DeleteDag"
-	DagService_PushDagManifest_FullMethodName  = "/server_v1.DagService/PushDagManifest"
+	DagService_RegisterDag_FullMethodName         = "/server_v1.DagService/RegisterDag"
+	DagService_ListDagRegistration_FullMethodName = "/server_v1.DagService/ListDagRegistration"
+	DagService_GetDagRegistration_FullMethodName  = "/server_v1.DagService/GetDagRegistration"
+	DagService_ListDag_FullMethodName             = "/server_v1.DagService/ListDag"
+	DagService_GetDag_FullMethodName              = "/server_v1.DagService/GetDag"
+	DagService_SetDagSchedule_FullMethodName      = "/server_v1.DagService/SetDagSchedule"
+	DagService_SetDagPaused_FullMethodName        = "/server_v1.DagService/SetDagPaused"
+	DagService_SetDagAutoUpdate_FullMethodName    = "/server_v1.DagService/SetDagAutoUpdate"
+	DagService_DeleteDag_FullMethodName           = "/server_v1.DagService/DeleteDag"
+	DagService_PushDagManifest_FullMethodName     = "/server_v1.DagService/PushDagManifest"
 )
 
 // DagServiceClient is the client API for DagService service.
@@ -39,11 +42,22 @@ const (
 // `describe`, валидирует полученный JSON-манифест и сохраняет даг, пиннуя
 // его к digest образа на момент регистрации.
 type DagServiceClient interface {
-	// RegisterDag регистрирует (или перерегистрирует — новая версия образа)
-	// даг по url docker-образа. Имя дага берётся из манифеста.
+	// RegisterDag ставит регистрацию (или перерегистрацию — новая версия
+	// образа) дага в очередь и сразу возвращает id записи регистрации:
+	// pull + describe выполняются асинхронно, статус — через
+	// Get/ListDagRegistration. Имя дага берётся из манифеста.
 	RegisterDag(ctx context.Context, in *DagRegisterReq, opts ...grpc.CallOption) (*DagRegisterRep, error)
+	// ListDagRegistration — записи очереди регистраций, новые первыми:
+	// активные (pending|running) и недавно завершённые (старые чистятся по
+	// TTL). source=auto — перерегистрация авто-обновления по digest.
+	ListDagRegistration(ctx context.Context, in *DagRegistrationListReq, opts ...grpc.CallOption) (*DagRegistrationListRep, error)
+	GetDagRegistration(ctx context.Context, in *DagRegistrationGetReq, opts ...grpc.CallOption) (*DagRegistrationMain, error)
 	ListDag(ctx context.Context, in *DagListReq, opts ...grpc.CallOption) (*DagListRep, error)
 	GetDag(ctx context.Context, in *DagGetReq, opts ...grpc.CallOption) (*DagMain, error)
+	// SetDagSchedule задаёт cron-расписание и catchup дага. Расписание живёт
+	// только на control plane (манифест дага его не содержит); пустая строка
+	// снимает расписание.
+	SetDagSchedule(ctx context.Context, in *DagSetScheduleReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// SetDagPaused ставит даг на паузу / снимает с паузы. Пауза останавливает
 	// только запуски по расписанию; ручной триггер работает.
 	SetDagPaused(ctx context.Context, in *DagSetPausedReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
@@ -78,6 +92,26 @@ func (c *dagServiceClient) RegisterDag(ctx context.Context, in *DagRegisterReq, 
 	return out, nil
 }
 
+func (c *dagServiceClient) ListDagRegistration(ctx context.Context, in *DagRegistrationListReq, opts ...grpc.CallOption) (*DagRegistrationListRep, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DagRegistrationListRep)
+	err := c.cc.Invoke(ctx, DagService_ListDagRegistration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dagServiceClient) GetDagRegistration(ctx context.Context, in *DagRegistrationGetReq, opts ...grpc.CallOption) (*DagRegistrationMain, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DagRegistrationMain)
+	err := c.cc.Invoke(ctx, DagService_GetDagRegistration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *dagServiceClient) ListDag(ctx context.Context, in *DagListReq, opts ...grpc.CallOption) (*DagListRep, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DagListRep)
@@ -92,6 +126,16 @@ func (c *dagServiceClient) GetDag(ctx context.Context, in *DagGetReq, opts ...gr
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DagMain)
 	err := c.cc.Invoke(ctx, DagService_GetDag_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dagServiceClient) SetDagSchedule(ctx context.Context, in *DagSetScheduleReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, DagService_SetDagSchedule_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -148,11 +192,22 @@ func (c *dagServiceClient) PushDagManifest(ctx context.Context, in *DagPushManif
 // `describe`, валидирует полученный JSON-манифест и сохраняет даг, пиннуя
 // его к digest образа на момент регистрации.
 type DagServiceServer interface {
-	// RegisterDag регистрирует (или перерегистрирует — новая версия образа)
-	// даг по url docker-образа. Имя дага берётся из манифеста.
+	// RegisterDag ставит регистрацию (или перерегистрацию — новая версия
+	// образа) дага в очередь и сразу возвращает id записи регистрации:
+	// pull + describe выполняются асинхронно, статус — через
+	// Get/ListDagRegistration. Имя дага берётся из манифеста.
 	RegisterDag(context.Context, *DagRegisterReq) (*DagRegisterRep, error)
+	// ListDagRegistration — записи очереди регистраций, новые первыми:
+	// активные (pending|running) и недавно завершённые (старые чистятся по
+	// TTL). source=auto — перерегистрация авто-обновления по digest.
+	ListDagRegistration(context.Context, *DagRegistrationListReq) (*DagRegistrationListRep, error)
+	GetDagRegistration(context.Context, *DagRegistrationGetReq) (*DagRegistrationMain, error)
 	ListDag(context.Context, *DagListReq) (*DagListRep, error)
 	GetDag(context.Context, *DagGetReq) (*DagMain, error)
+	// SetDagSchedule задаёт cron-расписание и catchup дага. Расписание живёт
+	// только на control plane (манифест дага его не содержит); пустая строка
+	// снимает расписание.
+	SetDagSchedule(context.Context, *DagSetScheduleReq) (*emptypb.Empty, error)
 	// SetDagPaused ставит даг на паузу / снимает с паузы. Пауза останавливает
 	// только запуски по расписанию; ручной триггер работает.
 	SetDagPaused(context.Context, *DagSetPausedReq) (*emptypb.Empty, error)
@@ -180,11 +235,20 @@ type UnimplementedDagServiceServer struct{}
 func (UnimplementedDagServiceServer) RegisterDag(context.Context, *DagRegisterReq) (*DagRegisterRep, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterDag not implemented")
 }
+func (UnimplementedDagServiceServer) ListDagRegistration(context.Context, *DagRegistrationListReq) (*DagRegistrationListRep, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListDagRegistration not implemented")
+}
+func (UnimplementedDagServiceServer) GetDagRegistration(context.Context, *DagRegistrationGetReq) (*DagRegistrationMain, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDagRegistration not implemented")
+}
 func (UnimplementedDagServiceServer) ListDag(context.Context, *DagListReq) (*DagListRep, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListDag not implemented")
 }
 func (UnimplementedDagServiceServer) GetDag(context.Context, *DagGetReq) (*DagMain, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetDag not implemented")
+}
+func (UnimplementedDagServiceServer) SetDagSchedule(context.Context, *DagSetScheduleReq) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetDagSchedule not implemented")
 }
 func (UnimplementedDagServiceServer) SetDagPaused(context.Context, *DagSetPausedReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetDagPaused not implemented")
@@ -237,6 +301,42 @@ func _DagService_RegisterDag_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DagService_ListDagRegistration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DagRegistrationListReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DagServiceServer).ListDagRegistration(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DagService_ListDagRegistration_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DagServiceServer).ListDagRegistration(ctx, req.(*DagRegistrationListReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DagService_GetDagRegistration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DagRegistrationGetReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DagServiceServer).GetDagRegistration(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DagService_GetDagRegistration_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DagServiceServer).GetDagRegistration(ctx, req.(*DagRegistrationGetReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DagService_ListDag_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DagListReq)
 	if err := dec(in); err != nil {
@@ -269,6 +369,24 @@ func _DagService_GetDag_Handler(srv interface{}, ctx context.Context, dec func(i
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DagServiceServer).GetDag(ctx, req.(*DagGetReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DagService_SetDagSchedule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DagSetScheduleReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DagServiceServer).SetDagSchedule(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DagService_SetDagSchedule_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DagServiceServer).SetDagSchedule(ctx, req.(*DagSetScheduleReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -357,12 +475,24 @@ var DagService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DagService_RegisterDag_Handler,
 		},
 		{
+			MethodName: "ListDagRegistration",
+			Handler:    _DagService_ListDagRegistration_Handler,
+		},
+		{
+			MethodName: "GetDagRegistration",
+			Handler:    _DagService_GetDagRegistration_Handler,
+		},
+		{
 			MethodName: "ListDag",
 			Handler:    _DagService_ListDag_Handler,
 		},
 		{
 			MethodName: "GetDag",
 			Handler:    _DagService_GetDag_Handler,
+		},
+		{
+			MethodName: "SetDagSchedule",
+			Handler:    _DagService_SetDagSchedule_Handler,
 		},
 		{
 			MethodName: "SetDagPaused",

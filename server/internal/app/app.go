@@ -18,10 +18,13 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/rendau/loom/api/server_v1"
+	"github.com/rendau/loom/server/internal/authz"
 	"github.com/rendau/loom/server/internal/config"
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
 	dagDb "github.com/rendau/loom/server/internal/domain/dag/repo/db"
 	dagService "github.com/rendau/loom/server/internal/domain/dag/service"
+	dagregDb "github.com/rendau/loom/server/internal/domain/dagreg/repo/db"
+	dagregService "github.com/rendau/loom/server/internal/domain/dagreg/service"
 	domainDagSync "github.com/rendau/loom/server/internal/domain/dagsync"
 	poolDb "github.com/rendau/loom/server/internal/domain/pool/repo/db"
 	poolService "github.com/rendau/loom/server/internal/domain/pool/service"
@@ -31,6 +34,12 @@ import (
 	domainScheduler "github.com/rendau/loom/server/internal/domain/scheduler"
 	secretDb "github.com/rendau/loom/server/internal/domain/secret/repo/db"
 	secretService "github.com/rendau/loom/server/internal/domain/secret/service"
+	statsDb "github.com/rendau/loom/server/internal/domain/stats/repo/db"
+	statsService "github.com/rendau/loom/server/internal/domain/stats/service"
+	userDb "github.com/rendau/loom/server/internal/domain/user/repo/db"
+	userService "github.com/rendau/loom/server/internal/domain/user/service"
+	variableDb "github.com/rendau/loom/server/internal/domain/variable/repo/db"
+	variableService "github.com/rendau/loom/server/internal/domain/variable/service"
 	grpcHandler "github.com/rendau/loom/server/internal/handler/grpc"
 	"github.com/rendau/loom/server/internal/service/artifactcli"
 	"github.com/rendau/loom/server/internal/service/dockercli"
@@ -43,7 +52,10 @@ import (
 	poolUsc "github.com/rendau/loom/server/internal/usecase/pool"
 	runUsc "github.com/rendau/loom/server/internal/usecase/run"
 	secretUsc "github.com/rendau/loom/server/internal/usecase/secret"
+	statsUsc "github.com/rendau/loom/server/internal/usecase/stats"
 	tasklogUsc "github.com/rendau/loom/server/internal/usecase/tasklog"
+	userUsc "github.com/rendau/loom/server/internal/usecase/user"
+	variableUsc "github.com/rendau/loom/server/internal/usecase/variable"
 )
 
 // executorI — исполняемая реализация executor-порта с жизненным циклом
@@ -61,6 +73,9 @@ type App struct {
 	scheduler   *domainScheduler.Scheduler
 	retention   *domainRetention.Service
 	dagSync     *domainDagSync.Service
+	userSvc     *userService.Service
+	dagReg      *dagregService.Service
+	dagUsecase  *dagUsc.Usecase // обработчик очереди регистраций (dagReg.Start)
 
 	grpcServer       *GrpcServer
 	httpServer       *http.Server
@@ -100,6 +115,11 @@ func (a *App) Init() {
 	secretSvc, err := secretService.New(secretDb.New(repoBase), config.Conf.SecretKey)
 	errCheck(err, "secret service init")
 
+	variableSvc := variableService.New(variableDb.New(repoBase))
+	a.userSvc = userService.New(userDb.New(repoBase), txm)
+	statsSvc := statsService.New(statsDb.New(repoBase))
+	authzChecker := authz.New(a.userSvc)
+
 	// services
 	a.artifactCli, err = artifactcli.New(config.Conf.ArtifactAddr)
 	errCheck(err, "artifact client init")
@@ -116,10 +136,10 @@ func (a *App) Init() {
 	var schedulerNudger runUsc.SchedulerI = nopScheduler{}
 	switch config.Conf.Executor {
 	case "k8s":
-		clientset, cErr := k8sclient.New(config.Conf.K8sKubeconfig)
+		clientset, metricsClient, cErr := k8sclient.New(config.Conf.K8sKubeconfig)
 		errCheck(cErr, "k8s client init")
-		a.executor = k8sexecutor.New(clientset, config.Conf.K8sNamespace, config.Conf.K8sJobTTL,
-			config.Conf.K8sImagePullSecret)
+		a.executor = k8sexecutor.New(clientset, metricsClient, config.Conf.K8sNamespace,
+			config.Conf.K8sJobTTL, config.Conf.K8sImagePullSecret, config.Conf.K8sMetricsTick)
 
 		describer := k8sdescriber.New(clientset, config.Conf.K8sNamespace,
 			config.Conf.TaskServerAddr, config.Conf.K8sDescribeTimeout, config.Conf.K8sImagePullSecret)
@@ -135,7 +155,7 @@ func (a *App) Init() {
 
 	if a.executor != nil {
 		a.scheduler = domainScheduler.New(
-			runSvc, dagSvc, a.executor, a.artifactCli, a.artifactCli, secretSvc,
+			runSvc, dagSvc, a.executor, a.artifactCli, a.artifactCli, secretSvc, variableSvc,
 			domainScheduler.Config{
 				Tick:          config.Conf.SchedTick,
 				CronTick:      config.Conf.SchedCronTick,
@@ -152,21 +172,30 @@ func (a *App) Init() {
 	}
 
 	// retention
-	a.retention = domainRetention.New(runSvc, a.artifactCli, a.artifactCli,
+	a.retention = domainRetention.New(runSvc, a.artifactCli, a.artifactCli, a.userSvc,
 		config.Conf.RunTTL, config.Conf.RetentionTick)
 
+	// очередь асинхронных регистраций дагов; обработчик (usecase) задаётся
+	// при Start — он же клиент очереди
+	a.dagReg = dagregService.New(dagregDb.New(repoBase),
+		config.Conf.DagRegTick, config.Conf.DagRegStale, config.Conf.DagRegTTL)
+
 	// usecases
-	dagUsecase := dagUsc.New(dagSvc, imageInspector, poolSvc, manifestSink)
+	dagUsecase := dagUsc.New(dagSvc, imageInspector, poolSvc, manifestSink, a.dagReg, authzChecker)
+	a.dagUsecase = dagUsecase
 
-	// авто-обновление дагов: digest-чек registry + авто-
-	// перерегистрация через обычный Register-флоу usecase'а
+	// авто-обновление дагов: digest-чек registry + постановка
+	// перерегистрации в очередь dagreg
 	a.dagSync = domainDagSync.New(dagSvc, registrycli.New(config.Conf.RegistryAuthFile),
-		dagUsecase, config.Conf.DagSyncTick)
+		a.dagReg, config.Conf.DagSyncTick)
 
-	runUsecase := runUsc.New(runSvc, dagSvc, schedulerNudger)
+	runUsecase := runUsc.New(runSvc, dagSvc, schedulerNudger, authzChecker)
 	tasklogUsecase := tasklogUsc.New(a.artifactCli, runSvc)
 	poolUsecase := poolUsc.New(poolSvc)
-	secretUsecase := secretUsc.New(secretSvc)
+	secretUsecase := secretUsc.New(secretSvc, authzChecker)
+	variableUsecase := variableUsc.New(variableSvc, authzChecker)
+	userUsecase := userUsc.New(a.userSvc)
+	statsUsecase := statsUsc.New(statsSvc)
 
 	// grpc server
 	{
@@ -176,14 +205,22 @@ func (a *App) Init() {
 		taskValueHandler := grpcHandler.NewTaskValue(runUsecase)
 		poolHandler := grpcHandler.NewPool(poolUsecase)
 		secretHandler := grpcHandler.NewSecret(secretUsecase)
+		variableHandler := grpcHandler.NewVariable(variableUsecase)
+		authHandler := grpcHandler.NewAuth(userUsecase, BearerToken)
+		userHandler := grpcHandler.NewUser(userUsecase)
+		dashboardHandler := grpcHandler.NewDashboard(statsUsecase)
 
-		a.grpcServer = NewGrpcServer("main", func(server *grpc.Server) {
+		a.grpcServer = NewGrpcServer("main", a.userSvc, func(server *grpc.Server) {
 			pb.RegisterDagServiceServer(server, dagHandler)
 			pb.RegisterRunServiceServer(server, runHandler)
 			pb.RegisterTaskLogServiceServer(server, tasklogHandler)
 			pb.RegisterTaskValueServiceServer(server, taskValueHandler)
 			pb.RegisterPoolServiceServer(server, poolHandler)
 			pb.RegisterSecretServiceServer(server, secretHandler)
+			pb.RegisterVariableServiceServer(server, variableHandler)
+			pb.RegisterAuthServiceServer(server, authHandler)
+			pb.RegisterUserServiceServer(server, userHandler)
+			pb.RegisterDashboardServiceServer(server, dashboardHandler)
 		})
 	}
 
@@ -206,6 +243,10 @@ func (a *App) Init() {
 				pb.RegisterTaskValueServiceHandler,
 				pb.RegisterPoolServiceHandler,
 				pb.RegisterSecretServiceHandler,
+				pb.RegisterVariableServiceHandler,
+				pb.RegisterAuthServiceHandler,
+				pb.RegisterUserServiceHandler,
+				pb.RegisterDashboardServiceHandler,
 			}
 			for _, h := range handlers {
 				if hErr := h(context.Background(), mux, conn); hErr != nil {
@@ -298,6 +339,7 @@ func (a *App) Start() {
 
 	a.retention.Start()
 	a.dagSync.Start()
+	a.dagReg.Start(a.dagUsecase)
 }
 
 func (a *App) Listen() {
@@ -320,6 +362,7 @@ func (a *App) Stop() {
 	}
 	a.retention.Stop()
 	a.dagSync.Stop()
+	a.dagReg.Stop()
 
 	// http-gw server
 	{

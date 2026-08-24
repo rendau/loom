@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package server_v1;
+
+option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// VariableService — переменные для env-инъекции в поды тасков: как секреты,
+// но значения хранятся открыто и видны в админке.
+// Скоуп: dag_name = "" — глобальный, иначе локальный для дага; локальный
+// перекрывает глобальный с тем же именем при запуске попытки.
+service VariableService {
+  // ListVariable возвращает переменные со значениями.
+  rpc ListVariable(VariableListReq) returns (VariableListRep) {
+    option (google.api.http) = {
+      get: "/variable"
+    };
+  }
+
+  // SetVariable создаёт переменную или перезаписывает значение существующей.
+  rpc SetVariable(VariableSetReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      put: "/variable/{name}"
+      body: "*"
+    };
+  }
+
+  rpc DeleteVariable(VariableDeleteReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/variable/{name}"
+    };
+  }
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message VariableMain {
+  string name = 1;
+  string value = 2;
+  // Скоуп: пусто — глобальный, иначе имя дага.
+  string dag_name = 3;
+  google.protobuf.Timestamp created_at = 4;
+  optional google.protobuf.Timestamp modified_at = 5;
+}
+
+message VariableListReq {
+  // Отсутствует — все скоупы; "" — только глобальные; имя дага — только его.
+  optional string dag_name = 1;
+}
+
+message VariableListRep {
+  repeated VariableMain results = 1;
+}
+
+message VariableSetReq {
+  string name = 1;
+  string value = 2;
+  string dag_name = 3; // пусто — глобальный скоуп
+}
+
+message VariableDeleteReq {
+  string name = 1;
+  string dag_name = 2; // пусто — глобальный скоуп
+}

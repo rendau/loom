@@ -135,6 +135,9 @@ type Attempt struct {
 	FinishedAt time.Time
 	ExitCode   *int32 // nil — нет данных (например pod пропал)
 	ExitReason string // Error, OOMKilled, launch_failed, ...
+	// Пик памяти по семплам executor'а; nil — не измерено (короткая попытка
+	// или семплер недоступен).
+	PeakMemoryBytes *int64
 }
 
 // AttemptRef — идентификация попытки.
@@ -196,6 +199,9 @@ type LaunchSpec struct {
 const (
 	ExecEventStarted  = "started"
 	ExecEventFinished = "finished"
+	// ExecEventMetrics — семпл потребления живой попытки; пик пишется в БД
+	// по мере выполнения, чтобы не потеряться при смерти таска/OOM.
+	ExecEventMetrics = "metrics"
 )
 
 // ExecEvent — событие жизненного цикла попытки от executor'а.
@@ -203,4 +209,6 @@ type ExecEvent struct {
 	Ref  AttemptRef
 	Type string
 	Exit *ExitInfo // для finished
+	// PeakMemoryBytes — для metrics: текущий пик памяти попытки.
+	PeakMemoryBytes *int64
 }

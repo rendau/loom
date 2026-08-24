@@ -16,20 +16,24 @@ docker-образ = один даг, таски запускаются экзе�
   streamstore-каталоги: `DATA_DIR` и `LOG_DIR` — у лог-стримов свой
   жизненный цикл), каркас по gotemplate
 - `server/` — control plane, **stateless** (без дискового состояния):
-  Postgres (mobone) + gRPC/gateway, регистрация дагов через `describe`
-  (docker-CLI, а при `EXECUTOR=k8s` — одноразовый k8s Job, `k8sdescriber`),
-  планировщик (очередь `FOR UPDATE SKIP LOCKED`, чистый planner +
-  executor-порт, cron-триггер по `next_run_at` с catchup-режимом, ретраи
-  `up_for_retry` с backoff, таймаут-watchdog, зомби-reconcile), executor'ы
-  k8s и docker (`EXECUTOR=k8s|docker|none`), retention (`RUN_TTL`), ретрай
-  таска/подграфа (`RetryTask`, только на завершённом ране), параметры рана
-  и `logical_date`, backfill, значения тасков (XCom, `run_value`), пулы
-  слотов с приоритетами и `max_active_runs`, секреты с env-инъекцией
-  (`SECRET_KEY`). Логи не хранит — финализирует (`FinishTaskLog`) и
+  Postgres (mobone) + gRPC/gateway, **асинхронная** регистрация дагов
+  (очередь `dag_registration`, claim `FOR UPDATE SKIP LOCKED`; сам
+  `describe` — docker-CLI, а при `EXECUTOR=k8s` — одноразовый k8s Job,
+  `k8sdescriber`), планировщик (очередь `FOR UPDATE SKIP LOCKED`, чистый
+  planner + executor-порт, cron-триггер по `next_run_at` с catchup-режимом,
+  ретраи `up_for_retry` с backoff, таймаут-watchdog, зомби-reconcile),
+  executor'ы k8s и docker (`EXECUTOR=k8s|docker|none`), retention
+  (`RUN_TTL`), ретрай таска/подграфа (`RetryTask`, только на завершённом
+  ране), параметры рана и `logical_date`, backfill, значения тасков (XCom,
+  `run_value`), пулы слотов с приоритетами и `max_active_runs`, переменные
+  и секреты с env-инъекцией (`SECRET_KEY`), пользователи с ролями,
+  агрегаты дашборда. Логи не хранит — финализирует (`FinishTaskLog`) и
   проксирует чтение (`ReadTaskLog`) с artifact-сервера
 - `examples/` — примеры дагов
 - `admin/` — админка: Nuxt 4 SPA (`ssr: false`) + Nuxt UI v4 (НЕ Naive UI;
-  образец — проект caravaneer). Раздаётся server'ом на `ADMIN_PORT` (8081)
+  образец — проект caravaneer). Дашборд, карточка дага (схема до первого
+  запуска), метрики ранов, читабельные логи, переменные/секреты,
+  пользователи. Раздаётся server'ом на `ADMIN_PORT` (8081)
   из `ADMIN_DIR` (`make build-admin`), рантайм-конфиг — `/config.js` из env
   `ADMIN_API_BASE_URL`; дев — `pnpm dev` + `.env` (+ `HTTP_CORS=true` на
   gateway). После правок: `pnpm typecheck` → `pnpm lint`. См. `admin/README.md`
@@ -50,8 +54,35 @@ docker-образ = один даг, таски запускаются экзе�
   «дата данных» — `rt.LogicalDate()`.
 - Распределённый режим: `run --task=<name>` + env-контракт `LOOM_*`;
   программный вход — `DAG.RunTask`. Внутрикластерные RPC (SDK ↔ servers) не
-  аутентифицируются (токенов нет — осознанное решение); админские RPC
-  control plane закрыты `ADMIN_TOKEN`.
+  аутентифицируются (токенов нет — осознанное решение).
+- **Расписание задаётся в админке, не в коде дага**: `schedule`/`catchup` —
+  колонки `dag` (RPC `SetDagSchedule`), в манифесте `describe` их нет.
+  В SDK остался только `MaxActiveRuns` (свойство реализации пайплайна).
+- **Регистрация дага асинхронная**: `RegisterDag` кладёт запись в очередь и
+  сразу отдаёт `registration_id`; статусы (`pending|running|success|failed`)
+  админка поллит через `ListDagRegistration`. Авто-обновление по digest
+  (dagsync) ставит в ту же очередь с `source=auto` — отсюда индикация
+  «даг обновляется» в UI.
+- **Auth**: пользователи в Postgres (`app_user`, bcrypt), сессии — opaque-
+  токен, в БД только его sha256 (`session`); первый админ создаётся через
+  саму админку, пока пользователей нет (`CreateFirstAdmin`, race-safe через
+  `LOCK TABLE`). Роли: `admin` — всё; `user` — читает всё, меняет только
+  назначенные ему даги (`user_dag`): расписание/пауза, их переменные и
+  секреты, триггер/ретрай/backfill. Роль метода проверяет интерцептор
+  (`server/internal/app/auth.go`), права на конкретный даг — usecase через
+  `internal/authz`. `ADMIN_TOKEN` больше нет.
+- **Переменные и секреты** — два скоупа: глобальный (`dag_name = ''`) и
+  локальный для дага; локальный перекрывает глобальный при резолве в
+  `launch`. Значения переменных видны всем аутентифицированным, значение
+  секрета — по кнопке (`GetSecretValue`, только admin/владелец дага).
+  В SDK: `Secret(env, name)` и `Variable(env, name)` (env-пространство
+  общее — дубли ловит валидация манифеста).
+- **Метрики попыток**: пиковое потребление памяти семплирует executor
+  (docker — `docker stats --no-stream`; k8s — metrics.k8s.io, тик
+  `K8S_METRICS_TICK`, 0 — выключено) и шлёт событием `metrics` в тот же
+  канал, что started/finished; планировщик пишет `attempt.peak_memory_bytes`
+  (`greatest` — идемпотентно). Значение приблизительное: короткие спайки
+  между семплами теряются, у коротких попыток может остаться null.
 - Логи тасков: SDK → artifact-сервер (`artifact_v1.TaskLogService`,
   bidi-стрим с seq/ack) — **без потерь и дублей**, обрыв переживается
   реконнектом с досылкой неподтверждённого хвоста; дубль каждой строки в
@@ -66,7 +97,9 @@ docker-образ = один даг, таски запускаются экзе�
   - follow-читатель артефактов: переоткрытие со своего offset'а;
   - unary (values, finish, stat): gRPC retry policy;
   - полный буфер (32k строк лога / 4MiB записи) блокирует таск
-    (backpressure) — данные не дропаются, пока попытка жива.
+    (backpressure) — данные не дропаются, пока попытка жива;
+  - чтение лога админкой: `after_seq` в `server_v1.ReadTaskLog` — обрыв
+    follow-стрима переживается докачкой без потерь и дублей.
 
 ## Деплой
 

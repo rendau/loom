@@ -56,13 +56,14 @@ type Config struct {
 }
 
 type Scheduler struct {
-	runSvc   RunServiceI
-	dagSvc   DagServiceI
-	executor ExecutorI
-	artifact ArtifactI
-	tasklog  TaskLogI
-	secrets  SecretResolverI
-	cfg      Config
+	runSvc    RunServiceI
+	dagSvc    DagServiceI
+	executor  ExecutorI
+	artifact  ArtifactI
+	tasklog   TaskLogI
+	secrets   SecretResolverI
+	variables VariableResolverI
+	cfg       Config
 
 	nudgeCh   chan struct{}
 	ctx       context.Context
@@ -70,7 +71,7 @@ type Scheduler struct {
 	wg        sync.WaitGroup
 }
 
-func New(runSvc RunServiceI, dagSvc DagServiceI, executor ExecutorI, artifact ArtifactI, tasklog TaskLogI, secrets SecretResolverI, cfg Config) *Scheduler {
+func New(runSvc RunServiceI, dagSvc DagServiceI, executor ExecutorI, artifact ArtifactI, tasklog TaskLogI, secrets SecretResolverI, variables VariableResolverI, cfg Config) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Scheduler{
@@ -80,6 +81,7 @@ func New(runSvc RunServiceI, dagSvc DagServiceI, executor ExecutorI, artifact Ar
 		artifact:  artifact,
 		tasklog:   tasklog,
 		secrets:   secrets,
+		variables: variables,
 		cfg:       cfg,
 		nudgeCh:   make(chan struct{}, 1),
 		ctx:       ctx,
@@ -558,16 +560,27 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 		spec.Env[loom.EnvRunParams] = string(run.Params)
 	}
 
-	// секреты манифеста → env контейнера; отсутствующий секрет валит запуск
-	// (launch_failed), после добавления секрета попытку вернёт RetryTask
+	// секреты и переменные манифеста → env контейнера (локальный скоуп дага
+	// перекрывает глобальный); отсутствующее имя валит запуск (launch_failed),
+	// после добавления попытку вернёт RetryTask
 	if len(task.Secrets) > 0 {
 		names := lo.Uniq(lo.Map(task.Secrets, func(s dagModel.SecretRef, _ int) string { return s.Secret }))
-		values, err := s.secrets.ResolveValues(ctx, names)
+		values, err := s.secrets.ResolveValues(ctx, run.DagName, names)
 		if err != nil {
 			return fmt.Errorf("resolve secrets: %w", err)
 		}
 		for _, sec := range task.Secrets {
 			spec.Env[sec.Env] = string(values[sec.Secret])
+		}
+	}
+	if len(task.Variables) > 0 {
+		names := lo.Uniq(lo.Map(task.Variables, func(v dagModel.VariableRef, _ int) string { return v.Variable }))
+		values, err := s.variables.ResolveValues(ctx, run.DagName, names)
+		if err != nil {
+			return fmt.Errorf("resolve variables: %w", err)
+		}
+		for _, v := range task.Variables {
+			spec.Env[v.Env] = values[v.Variable]
 		}
 	}
 
@@ -611,6 +624,16 @@ func (s *Scheduler) handleEvent(ev runModel.ExecEvent) {
 	case runModel.ExecEventFinished:
 		exit := lo.FromPtr(ev.Exit)
 		s.finalize(ev.Ref, exit)
+
+	case runModel.ExecEventMetrics:
+		if ev.PeakMemoryBytes == nil {
+			return
+		}
+		// без Nudge: метрика не меняет план
+		if err := s.runSvc.SetAttemptPeakMemory(s.ctx, ev.Ref, *ev.PeakMemoryBytes); err != nil && s.ctx.Err() == nil {
+			slog.Error("set attempt peak memory", "run_id", ev.Ref.RunId, "task", ev.Ref.Task,
+				"attempt", ev.Ref.Attempt, "error", err)
+		}
 	}
 }
 

@@ -25,7 +25,7 @@ type GrpcServer struct {
 	server *grpc.Server
 }
 
-func NewGrpcServer(name string, register func(*grpc.Server)) *GrpcServer {
+func NewGrpcServer(name string, auth AuthenticatorI, register func(*grpc.Server)) *GrpcServer {
 	server := grpc.NewServer(
 		grpc.MaxSendMsgSize(math.MaxUint32),
 		grpc.MaxRecvMsgSize(math.MaxUint32),
@@ -38,8 +38,8 @@ func NewGrpcServer(name string, register func(*grpc.Server)) *GrpcServer {
 			Time:    10 * time.Second,
 			Timeout: 3 * time.Second,
 		}),
-		grpc.ChainUnaryInterceptor(unaryInterceptors()...),
-		grpc.ChainStreamInterceptor(streamInterceptors()...),
+		grpc.ChainUnaryInterceptor(unaryInterceptors(auth)...),
+		grpc.ChainStreamInterceptor(streamInterceptors(auth)...),
 	)
 
 	// register handlers
@@ -78,22 +78,22 @@ func (s *GrpcServer) Stop() {
 }
 
 // unaryInterceptors / streamInterceptors — цепочка: метрики (снаружи —
-// меряют всё), auth админских RPC (при ADMIN_TOKEN), recovery (внутри —
-// паника хендлера станет Internal и попадёт в метрики кодом ошибки).
-func unaryInterceptors() []grpc.UnaryServerInterceptor {
-	chain := []grpc.UnaryServerInterceptor{metrics.Grpc.UnaryServerInterceptor()}
-	if config.Conf.AdminToken != "" {
-		chain = append(chain, GrpcInterceptorAuth(config.Conf.AdminToken))
+// меряют всё), auth сессий админки, recovery (внутри — паника хендлера
+// станет Internal и попадёт в метрики кодом ошибки).
+func unaryInterceptors(auth AuthenticatorI) []grpc.UnaryServerInterceptor {
+	return []grpc.UnaryServerInterceptor{
+		metrics.Grpc.UnaryServerInterceptor(),
+		GrpcInterceptorAuth(auth),
+		GrpcInterceptorRecovery(),
 	}
-	return append(chain, GrpcInterceptorRecovery())
 }
 
-func streamInterceptors() []grpc.StreamServerInterceptor {
-	chain := []grpc.StreamServerInterceptor{metrics.Grpc.StreamServerInterceptor()}
-	if config.Conf.AdminToken != "" {
-		chain = append(chain, GrpcStreamInterceptorAuth(config.Conf.AdminToken))
+func streamInterceptors(auth AuthenticatorI) []grpc.StreamServerInterceptor {
+	return []grpc.StreamServerInterceptor{
+		metrics.Grpc.StreamServerInterceptor(),
+		GrpcStreamInterceptorAuth(auth),
+		GrpcStreamInterceptorRecovery(),
 	}
-	return append(chain, GrpcStreamInterceptorRecovery())
 }
 
 func GrpcInterceptorRecovery() grpc.UnaryServerInterceptor {

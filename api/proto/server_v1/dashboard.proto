@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package server_v1;
+
+option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// DashboardService — сводка для главной страницы админки: агрегаты
+// считаются SQL-запросами, а не перебором списка ранов.
+service DashboardService {
+  rpc GetDashboard(google.protobuf.Empty) returns (DashboardRep) {
+    option (google.api.http) = {
+      get: "/dashboard"
+    };
+  }
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message DashboardRep {
+  int64 active_runs = 1;
+  int64 dag_count = 2;
+  int64 paused_dag_count = 3;
+  DashboardWindow last_24h = 4;
+  DashboardWindow last_7d = 5;
+  repeated DashboardUpcoming upcoming = 6;        // ближайшие запуски по cron
+  repeated DashboardPool pools = 7;               // занятость пулов слотов
+  repeated DashboardFailure recent_failures = 8;  // последние провалившиеся раны
+  repeated DashboardDay activity = 9;             // раны по дням (14 дней)
+  repeated DashboardDagDuration dag_durations = 10; // длительности за 7 дней
+}
+
+message DashboardWindow {
+  int64 success = 1;
+  int64 failed = 2;
+}
+
+message DashboardUpcoming {
+  string dag_name = 1;
+  google.protobuf.Timestamp next_run_at = 2;
+  string schedule = 3;
+}
+
+message DashboardPool {
+  string name = 1;
+  int64 slots = 2;
+  int64 busy = 3;
+}
+
+message DashboardFailure {
+  string run_id = 1;
+  string dag_name = 2;
+  google.protobuf.Timestamp finished_at = 3;
+}
+
+message DashboardDay {
+  string date = 1; // YYYY-MM-DD (UTC)
+  int64 success = 2;
+  int64 failed = 3;
+  int64 running = 4;
+}
+
+message DashboardDagDuration {
+  string dag_name = 1;
+  double avg_sec = 2;
+  double max_sec = 3;
+  int64 runs = 4;
+}

@@ -58,25 +58,18 @@ func (s *Service) Get(ctx context.Context, name string, errNE bool) (*model.Main
 
 // Register сохраняет даг по манифесту, полученному из образа: валидирует
 // манифест и создаёт/обновляет запись (перерегистрация = новая версия
-// образа). Paused при перерегистрации не трогается; autoUpdate
-// обновляется только при явном значении — nil сохраняет текущее (в
-// частности, авто-перерегистрация dagsync флаг не трогает). next_run_at
-// пересчитывается от текущего момента, кроме catchup-дага с тем же
-// расписанием — его тики наверстает cron-цикл.
+// образа). Расписание, catchup, paused при перерегистрации не трогаются —
+// ими управляет админка (SetSchedule/SetPaused); autoUpdate обновляется
+// только при явном значении — nil сохраняет текущее (в частности,
+// авто-перерегистрация dagsync флаг не трогает).
 func (s *Service) Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest, autoUpdate *bool) (*model.Main, error) {
 	if err := ValidateManifest(m); err != nil {
 		return nil, err
 	}
 
-	old, oldFound, err := s.Get(ctx, m.Name, false)
-	if err != nil {
-		return nil, err
-	}
-
-	err = s.repoDb.UpdateOrCreate(ctx, m.Name, &model.Edit{
+	err := s.repoDb.UpdateOrCreate(ctx, m.Name, &model.Edit{
 		Image:       &image,
 		ImageDigest: &imageDigest,
-		Schedule:    &m.Schedule,
 		AutoUpdate:  autoUpdate,
 		Manifest:    &rawManifest,
 		ModifiedAt:  new(time.Now()),
@@ -85,16 +78,41 @@ func (s *Service) Register(ctx context.Context, image, imageDigest string, rawMa
 		return nil, fmt.Errorf("repoDb.UpdateOrCreate: %w", err)
 	}
 
-	keepNextRun := m.Catchup && m.Schedule != "" &&
-		oldFound && old.Schedule == m.Schedule && !old.NextRunAt.IsZero()
-	if !keepNextRun {
-		if err = s.resetNextRun(ctx, m.Name, m.Schedule); err != nil {
-			return nil, err
+	result, _, err := s.Get(ctx, m.Name, true)
+	return result, err
+}
+
+// SetSchedule задаёт cron-расписание и catchup дага; пустое расписание
+// снимает его. next_run_at пересчитывается от «сейчас» только при смене
+// самого расписания — переключение одного catchup очередь тиков не сбивает.
+func (s *Service) SetSchedule(ctx context.Context, name, schedule string, catchup bool) error {
+	dag, _, err := s.Get(ctx, name, true)
+	if err != nil {
+		return err
+	}
+
+	if schedule != "" {
+		if _, err = util.CronNext(schedule, time.Now()); err != nil {
+			return errs.ErrFull{Err: errs.InvalidRequest,
+				Desc: fmt.Sprintf("некорректное расписание %q: %v", schedule, err)}
 		}
 	}
 
-	result, _, err := s.Get(ctx, m.Name, true)
-	return result, err
+	err = s.repoDb.Update(ctx, name, &model.Edit{
+		Schedule:   &schedule,
+		Catchup:    &catchup,
+		ModifiedAt: new(time.Now()),
+	})
+	if err != nil {
+		return fmt.Errorf("repoDb.Update: %w", err)
+	}
+
+	if dag.Schedule != schedule {
+		if err = s.resetNextRun(ctx, name, schedule); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) SetPaused(ctx context.Context, name string, paused bool) error {
@@ -123,7 +141,7 @@ func (s *Service) SetPaused(ctx context.Context, name string, paused bool) error
 }
 
 // SetAutoUpdate включает/выключает poll-синк новой версии образа дага
-//.
+// .
 func (s *Service) SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error {
 	if _, _, err := s.Get(ctx, name, true); err != nil {
 		return err
@@ -229,11 +247,6 @@ func ValidateManifest(m *model.Manifest) error {
 	if !nameRe.MatchString(m.Name) {
 		return fail(fmt.Sprintf("недопустимое имя дага %q", m.Name))
 	}
-	if m.Schedule != "" {
-		if _, err := util.CronNext(m.Schedule, time.Now()); err != nil {
-			return fail(fmt.Sprintf("некорректное расписание %q: %v", m.Schedule, err))
-		}
-	}
 	if len(m.Tasks) == 0 {
 		return fail("в даге нет тасков")
 	}
@@ -264,20 +277,36 @@ func ValidateManifest(m *model.Manifest) error {
 		if t.Pool != "" && !nameRe.MatchString(t.Pool) {
 			return fail(fmt.Sprintf("таск %q: недопустимое имя пула %q", t.Name, t.Pool))
 		}
+		// env-инъекции секретов и переменных делят одно пространство имён —
+		// seenEnv общий
 		seenEnv := map[string]bool{}
+		checkEnv := func(env string) error {
+			if !envNameRe.MatchString(env) {
+				return fail(fmt.Sprintf("таск %q: недопустимое env-имя %q", t.Name, env))
+			}
+			if strings.HasPrefix(env, "LOOM_") {
+				return fail(fmt.Sprintf("таск %q: env %q конфликтует с контрактом LOOM_*", t.Name, env))
+			}
+			if seenEnv[env] {
+				return fail(fmt.Sprintf("таск %q: дубль env %q", t.Name, env))
+			}
+			seenEnv[env] = true
+			return nil
+		}
 		for _, sec := range t.Secrets {
-			if !envNameRe.MatchString(sec.Env) {
-				return fail(fmt.Sprintf("таск %q: недопустимое env-имя секрета %q", t.Name, sec.Env))
+			if err := checkEnv(sec.Env); err != nil {
+				return err
 			}
-			if strings.HasPrefix(sec.Env, "LOOM_") {
-				return fail(fmt.Sprintf("таск %q: env %q конфликтует с контрактом LOOM_*", t.Name, sec.Env))
-			}
-			if seenEnv[sec.Env] {
-				return fail(fmt.Sprintf("таск %q: дубль env %q", t.Name, sec.Env))
-			}
-			seenEnv[sec.Env] = true
 			if !nameRe.MatchString(sec.Secret) {
 				return fail(fmt.Sprintf("таск %q: недопустимое имя секрета %q", t.Name, sec.Secret))
+			}
+		}
+		for _, v := range t.Variables {
+			if err := checkEnv(v.Env); err != nil {
+				return err
+			}
+			if !nameRe.MatchString(v.Variable) {
+				return fail(fmt.Sprintf("таск %q: недопустимое имя переменной %q", t.Name, v.Variable))
 			}
 		}
 		tasks[t.Name] = t

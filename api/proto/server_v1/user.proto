@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package server_v1;
+
+option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "server_v1/auth.proto"; // UserMain
+
+// UserService — управление пользователями админки; доступен только роли
+// admin.
+service UserService {
+  rpc ListUser(google.protobuf.Empty) returns (UserListRep) {
+    option (google.api.http) = {
+      get: "/user"
+    };
+  }
+
+  rpc CreateUser(UserCreateReq) returns (UserMain) {
+    option (google.api.http) = {
+      post: "/user"
+      body: "*"
+    };
+  }
+
+  // UpdateUser меняет заданные поля: пароль, роль, набор назначенных дагов.
+  rpc UpdateUser(UserUpdateReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      put: "/user/{id}"
+      body: "*"
+    };
+  }
+
+  rpc DeleteUser(UserDeleteReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/user/{id}"
+    };
+  }
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message UserListRep {
+  repeated UserMain results = 1;
+}
+
+message UserCreateReq {
+  string username = 1;
+  string password = 2;
+  string role = 3; // admin | user
+  repeated string dag_names = 4;
+}
+
+message UserUpdateReq {
+  string id = 1;
+  optional string password = 2;
+  optional string role = 3;
+  // Отсутствует — набор дагов не меняется; пустой список очищает его.
+  repeated string dag_names = 4;
+  bool set_dag_names = 5;
+}
+
+message UserDeleteReq {
+  string id = 1;
+}

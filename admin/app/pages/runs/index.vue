@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { TableColumn } from '@nuxt/ui'
+import type { TableColumn, TableRow } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
 import { cancelRun, listRuns } from '~/api/run.api'
 import type { Run } from '~/types/run'
@@ -66,16 +66,22 @@ watch(statusFilter, () => {
   load()
 })
 
+// id рана и логическая дата в таблицу не выведены (она и так широкая): id
+// виден в карточке рана, куда ведёт клик по строке, там же — логическая дата
 const columns: TableColumn<Run>[] = [
-  { accessorKey: 'id', header: 'Ран' },
   { accessorKey: 'dag_name', header: 'Даг' },
   { accessorKey: 'trigger', header: 'Триггер' },
   { accessorKey: 'status', header: 'Статус' },
-  { accessorKey: 'logical_date', header: 'Лог. дата' },
   { accessorKey: 'created_at', header: 'Создан' },
   { id: 'duration', header: 'Длительность' },
   { id: 'actions', header: '' },
 ]
+
+// клик по строке открывает ран; UTable сам игнорирует клики по кнопкам и
+// ссылкам внутри строки, так что иконка остановки продолжает работать
+function openRun(_e: Event, row: TableRow<Run>) {
+  navigateTo(`/runs/${row.original.id}`)
+}
 
 // принудительная остановка выполняющегося рана
 const { canManageDag } = useAuth()
@@ -128,13 +134,13 @@ async function confirmCancel() {
     </template>
 
     <template #body>
-      <UTable :data="runs" :columns="columns" :loading="loading">
-        <template #id-cell="{ row }">
-          <NuxtLink :to="`/runs/${row.original.id}`" class="font-mono text-primary hover:underline">
-            {{ row.original.id }}
-          </NuxtLink>
-        </template>
-
+      <UTable
+        :data="runs"
+        :columns="columns"
+        :loading="loading"
+        :ui="{ tr: 'cursor-pointer' }"
+        @select="openRun"
+      >
         <template #trigger-cell="{ row }">
           <div class="flex items-center gap-1.5">
             <UBadge :color="runTriggerColor(row.original.trigger)" variant="subtle" size="sm">
@@ -150,10 +156,6 @@ async function confirmCancel() {
           <UBadge :color="runStatusColor(row.original.status)" variant="subtle">
             {{ runStatusLabel(row.original.status) }}
           </UBadge>
-        </template>
-
-        <template #logical_date-cell="{ row }">
-          {{ formatDateTime(row.original.logical_date) }}
         </template>
 
         <template #created_at-cell="{ row }">

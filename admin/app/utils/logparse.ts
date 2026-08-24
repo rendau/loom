@@ -119,7 +119,28 @@ function parseLogfmt(line: string): Array<[string, string]> | null {
   return pairs
 }
 
-export function parseLogLine(raw: string): ParsedLogLine {
+// LogContext — попытка, лог которой сейчас открыт. Логгер SDK добавляет
+// dag/run_id/task/attempt в каждую строку (в stdout контейнера без них не
+// разобраться), но в просмотрщике эти пары дублируют заголовок на каждой
+// строке — совпавшие с контекстом прячем.
+export interface LogContext {
+  runId: string
+  task: string
+  attempt: number
+}
+
+function isContextField(key: string, value: string, ctx: LogContext): boolean {
+  switch (key) {
+    case 'run_id': return value === ctx.runId
+    case 'task': return value === ctx.task
+    case 'attempt': return value === String(ctx.attempt)
+    // имя дага пропом не приходит, но run_id собран как <даг>-<время>-<суффикс>
+    case 'dag': return ctx.runId.startsWith(`${value}-`)
+    default: return false
+  }
+}
+
+export function parseLogLine(raw: string, ctx?: LogContext): ParsedLogLine {
   const segments = parseAnsi(raw)
   const clean = segments ? stripAnsi(raw) : raw
 
@@ -151,7 +172,10 @@ export function parseLogLine(raw: string): ParsedLogLine {
         kind: 'logfmt',
         level,
         msg,
-        fields: pairs.filter(([k]) => k !== 'time' && k !== 'level' && k !== 'msg'),
+        fields: pairs.filter(([k, v]) =>
+          k !== 'time' && k !== 'level' && k !== 'msg'
+          && !(ctx && isContextField(k, v, ctx)),
+        ),
         clean,
         segments: segments ?? undefined,
       }

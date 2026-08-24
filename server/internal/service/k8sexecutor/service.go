@@ -40,7 +40,21 @@ const (
 	annTask    = "loom.io/task"
 	annAttempt = "loom.io/attempt"
 
+	// attemptHashLabelKey — хэш ref'а попытки в лейбле Job'а: по нему Kill
+	// находит Job, не собирая его имя (в имени есть даг и оно не выводится
+	// из одного ref'а).
+	attemptHashLabelKey = "loom.io/attempt-hash"
+
 	containerName = "task"
+
+	// jobNamePrefix — префикс имён Job'ов попыток (loom task): поды тасков
+	// отличаются от подов самого loom и artifact.
+	jobNamePrefix = "lt-"
+	// jobNameMaxLen — потолок имени Job'а: оно уезжает в значение лейбла
+	// подов batch.kubernetes.io/job-name, а значение лейбла — 63 символа.
+	jobNameMaxLen = 63
+	// refHashLen — длина хэша ref'а в имени Job'а и в значении лейбла.
+	refHashLen = 10
 
 	informerResync = 5 * time.Minute
 	eventsBuffer   = 1024
@@ -152,17 +166,31 @@ func (s *Service) Launch(ctx context.Context, spec runModel.LaunchSpec) error {
 	return nil
 }
 
-// Kill удаляет Job попытки вместе с подом.
+// Kill удаляет Job попытки вместе с подом. Идемпотентен: отсутствие Job'а —
+// не ошибка.
 func (s *Service) Kill(ctx context.Context, ref runModel.AttemptRef) error {
 	propagation := metav1.DeletePropagationForeground
 
-	err := s.clientset.BatchV1().Jobs(s.namespace).Delete(ctx, jobName(ref), metav1.DeleteOptions{
-		PropagationPolicy: &propagation,
-	})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("delete job: %w", err)
+	jobs := s.clientset.BatchV1().Jobs(s.namespace)
+
+	list, err := jobs.List(ctx, metav1.ListOptions{LabelSelector: attemptSelector(ref)})
+	if err != nil {
+		return fmt.Errorf("list jobs: %w", err)
+	}
+
+	for _, job := range list.Items {
+		err = jobs.Delete(ctx, job.Name, metav1.DeleteOptions{PropagationPolicy: &propagation})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete job: %w", err)
+		}
 	}
 	return nil
+}
+
+// attemptSelector — label-селектор Job'а конкретной попытки.
+func attemptSelector(ref runModel.AttemptRef) string {
+	return managedByLabelKey + "=" + managedByLabelValue +
+		"," + attemptHashLabelKey + "=" + refHash(ref)
 }
 
 // ListAlive возвращает попытки, чьи Job'ы существуют в кластере (включая
@@ -186,7 +214,10 @@ func (s *Service) ListAlive(ctx context.Context) ([]runModel.AttemptRef, error) 
 }
 
 func (s *Service) buildJob(spec runModel.LaunchSpec) (*batchv1.Job, error) {
-	labels := map[string]string{managedByLabelKey: managedByLabelValue}
+	labels := map[string]string{
+		managedByLabelKey:   managedByLabelValue,
+		attemptHashLabelKey: refHash(spec.Ref),
+	}
 	annotations := map[string]string{
 		annRunId:   spec.Ref.RunId,
 		annTask:    spec.Ref.Task,
@@ -205,7 +236,7 @@ func (s *Service) buildJob(spec runModel.LaunchSpec) (*batchv1.Job, error) {
 
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        jobName(spec.Ref),
+			Name:        jobName(spec),
 			Namespace:   s.namespace,
 			Labels:      labels,
 			Annotations: annotations,
@@ -456,27 +487,74 @@ func annotationsRef(annotations map[string]string) (runModel.AttemptRef, bool) {
 	return runModel.AttemptRef{RunId: runId, Task: task, Attempt: int32(attempt)}, true
 }
 
-// jobName — детерминированное DNS-1123-имя Job'а попытки: усечённое имя
-// таска для читаемости + хэш полного ref'а для уникальности.
-func jobName(ref runModel.AttemptRef) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d", ref.RunId, ref.Task, ref.Attempt)))
+// jobName — детерминированное DNS-1123-имя Job'а попытки:
+// lt-<даг>-<таск>-<попытка>-<хэш>. Имена дага и таска нормализуются под
+// DNS-1123 и усекаются, только если вдвоём не влезают в остаток бюджета
+// (63 минус префикс, разделители, номер попытки и хэш) — длинному имени
+// достаётся всё, что не занял короткий сосед. Уникальность имени даёт хэш
+// ref'а, а не эти части.
+func jobName(spec runModel.LaunchSpec) string {
+	hash := refHash(spec.Ref)
+	attempt := strconv.Itoa(int(spec.Ref.Attempt))
+	dag := namePart(spec.DagName, "dag")
+	task := namePart(spec.Ref.Task, "task")
 
-	task := strings.ToLower(ref.Task)
-	task = strings.Map(func(r rune) rune {
+	// три разделителя между четырьмя частями после префикса
+	budget := jobNameMaxLen - len(jobNamePrefix) - 3 - len(attempt) - len(hash)
+	dag, task = fitNameParts(dag, task, budget)
+
+	return fmt.Sprintf("%s%s-%s-%s-%s", jobNamePrefix, dag, task, attempt, hash)
+}
+
+// fitNameParts укладывает пару имён в budget: помещаются оба — не трогаем;
+// не помещаются — короткий берёт свою длину целиком, остаток бюджета уходит
+// длинному, и только если длинные оба — бюджет делится пополам.
+func fitNameParts(dag, task string, budget int) (string, string) {
+	if len(dag)+len(task) <= budget {
+		return dag, task
+	}
+
+	half := budget / 2
+	switch {
+	case len(dag) <= half:
+		return dag, cut(task, budget-len(dag))
+	case len(task) <= budget-half:
+		return cut(dag, budget-len(task)), task
+	default:
+		return cut(dag, half), cut(task, budget-half)
+	}
+}
+
+// cut — усечение части имени до n символов без хвостовых дефисов (первый
+// символ у namePart всегда alnum, так что пустой результат невозможен).
+func cut(v string, n int) string {
+	if len(v) <= n {
+		return v
+	}
+	return strings.TrimRight(v[:n], "-")
+}
+
+// namePart — часть имени объекта k8s из имени дага/таска: нижний регистр,
+// только [a-z0-9-], без ведущих и хвостовых дефисов; пусто — fallback.
+func namePart(v, fallback string) string {
+	v = strings.Trim(strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 			return r
 		}
 		return '-'
-	}, task)
-	task = strings.Trim(task, "-")
-	if len(task) > 20 {
-		task = task[:20]
-	}
-	if task == "" {
-		task = "task"
-	}
+	}, strings.ToLower(v)), "-")
 
-	return fmt.Sprintf("loom-%s-%d-%s", task, ref.Attempt, hex.EncodeToString(sum[:])[:10])
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+// refHash — детерминированный короткий хэш попытки: уникальность имени Job'а
+// и значение лейбла, по которому попытка находится в кластере.
+func refHash(ref runModel.AttemptRef) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d", ref.RunId, ref.Task, ref.Attempt)))
+	return hex.EncodeToString(sum[:])[:refHashLen]
 }
 
 // pullSecretRefs — imagePullSecrets из имени секрета; пусто — без секрета.

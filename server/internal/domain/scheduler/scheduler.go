@@ -571,8 +571,9 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 	}
 
 	spec := runModel.LaunchSpec{
-		Ref:   runModel.AttemptRef{RunId: c.RunId, Task: c.Task, Attempt: c.Attempt},
-		Image: run.ImageDigest,
+		Ref:     runModel.AttemptRef{RunId: c.RunId, Task: c.Task, Attempt: c.Attempt},
+		DagName: run.DagName,
+		Image:   run.ImageDigest,
 		Env: map[string]string{
 			loom.EnvRunID:        c.RunId,
 			loom.EnvTask:         c.Task,

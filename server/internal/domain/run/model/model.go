@@ -200,7 +200,10 @@ type ExitInfo struct {
 // LaunchSpec — параметры запуска попытки executor'ом: образ рана (пиннутый
 // digest), env-контракт LOOM_* и ресурсы контейнера из манифеста.
 type LaunchSpec struct {
-	Ref       AttemptRef
+	Ref AttemptRef
+	// DagName — только для читаемых имён объектов executor'а (имя Job'а/пода);
+	// идентификация попытки — по Ref.
+	DagName   string
 	Image     string
 	Env       map[string]string
 	Resources *dagModel.TaskResources

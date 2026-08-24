@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { readTaskLog } from '~/api/log.api'
 import type { LogStreamStatus } from '~/api/log.api'
 import type { TaskLogEntry } from '~/types/log'
-import type { LogLevel, ParsedLogLine } from '~/utils/logparse'
+import type { LogContext, LogLevel, ParsedLogLine } from '~/utils/logparse'
 
 // Просмотр лога попытки: виртуализированный список с разбором logfmt/JSON,
 // ANSI-раскраской, фильтрами по уровню/источнику, поиском и live-follow с
@@ -20,6 +20,14 @@ interface Row {
   entry: TaskLogEntry
   parsed: ParsedLogLine
 }
+
+// контекст просмотра: пары dag/run_id/task/attempt, повторяющие его, из
+// строк убираются — они и так в заголовке
+const logContext = computed<LogContext>(() => ({
+  runId: props.runId,
+  task: props.task,
+  attempt: props.attempt,
+}))
 
 const rows = shallowRef<Row[]>([])
 const errorText = ref('')
@@ -54,7 +62,7 @@ async function start(continueFrom = 0) {
       },
       (batch) => {
         received += batch.length
-        rows.value = [...rows.value, ...batch.map(entry => ({ entry, parsed: parseLogLine(entry.line) }))]
+        rows.value = [...rows.value, ...batch.map(entry => ({ entry, parsed: parseLogLine(entry.line, logContext.value) }))]
         scrollDownIfPinned()
       },
       myCtrl.signal,

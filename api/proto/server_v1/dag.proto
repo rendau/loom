@@ -107,6 +107,32 @@ service DagService {
     };
   }
 
+  // ListTaskResources — оверрайды ресурсов тасков дага из админки.
+  // Значения из манифеста (кода дага) — рекомендуемые; непустое поле
+  // оверрайда приоритетнее и применяется при launch попытки (подхватывается
+  // ретраями без перерегистрации).
+  rpc ListTaskResources(TaskResourcesListReq) returns (TaskResourcesListRep) {
+    option (google.api.http) = {
+      get: "/dag/{name}/task-resources"
+    };
+  }
+
+  // SetTaskResources задаёт оверрайд ресурсов таска; пустое поле — брать из
+  // манифеста. Все поля пустые — оверрайд удаляется.
+  rpc SetTaskResources(TaskResourcesSetReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      put: "/dag/{name}/task-resources/{task}"
+      body: "*"
+    };
+  }
+
+  // DeleteTaskResources снимает оверрайд таска (возврат к манифесту).
+  rpc DeleteTaskResources(TaskResourcesDeleteReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/dag/{name}/task-resources/{task}"
+    };
+  }
+
   // PushDagManifest — внутренний вызов describe-Job'а: при
   // регистрации через k8s Job сам отправляет манифест (или ошибку валидации
   // дага) на control plane, вместо передачи через логи пода. describe_id —
@@ -322,6 +348,39 @@ message DagSetAutoUpdateReq {
 
 message DagDeleteReq {
   string name = 1;
+}
+
+// TaskResources (оверрайды из админки)
+
+message TaskResourcesMain {
+  string task = 1;
+  string cpu_request = 2;
+  string cpu_limit = 3;
+  string memory_request = 4;
+  string memory_limit = 5;
+  google.protobuf.Timestamp modified_at = 6;
+}
+
+message TaskResourcesListReq {
+  string name = 1; // имя дага
+}
+
+message TaskResourcesListRep {
+  repeated TaskResourcesMain results = 1;
+}
+
+message TaskResourcesSetReq {
+  string name = 1; // имя дага
+  string task = 2;
+  string cpu_request = 3;
+  string cpu_limit = 4;
+  string memory_request = 5;
+  string memory_limit = 6;
+}
+
+message TaskResourcesDeleteReq {
+  string name = 1; // имя дага
+  string task = 2;
 }
 
 // PushManifest

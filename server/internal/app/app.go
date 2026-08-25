@@ -35,6 +35,8 @@ import (
 	domainScheduler "github.com/rendau/loom/server/internal/domain/scheduler"
 	secretDb "github.com/rendau/loom/server/internal/domain/secret/repo/db"
 	secretService "github.com/rendau/loom/server/internal/domain/secret/service"
+	settingDb "github.com/rendau/loom/server/internal/domain/setting/repo/db"
+	settingService "github.com/rendau/loom/server/internal/domain/setting/service"
 	statsDb "github.com/rendau/loom/server/internal/domain/stats/repo/db"
 	statsService "github.com/rendau/loom/server/internal/domain/stats/service"
 	userDb "github.com/rendau/loom/server/internal/domain/user/repo/db"
@@ -49,12 +51,13 @@ import (
 	"github.com/rendau/loom/server/internal/service/k8sdescriber"
 	"github.com/rendau/loom/server/internal/service/k8sexecutor"
 	"github.com/rendau/loom/server/internal/service/registrycli"
+	artifactUsc "github.com/rendau/loom/server/internal/usecase/artifact"
 	dagUsc "github.com/rendau/loom/server/internal/usecase/dag"
 	poolUsc "github.com/rendau/loom/server/internal/usecase/pool"
 	runUsc "github.com/rendau/loom/server/internal/usecase/run"
 	secretUsc "github.com/rendau/loom/server/internal/usecase/secret"
+	settingUsc "github.com/rendau/loom/server/internal/usecase/setting"
 	statsUsc "github.com/rendau/loom/server/internal/usecase/stats"
-	artifactUsc "github.com/rendau/loom/server/internal/usecase/artifact"
 	tasklogUsc "github.com/rendau/loom/server/internal/usecase/tasklog"
 	userUsc "github.com/rendau/loom/server/internal/usecase/user"
 	variableUsc "github.com/rendau/loom/server/internal/usecase/variable"
@@ -118,6 +121,7 @@ func (a *App) Init() {
 	errCheck(err, "secret service init")
 
 	variableSvc := variableService.New(variableDb.New(repoBase))
+	settingSvc := settingService.New(settingDb.New(repoBase))
 	a.userSvc = userService.New(userDb.New(repoBase), txm)
 	statsSvc := statsService.New(statsDb.New(repoBase))
 	authzChecker := authz.New(a.userSvc)
@@ -141,7 +145,7 @@ func (a *App) Init() {
 		clientset, metricsClient, cErr := k8sclient.New(config.Conf.K8sKubeconfig)
 		errCheck(cErr, "k8s client init")
 		a.executor = k8sexecutor.New(clientset, metricsClient, config.Conf.K8sNamespace,
-			config.Conf.K8sJobTTL, config.Conf.K8sImagePullSecret, config.Conf.K8sMetricsTick)
+			config.Conf.K8sImagePullSecret, config.Conf.K8sMetricsTick)
 
 		describer := k8sdescriber.New(clientset, config.Conf.K8sNamespace,
 			config.Conf.TaskServerAddr, config.Conf.K8sDescribeTimeout, config.Conf.K8sImagePullSecret)
@@ -157,7 +161,7 @@ func (a *App) Init() {
 
 	if a.executor != nil {
 		a.scheduler = domainScheduler.New(
-			runSvc, dagSvc, a.executor, a.artifactCli, a.artifactCli, secretSvc, variableSvc,
+			runSvc, dagSvc, a.executor, a.artifactCli, a.artifactCli, secretSvc, variableSvc, settingSvc,
 			domainScheduler.Config{
 				Tick:          config.Conf.SchedTick,
 				CronTick:      config.Conf.SchedCronTick,
@@ -175,12 +179,12 @@ func (a *App) Init() {
 
 	// retention
 	a.retention = domainRetention.New(runSvc, a.artifactCli, a.artifactCli, a.userSvc,
-		config.Conf.RunTTL, config.Conf.RetentionTick)
+		settingSvc, config.Conf.RetentionTick)
 
 	// очередь асинхронных регистраций дагов; обработчик (usecase) задаётся
 	// при Start — он же клиент очереди
-	a.dagReg = dagregService.New(dagregDb.New(repoBase),
-		config.Conf.DagRegTick, config.Conf.DagRegStale, config.Conf.DagRegTTL)
+	a.dagReg = dagregService.New(dagregDb.New(repoBase), settingSvc,
+		config.Conf.DagRegTick, config.Conf.DagRegStale)
 
 	// usecases
 	dagUsecase := dagUsc.New(dagSvc, imageInspector, poolSvc, manifestSink, a.dagReg, statsSvc, authzChecker)
@@ -197,6 +201,7 @@ func (a *App) Init() {
 	poolUsecase := poolUsc.New(poolSvc)
 	secretUsecase := secretUsc.New(secretSvc, authzChecker)
 	variableUsecase := variableUsc.New(variableSvc, authzChecker)
+	settingUsecase := settingUsc.New(settingSvc, authzChecker)
 	userUsecase := userUsc.New(a.userSvc)
 	statsUsecase := statsUsc.New(statsSvc)
 
@@ -209,6 +214,7 @@ func (a *App) Init() {
 		poolHandler := grpcHandler.NewPool(poolUsecase)
 		secretHandler := grpcHandler.NewSecret(secretUsecase)
 		variableHandler := grpcHandler.NewVariable(variableUsecase)
+		settingHandler := grpcHandler.NewSetting(settingUsecase)
 		authHandler := grpcHandler.NewAuth(userUsecase, BearerToken)
 		userHandler := grpcHandler.NewUser(userUsecase)
 		dashboardHandler := grpcHandler.NewDashboard(statsUsecase)
@@ -222,6 +228,7 @@ func (a *App) Init() {
 			pb.RegisterPoolServiceServer(server, poolHandler)
 			pb.RegisterSecretServiceServer(server, secretHandler)
 			pb.RegisterVariableServiceServer(server, variableHandler)
+			pb.RegisterSettingServiceServer(server, settingHandler)
 			pb.RegisterAuthServiceServer(server, authHandler)
 			pb.RegisterUserServiceServer(server, userHandler)
 			pb.RegisterDashboardServiceServer(server, dashboardHandler)
@@ -249,6 +256,7 @@ func (a *App) Init() {
 				pb.RegisterPoolServiceHandler,
 				pb.RegisterSecretServiceHandler,
 				pb.RegisterVariableServiceHandler,
+				pb.RegisterSettingServiceHandler,
 				pb.RegisterAuthServiceHandler,
 				pb.RegisterUserServiceHandler,
 				pb.RegisterDashboardServiceHandler,

@@ -27,9 +27,9 @@ const maintenanceEvery = 5 * time.Minute
 
 type Service struct {
 	repoDb     RepoDbI
+	settings   SettingsI
 	tick       time.Duration
 	staleAfter time.Duration
-	ttl        time.Duration
 
 	processor ProcessorI
 	sem       chan struct{}
@@ -42,14 +42,14 @@ type Service struct {
 	wg        sync.WaitGroup
 }
 
-func New(repoDb RepoDbI, tick, staleAfter, ttl time.Duration) *Service {
+func New(repoDb RepoDbI, settings SettingsI, tick, staleAfter time.Duration) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Service{
 		repoDb:     repoDb,
+		settings:   settings,
 		tick:       tick,
 		staleAfter: staleAfter,
-		ttl:        ttl,
 		sem:        make(chan struct{}, maxConcurrent),
 		nudgeCh:    make(chan struct{}, 1),
 		ctx:        ctx,
@@ -221,8 +221,15 @@ func (s *Service) maintain(ctx context.Context) {
 		slog.Warn("stale dag registrations failed", "count", n)
 	}
 
-	if s.ttl > 0 {
-		if _, err := s.repoDb.DeleteFinishedBefore(ctx, time.Now().Add(-s.ttl)); err != nil {
+	// TTL истории — глобальная настройка dag_reg_ttl из БД (правки в
+	// админке подхватываются без рестарта)
+	eff, err := s.settings.Resolve(ctx, "")
+	if err != nil {
+		slog.Error("dag registration resolve settings", "error", err)
+		return
+	}
+	if eff.DagRegTTL > 0 {
+		if _, err = s.repoDb.DeleteFinishedBefore(ctx, time.Now().Add(-eff.DagRegTTL)); err != nil {
 			slog.Error("dag registration ttl cleanup", "error", err)
 		}
 	}

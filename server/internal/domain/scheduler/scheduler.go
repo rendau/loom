@@ -74,6 +74,7 @@ type Scheduler struct {
 	tasklog   TaskLogI
 	secrets   SecretResolverI
 	variables VariableResolverI
+	settings  SettingsI
 	cfg       Config
 
 	nudgeCh   chan struct{}
@@ -82,7 +83,7 @@ type Scheduler struct {
 	wg        sync.WaitGroup
 }
 
-func New(runSvc RunServiceI, dagSvc DagServiceI, executor ExecutorI, artifact ArtifactI, tasklog TaskLogI, secrets SecretResolverI, variables VariableResolverI, cfg Config) *Scheduler {
+func New(runSvc RunServiceI, dagSvc DagServiceI, executor ExecutorI, artifact ArtifactI, tasklog TaskLogI, secrets SecretResolverI, variables VariableResolverI, settings SettingsI, cfg Config) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Scheduler{
@@ -93,6 +94,7 @@ func New(runSvc RunServiceI, dagSvc DagServiceI, executor ExecutorI, artifact Ar
 		tasklog:   tasklog,
 		secrets:   secrets,
 		variables: variables,
+		settings:  settings,
 		cfg:       cfg,
 		nudgeCh:   make(chan struct{}, 1),
 		ctx:       ctx,
@@ -570,10 +572,22 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 		return fmt.Errorf("marshal dep attempts: %w", err)
 	}
 
+	// оверрайд ресурсов из админки приоритетнее манифеста (по-полево);
+	// настройки скоупа дага дают TTL k8s Job'а попытки
+	resOverride, err := s.dagSvc.GetTaskResources(ctx, run.DagName, c.Task)
+	if err != nil {
+		return fmt.Errorf("dagSvc.GetTaskResources: %w", err)
+	}
+	settings, err := s.settings.Resolve(ctx, run.DagName)
+	if err != nil {
+		return fmt.Errorf("settings.Resolve: %w", err)
+	}
+
 	spec := runModel.LaunchSpec{
 		Ref:     runModel.AttemptRef{RunId: c.RunId, Task: c.Task, Attempt: c.Attempt},
 		DagName: run.DagName,
 		Image:   run.ImageDigest,
+		JobTTL:  settings.K8sJobTTL,
 		Env: map[string]string{
 			loom.EnvRunID:        c.RunId,
 			loom.EnvTask:         c.Task,
@@ -583,7 +597,7 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 			loom.EnvServerAddr:   s.cfg.TaskEnv.ServerAddr,
 			loom.EnvLogicalDate:  run.LogicalDate.UTC().Format(time.RFC3339),
 		},
-		Resources: task.Resources,
+		Resources: mergeResources(task.Resources, resOverride),
 	}
 	if len(run.Params) > 0 {
 		spec.Env[loom.EnvRunParams] = string(run.Params)
@@ -842,4 +856,32 @@ func exitLogEntry(exit runModel.ExitInfo, retryAt *time.Time) tasklogModel.Entry
 		Source:   tasklogModel.SourceServer,
 		Line:     line,
 	}
+}
+
+// mergeResources накладывает оверрайд ресурсов из админки на значения
+// манифеста: непустое поле оверрайда приоритетнее. nil-оверрайд возвращает
+// манифест как есть.
+func mergeResources(manifest, override *dagModel.TaskResources) *dagModel.TaskResources {
+	if override == nil {
+		return manifest
+	}
+
+	result := dagModel.TaskResources{}
+	if manifest != nil {
+		result = *manifest
+	}
+	for _, f := range []struct {
+		dst *string
+		src string
+	}{
+		{&result.CPURequest, override.CPURequest},
+		{&result.CPULimit, override.CPULimit},
+		{&result.MemoryRequest, override.MemoryRequest},
+		{&result.MemoryLimit, override.MemoryLimit},
+	} {
+		if f.src != "" {
+			*f.dst = f.src
+		}
+	}
+	return &result
 }

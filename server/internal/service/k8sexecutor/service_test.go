@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -98,7 +97,7 @@ func TestJobNameDiffersByAttempt(t *testing.T) {
 // собирается (в нём есть имя дага).
 func TestKillDeletesJobOfAttempt(t *testing.T) {
 	cs := fake.NewClientset()
-	svc := New(cs, nil, "ns", time.Minute, "", 0)
+	svc := New(cs, nil, "ns", "", 0)
 
 	spec := testSpec("demo-etl", "extract")
 	other := testSpec("demo-etl", "load")
@@ -116,7 +115,7 @@ func TestKillDeletesJobOfAttempt(t *testing.T) {
 
 func TestKillWithoutJobIsNoop(t *testing.T) {
 	cs := fake.NewClientset()
-	svc := New(cs, nil, "ns", time.Minute, "", 0)
+	svc := New(cs, nil, "ns", "", 0)
 
 	assert.NoError(t, svc.Kill(context.Background(), testSpec("demo-etl", "extract").Ref))
 }

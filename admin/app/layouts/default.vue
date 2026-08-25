@@ -14,8 +14,10 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
   const adminItems: NavigationMenuItem[] = [
     { label: 'Пулы', icon: 'i-lucide-layers', to: '/pools' },
   ]
-  if (isAdmin.value)
+  if (isAdmin.value) {
+    adminItems.push({ label: 'Настройки', icon: 'i-lucide-settings', to: '/settings' })
     adminItems.push({ label: 'Пользователи', icon: 'i-lucide-users', to: '/users' })
+  }
   return [items, adminItems]
 })
 

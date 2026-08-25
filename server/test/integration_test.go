@@ -28,6 +28,7 @@ import (
 	loom "github.com/rendau/loom/sdk"
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
 	"github.com/rendau/loom/server/internal/domain/dag/manifest"
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	dagDb "github.com/rendau/loom/server/internal/domain/dag/repo/db"
 	dagService "github.com/rendau/loom/server/internal/domain/dag/service"
 	poolDb "github.com/rendau/loom/server/internal/domain/pool/repo/db"
@@ -39,6 +40,8 @@ import (
 	domainScheduler "github.com/rendau/loom/server/internal/domain/scheduler"
 	secretDb "github.com/rendau/loom/server/internal/domain/secret/repo/db"
 	secretService "github.com/rendau/loom/server/internal/domain/secret/service"
+	settingDb "github.com/rendau/loom/server/internal/domain/setting/repo/db"
+	settingService "github.com/rendau/loom/server/internal/domain/setting/service"
 	tasklogModel "github.com/rendau/loom/server/internal/domain/tasklog/model"
 	variableDb "github.com/rendau/loom/server/internal/domain/variable/repo/db"
 	variableService "github.com/rendau/loom/server/internal/domain/variable/service"
@@ -209,6 +212,7 @@ type env struct {
 	poolSvc     *poolService.Service
 	secretSvc   *secretService.Service
 	variableSvc *variableService.Service
+	settingSvc  *settingService.Service
 	tasklog     *fakeTasklog
 	executor    *fakeExecutor
 	artifact    *fakeArtifact
@@ -235,8 +239,8 @@ func newEnv(t *testing.T) *env {
 	t.Cleanup(pool.Close)
 
 	_, err = pool.Exec(context.Background(),
-		`TRUNCATE attempt, run_value, run_env, task_instance, run, dag, dag_registration, pool, secret,
-			variable, app_user, session, user_dag`)
+		`TRUNCATE attempt, run_value, run_env, task_instance, run, task_resources, dag, dag_registration, pool, secret,
+			variable, setting, app_user, session, user_dag`)
 	require.NoError(t, err)
 
 	txm := mobone.NewTransactionManager(pool)
@@ -248,6 +252,7 @@ func newEnv(t *testing.T) *env {
 	secretSvc, err := secretService.New(secretDb.New(base), "test-secret-key")
 	require.NoError(t, err)
 	variableSvc := variableService.New(variableDb.New(base))
+	settingSvc := settingService.New(settingDb.New(base))
 
 	// сид дефолтного пула после TRUNCATE
 	_, err = pool.Exec(context.Background(),
@@ -258,7 +263,7 @@ func newEnv(t *testing.T) *env {
 	executor := newFakeExecutor()
 	artifact := &fakeArtifact{}
 
-	scheduler := domainScheduler.New(runSvc, dagSvc, executor, artifact, tasklog, secretSvc, variableSvc,
+	scheduler := domainScheduler.New(runSvc, dagSvc, executor, artifact, tasklog, secretSvc, variableSvc, settingSvc,
 		domainScheduler.Config{
 			Tick:          30 * time.Millisecond,
 			CronTick:      50 * time.Millisecond,
@@ -277,6 +282,7 @@ func newEnv(t *testing.T) *env {
 		poolSvc:     poolSvc,
 		secretSvc:   secretSvc,
 		variableSvc: variableSvc,
+		settingSvc:  settingSvc,
 		tasklog:     tasklog,
 		executor:    executor,
 		artifact:    artifact,
@@ -1475,7 +1481,9 @@ func TestRetentionSweep(t *testing.T) {
 	e.executor.finished(a.Ref, true, 0, "")
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	retention := domainRetention.New(e.runSvc, e.artifact, e.tasklog, nil, time.Hour, time.Hour)
+	// лимиты — настройки в БД: TTL час, по количеству не ограничено
+	require.NoError(t, e.settingSvc.Set(context.Background(), "", "run_ttl", "1h"))
+	retention := domainRetention.New(e.runSvc, e.artifact, e.tasklog, nil, e.settingSvc, time.Hour)
 
 	// ран моложе TTL — не удаляется
 	deleted, err := retention.Sweep(context.Background())
@@ -1504,4 +1512,137 @@ func TestRetentionSweep(t *testing.T) {
 	deleted, err = retention.Sweep(context.Background())
 	require.NoError(t, err)
 	assert.Zero(t, deleted)
+}
+
+// Retention по количеству: run_keep_last оставляет N последних завершённых
+// ранов дага, уточнение на даге перекрывает глобальное значение.
+func TestRetentionKeepLast(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "keep-last-dag",
+		"tasks": [{"name": "a"}]
+	}`)
+
+	runIds := make([]string, 0, 3)
+	for i := 0; i < 3; i++ {
+		runId, err := e.runUsecase.Trigger(ctx, dagName, nil)
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			return len(e.executor.launchedForRun(runId)) == 1
+		}, waitTimeout, 10*time.Millisecond, "task of run %q was not launched", runId)
+		ref := e.executor.launchedForRun(runId)[0].Ref
+		e.executor.started(ref)
+		e.executor.finished(ref, true, 0, "")
+		e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
+		runIds = append(runIds, runId)
+	}
+
+	// разводим finished_at: runIds[0] — самый старый
+	for i, runId := range runIds {
+		_, err := e.pool.Exec(ctx,
+			`UPDATE run SET finished_at = now() - make_interval(hours => $2) WHERE id = $1`,
+			runId, len(runIds)-i)
+		require.NoError(t, err)
+	}
+
+	// чистка по времени выключена, глобально храним 2 последних
+	require.NoError(t, e.settingSvc.Set(ctx, "", "run_ttl", "0"))
+	require.NoError(t, e.settingSvc.Set(ctx, "", "run_keep_last", "2"))
+	retention := domainRetention.New(e.runSvc, e.artifact, e.tasklog, nil, e.settingSvc, time.Hour)
+
+	deleted, err := retention.Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, deleted)
+	_, found, err := e.runSvc.Get(ctx, runIds[0], false)
+	require.NoError(t, err)
+	assert.False(t, found, "самый старый ран должен уйти")
+	assert.Equal(t, []string{runIds[0]}, e.artifact.deleted())
+
+	// уточнение на даге приоритетнее глобального: храним 1
+	require.NoError(t, e.settingSvc.Set(ctx, dagName, "run_keep_last", "1"))
+	deleted, err = retention.Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, deleted)
+	_, found, err = e.runSvc.Get(ctx, runIds[1], false)
+	require.NoError(t, err)
+	assert.False(t, found)
+	_, found, err = e.runSvc.Get(ctx, runIds[2], false)
+	require.NoError(t, err)
+	assert.True(t, found, "новейший ран должен остаться")
+}
+
+// Настройки: неизвестные имена и битые значения отклоняются, глобальные
+// значения не удаляются, dag_reg_ttl не уточняется на даге; резолв —
+// даг перекрывает глобаль, отсутствие обоих закрывает дефолт.
+func TestSettings(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+
+	require.Error(t, e.settingSvc.Set(ctx, "", "no_such_setting", "1"))
+	require.Error(t, e.settingSvc.Set(ctx, "", "run_ttl", "sometimes"))
+	require.Error(t, e.settingSvc.Set(ctx, "", "run_ttl", "-1h"))
+	require.Error(t, e.settingSvc.Set(ctx, "", "run_keep_last", "10.5"))
+	require.Error(t, e.settingSvc.Set(ctx, "some-dag", "dag_reg_ttl", "1h"), "только глобальная")
+	require.Error(t, e.settingSvc.Delete(ctx, "", "run_ttl"), "глобальные не удаляются")
+
+	// TRUNCATE снёс сид миграции — работают дефолты реестра
+	eff, err := e.settingSvc.Resolve(ctx, "demo")
+	require.NoError(t, err)
+	assert.Equal(t, 720*time.Hour, eff.RunTTL)
+	assert.EqualValues(t, 0, eff.RunKeepLast)
+	assert.Equal(t, time.Hour, eff.K8sJobTTL)
+
+	// глобаль + уточнение дага
+	require.NoError(t, e.settingSvc.Set(ctx, "", "k8s_job_ttl", "30m"))
+	require.NoError(t, e.settingSvc.Set(ctx, "demo", "k8s_job_ttl", "2h"))
+	eff, err = e.settingSvc.Resolve(ctx, "demo")
+	require.NoError(t, err)
+	assert.Equal(t, 2*time.Hour, eff.K8sJobTTL)
+	eff, err = e.settingSvc.Resolve(ctx, "other")
+	require.NoError(t, err)
+	assert.Equal(t, 30*time.Minute, eff.K8sJobTTL)
+
+	// удаление уточнения возвращает глобаль
+	require.NoError(t, e.settingSvc.Delete(ctx, "demo", "k8s_job_ttl"))
+	eff, err = e.settingSvc.Resolve(ctx, "demo")
+	require.NoError(t, err)
+	assert.Equal(t, 30*time.Minute, eff.K8sJobTTL)
+}
+
+// Оверрайд ресурсов таска из админки накладывается на манифест по-полево и
+// применяется при launch; JobTTL попытки — из настройки k8s_job_ttl.
+func TestTaskResourcesOverride(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "resources-dag",
+		"tasks": [{"name": "a", "resources": {"memory_limit": "256Mi", "cpu_limit": "500m"}}]
+	}`)
+
+	// валидация: неизвестный таск и битое quantity отклоняются
+	require.Error(t, e.dagSvc.SetTaskResources(ctx, dagName, "nope", dagModel.TaskResources{MemoryLimit: "1Gi"}))
+	require.Error(t, e.dagSvc.SetTaskResources(ctx, dagName, "a", dagModel.TaskResources{MemoryLimit: "big"}))
+
+	require.NoError(t, e.dagSvc.SetTaskResources(ctx, dagName, "a",
+		dagModel.TaskResources{MemoryLimit: "1Gi", CPURequest: "100m"}))
+	require.NoError(t, e.settingSvc.Set(ctx, "", "k8s_job_ttl", "45m"))
+
+	_, err := e.runUsecase.Trigger(ctx, dagName, nil)
+	require.NoError(t, err)
+
+	spec := e.waitLaunched(t, "a")
+	require.NotNil(t, spec.Resources)
+	assert.Equal(t, "1Gi", spec.Resources.MemoryLimit, "оверрайд приоритетнее манифеста")
+	assert.Equal(t, "100m", spec.Resources.CPURequest, "оверрайд добавил поле")
+	assert.Equal(t, "500m", spec.Resources.CPULimit, "непустое поле манифеста без оверрайда сохраняется")
+	assert.Equal(t, 45*time.Minute, spec.JobTTL)
+
+	// снятие оверрайда возвращает манифест (проверяем ретраем таска)
+	require.NoError(t, e.dagSvc.DeleteTaskResources(ctx, dagName, "a"))
+	list, err := e.dagSvc.ListTaskResources(ctx, dagName)
+	require.NoError(t, err)
+	assert.Empty(t, list)
 }

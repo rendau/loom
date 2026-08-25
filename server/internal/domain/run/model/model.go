@@ -225,6 +225,10 @@ type LaunchSpec struct {
 	Image     string
 	Env       map[string]string
 	Resources *dagModel.TaskResources
+	// JobTTL — ttlSecondsAfterFinished Job'а попытки (настройка k8s_job_ttl,
+	// скоуп дага перекрывает глобальный); 0 — Job не удаляется. Docker-
+	// executor игнорирует.
+	JobTTL time.Duration
 }
 
 // Типы событий executor'а.

@@ -54,6 +54,15 @@ type Task struct {
 	Variables     []VariableRef
 }
 
+// TaskResourcesEntry — оверрайд ресурсов таска из админки: значения
+// манифеста (кода дага) — рекомендуемые, непустое поле оверрайда
+// приоритетнее при launch. Хранится в таблице task_resources.
+type TaskResourcesEntry struct {
+	Task       string
+	Res        TaskResources
+	ModifiedAt time.Time
+}
+
 // SecretRef — инъекция секрета control plane в env контейнера таска
 // .
 type SecretRef struct {

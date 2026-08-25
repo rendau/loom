@@ -6,8 +6,11 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	commonPb "github.com/rendau/loom/api/common"
 	pb "github.com/rendau/loom/api/server_v1"
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	statsModel "github.com/rendau/loom/server/internal/domain/stats/model"
 	"github.com/rendau/loom/server/internal/handler/grpc/dto"
 	dagUsc "github.com/rendau/loom/server/internal/usecase/dag"
@@ -139,4 +142,43 @@ func (h *Dag) PushDagManifest(ctx context.Context, req *pb.DagPushManifestReq) (
 		return nil, encodeErr(err)
 	}
 	return &emptypb.Empty{}, nil
+}
+
+func (h *Dag) ListTaskResources(ctx context.Context, req *pb.TaskResourcesListReq) (*pb.TaskResourcesListRep, error) {
+	items, err := h.usecase.ListTaskResources(ctx, req.GetName())
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+	return &pb.TaskResourcesListRep{Results: lo.Map(items, encodeTaskResourcesEntry)}, nil
+}
+
+func (h *Dag) SetTaskResources(ctx context.Context, req *pb.TaskResourcesSetReq) (*emptypb.Empty, error) {
+	err := h.usecase.SetTaskResources(ctx, req.GetName(), req.GetTask(), dagModel.TaskResources{
+		CPURequest:    req.GetCpuRequest(),
+		CPULimit:      req.GetCpuLimit(),
+		MemoryRequest: req.GetMemoryRequest(),
+		MemoryLimit:   req.GetMemoryLimit(),
+	})
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
+func (h *Dag) DeleteTaskResources(ctx context.Context, req *pb.TaskResourcesDeleteReq) (*emptypb.Empty, error) {
+	if err := h.usecase.DeleteTaskResources(ctx, req.GetName(), req.GetTask()); err != nil {
+		return nil, encodeErr(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
+func encodeTaskResourcesEntry(v *dagModel.TaskResourcesEntry, _ int) *pb.TaskResourcesMain {
+	return &pb.TaskResourcesMain{
+		Task:          v.Task,
+		CpuRequest:    v.Res.CPURequest,
+		CpuLimit:      v.Res.CPULimit,
+		MemoryRequest: v.Res.MemoryRequest,
+		MemoryLimit:   v.Res.MemoryLimit,
+		ModifiedAt:    timestamppb.New(v.ModifiedAt),
+	}
 }

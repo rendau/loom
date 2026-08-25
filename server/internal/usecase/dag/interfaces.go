@@ -13,6 +13,9 @@ type ServiceI interface {
 	Get(ctx context.Context, name string, errNE bool) (*model.Main, bool, error)
 	Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest, autoUpdate *bool) (*model.Main, error)
 	ListLastRuns(ctx context.Context, dagNames []string, perDag int) (map[string][]model.LastRun, error)
+	ListTaskResources(ctx context.Context, dagName string) ([]*model.TaskResourcesEntry, error)
+	SetTaskResources(ctx context.Context, dagName, task string, res model.TaskResources) error
+	DeleteTaskResources(ctx context.Context, dagName, task string) error
 	SetSchedule(ctx context.Context, name, schedule string, catchup bool) error
 	SetPaused(ctx context.Context, name string, paused bool) error
 	SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error

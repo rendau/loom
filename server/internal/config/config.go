@@ -55,8 +55,6 @@ var Conf = struct {
 
 	K8sNamespace  string `env:"K8S_NAMESPACE" envDefault:"default"`
 	K8sKubeconfig string `env:"K8S_KUBECONFIG"` // пусто — in-cluster, иначе путь к kubeconfig
-	// K8sJobTTL — ttlSecondsAfterFinished завершённых Job'ов.
-	K8sJobTTL time.Duration `env:"K8S_JOB_TTL" envDefault:"1h"`
 	// K8sDescribeTimeout — таймаут describe-Job'а регистрации дага; должен
 	// покрывать и pull образа.
 	K8sDescribeTimeout time.Duration `env:"K8S_DESCRIBE_TIMEOUT" envDefault:"5m"`
@@ -80,10 +78,8 @@ var Conf = struct {
 	// SchedClaimLimit — сколько queued-тасков забирать за один проход.
 	SchedClaimLimit int64 `env:"SCHED_CLAIM_LIMIT" envDefault:"10"`
 
-	// RunTTL — сколько хранить завершённые раны (артефакты, логи, записи
-	// БД); 0 — retention выключен.
-	RunTTL time.Duration `env:"RUN_TTL" envDefault:"720h"`
-	// RetentionTick — период проходов очистки.
+	// RetentionTick — период проходов очистки завершённых ранов; сами
+	// лимиты (run_ttl, run_keep_last) — настройки в БД, правятся админкой.
 	RetentionTick time.Duration `env:"RETENTION_TICK" envDefault:"1h"`
 
 	// DagSyncTick — период авто-обновления дагов: digest-чек
@@ -95,10 +91,9 @@ var Conf = struct {
 	DagRegTick time.Duration `env:"DAG_REG_TICK" envDefault:"2s"`
 	// DagRegStale — возраст running-регистрации, после которого она
 	// считается брошенной (инстанс умер посреди describe) и падает в failed;
-	// должен покрывать pull + describe.
+	// должен покрывать pull + describe. TTL истории регистраций — настройка
+	// dag_reg_ttl в БД.
 	DagRegStale time.Duration `env:"DAG_REG_STALE" envDefault:"30m"`
-	// DagRegTTL — сколько хранить завершённые записи регистраций; 0 — вечно.
-	DagRegTTL time.Duration `env:"DAG_REG_TTL" envDefault:"720h"`
 	// RegistryAuthFile — путь к docker config.json с кредами registry для
 	// digest-чека приватных образов; пусто — anonymous-доступ.
 	RegistryAuthFile string `env:"REGISTRY_AUTH_FILE"`

@@ -469,9 +469,23 @@ func (s *Service) ListStaleAttempts(ctx context.Context, olderThan time.Time) ([
 
 // ── retention ───────────────────────────────────────────
 
-// ListExpired возвращает id завершённых ранов с истёкшим TTL.
-func (s *Service) ListExpired(ctx context.Context, before time.Time, limit int64) ([]string, error) {
-	ids, err := s.repoDb.ListExpiredRuns(ctx, before, limit)
+// ListRetentionDags возвращает имена дагов с завершёнными ранами — скоупы
+// retention-прохода.
+func (s *Service) ListRetentionDags(ctx context.Context) ([]string, error) {
+	names, err := s.repoDb.ListRetentionDags(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.ListRetentionDags: %w", err)
+	}
+	return names, nil
+}
+
+// ListExpired возвращает id завершённых ранов дага, нарушающих любой из
+// retention-лимитов: старше before (nil — не чистить по времени) либо за
+// пределами keepLast последних (0 — без лимита по количеству).
+func (s *Service) ListExpired(ctx context.Context, dagName string, before *time.Time,
+	keepLast, limit int64,
+) ([]string, error) {
+	ids, err := s.repoDb.ListExpiredRuns(ctx, dagName, before, keepLast, limit)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.ListExpiredRuns: %w", err)
 	}

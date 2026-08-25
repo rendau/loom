@@ -7,6 +7,7 @@ import (
 	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
 	secretModel "github.com/rendau/loom/server/internal/domain/secret/model"
+	settingModel "github.com/rendau/loom/server/internal/domain/setting/model"
 	tasklogModel "github.com/rendau/loom/server/internal/domain/tasklog/model"
 	variableModel "github.com/rendau/loom/server/internal/domain/variable/model"
 )
@@ -32,10 +33,18 @@ type RunServiceI interface {
 
 // DagServiceI — cron-расписания: выборка дагов с наступившим next_run_at и
 // его сдвиг compare-and-swap'ом (защита от двойного триггера при нескольких
-// инстансах control plane).
+// инстансах control plane). GetTaskResources — оверрайд ресурсов таска из
+// админки, накладывается на манифест при launch (nil — оверрайда нет).
 type DagServiceI interface {
 	ListDueSchedules(ctx context.Context) ([]*dagModel.Main, error)
 	AdvanceNextRun(ctx context.Context, name string, from, to time.Time) (bool, error)
+	GetTaskResources(ctx context.Context, dagName, task string) (*dagModel.TaskResources, error)
+}
+
+// SettingsI — эффективные настройки скоупа дага для launch (TTL k8s
+// Job'ов).
+type SettingsI interface {
+	Resolve(ctx context.Context, dagName string) (settingModel.Effective, error)
 }
 
 // ExecutorI — порт executor'а: запуск/остановка на уровне

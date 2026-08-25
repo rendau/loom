@@ -15,6 +15,8 @@ import (
 	dagregModel "github.com/rendau/loom/server/internal/domain/dagreg/model"
 	dagregDb "github.com/rendau/loom/server/internal/domain/dagreg/repo/db"
 	dagregService "github.com/rendau/loom/server/internal/domain/dagreg/service"
+	settingDb "github.com/rendau/loom/server/internal/domain/setting/repo/db"
+	settingService "github.com/rendau/loom/server/internal/domain/setting/service"
 )
 
 // fakeProcessor — обработчик очереди регистраций для тестов воркера.
@@ -37,9 +39,11 @@ func newDagregEnv(t *testing.T) (*dagregDb.Repo, func(tick time.Duration) *dagre
 	e := newEnv(t)
 
 	txm := mobone.NewTransactionManager(e.pool)
-	repo := dagregDb.New(commonRepoPg.NewBase(e.pool, txm))
+	base := commonRepoPg.NewBase(e.pool, txm)
+	repo := dagregDb.New(base)
+	settings := settingService.New(settingDb.New(base))
 	return repo, func(tick time.Duration) *dagregService.Service {
-		return dagregService.New(repo, tick, time.Hour, time.Hour)
+		return dagregService.New(repo, settings, tick, time.Hour)
 	}
 }
 

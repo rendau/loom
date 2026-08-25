@@ -31,6 +31,9 @@ const (
 	DagService_SyncDag_FullMethodName             = "/server_v1.DagService/SyncDag"
 	DagService_SetDagAutoUpdate_FullMethodName    = "/server_v1.DagService/SetDagAutoUpdate"
 	DagService_DeleteDag_FullMethodName           = "/server_v1.DagService/DeleteDag"
+	DagService_ListTaskResources_FullMethodName   = "/server_v1.DagService/ListTaskResources"
+	DagService_SetTaskResources_FullMethodName    = "/server_v1.DagService/SetTaskResources"
+	DagService_DeleteTaskResources_FullMethodName = "/server_v1.DagService/DeleteTaskResources"
 	DagService_PushDagManifest_FullMethodName     = "/server_v1.DagService/PushDagManifest"
 )
 
@@ -76,6 +79,16 @@ type DagServiceClient interface {
 	// изменении перерегистрирует даг автоматически.
 	SetDagAutoUpdate(ctx context.Context, in *DagSetAutoUpdateReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	DeleteDag(ctx context.Context, in *DagDeleteReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// ListTaskResources — оверрайды ресурсов тасков дага из админки.
+	// Значения из манифеста (кода дага) — рекомендуемые; непустое поле
+	// оверрайда приоритетнее и применяется при launch попытки (подхватывается
+	// ретраями без перерегистрации).
+	ListTaskResources(ctx context.Context, in *TaskResourcesListReq, opts ...grpc.CallOption) (*TaskResourcesListRep, error)
+	// SetTaskResources задаёт оверрайд ресурсов таска; пустое поле — брать из
+	// манифеста. Все поля пустые — оверрайд удаляется.
+	SetTaskResources(ctx context.Context, in *TaskResourcesSetReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// DeleteTaskResources снимает оверрайд таска (возврат к манифесту).
+	DeleteTaskResources(ctx context.Context, in *TaskResourcesDeleteReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// PushDagManifest — внутренний вызов describe-Job'а: при
 	// регистрации через k8s Job сам отправляет манифест (или ошибку валидации
 	// дага) на control plane, вместо передачи через логи пода. describe_id —
@@ -202,6 +215,36 @@ func (c *dagServiceClient) DeleteDag(ctx context.Context, in *DagDeleteReq, opts
 	return out, nil
 }
 
+func (c *dagServiceClient) ListTaskResources(ctx context.Context, in *TaskResourcesListReq, opts ...grpc.CallOption) (*TaskResourcesListRep, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskResourcesListRep)
+	err := c.cc.Invoke(ctx, DagService_ListTaskResources_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dagServiceClient) SetTaskResources(ctx context.Context, in *TaskResourcesSetReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, DagService_SetTaskResources_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dagServiceClient) DeleteTaskResources(ctx context.Context, in *TaskResourcesDeleteReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, DagService_DeleteTaskResources_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *dagServiceClient) PushDagManifest(ctx context.Context, in *DagPushManifestReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(emptypb.Empty)
@@ -254,6 +297,16 @@ type DagServiceServer interface {
 	// изменении перерегистрирует даг автоматически.
 	SetDagAutoUpdate(context.Context, *DagSetAutoUpdateReq) (*emptypb.Empty, error)
 	DeleteDag(context.Context, *DagDeleteReq) (*emptypb.Empty, error)
+	// ListTaskResources — оверрайды ресурсов тасков дага из админки.
+	// Значения из манифеста (кода дага) — рекомендуемые; непустое поле
+	// оверрайда приоритетнее и применяется при launch попытки (подхватывается
+	// ретраями без перерегистрации).
+	ListTaskResources(context.Context, *TaskResourcesListReq) (*TaskResourcesListRep, error)
+	// SetTaskResources задаёт оверрайд ресурсов таска; пустое поле — брать из
+	// манифеста. Все поля пустые — оверрайд удаляется.
+	SetTaskResources(context.Context, *TaskResourcesSetReq) (*emptypb.Empty, error)
+	// DeleteTaskResources снимает оверрайд таска (возврат к манифесту).
+	DeleteTaskResources(context.Context, *TaskResourcesDeleteReq) (*emptypb.Empty, error)
 	// PushDagManifest — внутренний вызов describe-Job'а: при
 	// регистрации через k8s Job сам отправляет манифест (или ошибку валидации
 	// дага) на control plane, вместо передачи через логи пода. describe_id —
@@ -302,6 +355,15 @@ func (UnimplementedDagServiceServer) SetDagAutoUpdate(context.Context, *DagSetAu
 }
 func (UnimplementedDagServiceServer) DeleteDag(context.Context, *DagDeleteReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteDag not implemented")
+}
+func (UnimplementedDagServiceServer) ListTaskResources(context.Context, *TaskResourcesListReq) (*TaskResourcesListRep, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTaskResources not implemented")
+}
+func (UnimplementedDagServiceServer) SetTaskResources(context.Context, *TaskResourcesSetReq) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetTaskResources not implemented")
+}
+func (UnimplementedDagServiceServer) DeleteTaskResources(context.Context, *TaskResourcesDeleteReq) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteTaskResources not implemented")
 }
 func (UnimplementedDagServiceServer) PushDagManifest(context.Context, *DagPushManifestReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PushDagManifest not implemented")
@@ -525,6 +587,60 @@ func _DagService_DeleteDag_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DagService_ListTaskResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TaskResourcesListReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DagServiceServer).ListTaskResources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DagService_ListTaskResources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DagServiceServer).ListTaskResources(ctx, req.(*TaskResourcesListReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DagService_SetTaskResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TaskResourcesSetReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DagServiceServer).SetTaskResources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DagService_SetTaskResources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DagServiceServer).SetTaskResources(ctx, req.(*TaskResourcesSetReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DagService_DeleteTaskResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TaskResourcesDeleteReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DagServiceServer).DeleteTaskResources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DagService_DeleteTaskResources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DagServiceServer).DeleteTaskResources(ctx, req.(*TaskResourcesDeleteReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DagService_PushDagManifest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DagPushManifestReq)
 	if err := dec(in); err != nil {
@@ -593,6 +709,18 @@ var DagService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteDag",
 			Handler:    _DagService_DeleteDag_Handler,
+		},
+		{
+			MethodName: "ListTaskResources",
+			Handler:    _DagService_ListTaskResources_Handler,
+		},
+		{
+			MethodName: "SetTaskResources",
+			Handler:    _DagService_SetTaskResources_Handler,
+		},
+		{
+			MethodName: "DeleteTaskResources",
+			Handler:    _DagService_DeleteTaskResources_Handler,
 		},
 		{
 			MethodName: "PushDagManifest",

@@ -241,6 +241,45 @@ func (u *Usecase) PushManifest(_ context.Context, id string, manifest []byte, er
 	return nil
 }
 
+// ListTaskResources — оверрайды ресурсов тасков дага (читают все
+// аутентифицированные, как и сам даг).
+func (u *Usecase) ListTaskResources(ctx context.Context, name string) ([]*model.TaskResourcesEntry, error) {
+	if name == "" {
+		return nil, errs.IdRequired
+	}
+	items, err := u.svc.ListTaskResources(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("svc.ListTaskResources: %w", err)
+	}
+	return items, nil
+}
+
+func (u *Usecase) SetTaskResources(ctx context.Context, name, task string, res model.TaskResources) error {
+	if name == "" || task == "" {
+		return errs.IdRequired
+	}
+	if err := u.authz.RequireDag(ctx, name); err != nil {
+		return err
+	}
+	if err := u.svc.SetTaskResources(ctx, name, task, res); err != nil {
+		return fmt.Errorf("svc.SetTaskResources: %w", err)
+	}
+	return nil
+}
+
+func (u *Usecase) DeleteTaskResources(ctx context.Context, name, task string) error {
+	if name == "" || task == "" {
+		return errs.IdRequired
+	}
+	if err := u.authz.RequireDag(ctx, name); err != nil {
+		return err
+	}
+	if err := u.svc.DeleteTaskResources(ctx, name, task); err != nil {
+		return fmt.Errorf("svc.DeleteTaskResources: %w", err)
+	}
+	return nil
+}
+
 func (u *Usecase) SetSchedule(ctx context.Context, name, schedule string, catchup bool) error {
 	if name == "" {
 		return errs.IdRequired

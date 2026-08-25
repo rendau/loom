@@ -1,7 +1,9 @@
-// Package retention — TTL завершённых ранов: периодическая очистка
-// артефактов и логов (artifact-сервер) и записей БД. Порядок удаления —
-// данные раньше записи рана: упавшая на артефактах очистка оставляет ран
-// в БД и повторится следующим проходом.
+// Package retention — очистка завершённых ранов: периодическое удаление
+// артефактов и логов (artifact-сервер) и записей БД. Лимиты — настройки
+// из БД (run_ttl и run_keep_last, скоуп дага перекрывает глобальный); ран
+// удаляется, если нарушает любой из них. Порядок удаления — данные раньше
+// записи рана: упавшая на артефактах очистка оставляет ран в БД и
+// повторится следующим проходом.
 package retention
 
 import (
@@ -10,6 +12,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	settingModel "github.com/rendau/loom/server/internal/domain/setting/model"
 )
 
 // sweepLimit — ранов за один проход: ограничивает длительность прохода,
@@ -17,8 +21,14 @@ import (
 const sweepLimit = 100
 
 type RunServiceI interface {
-	ListExpired(ctx context.Context, before time.Time, limit int64) ([]string, error)
+	ListRetentionDags(ctx context.Context) ([]string, error)
+	ListExpired(ctx context.Context, dagName string, before *time.Time, keepLast, limit int64) ([]string, error)
 	DeleteRun(ctx context.Context, runId string) error
+}
+
+// SettingsI — резолв retention-лимитов по скоупам дагов.
+type SettingsI interface {
+	ResolveForDags(ctx context.Context, dagNames []string) (map[string]settingModel.Effective, error)
 }
 
 type ArtifactI interface {
@@ -40,7 +50,7 @@ type Service struct {
 	artifact ArtifactI
 	tasklog  TaskLogI
 	sessions SessionCleanerI
-	ttl      time.Duration
+	settings SettingsI
 	tick     time.Duration
 
 	ctx       context.Context
@@ -49,7 +59,7 @@ type Service struct {
 }
 
 func New(runSvc RunServiceI, artifact ArtifactI, tasklog TaskLogI, sessions SessionCleanerI,
-	ttl, tick time.Duration,
+	settings SettingsI, tick time.Duration,
 ) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -58,21 +68,17 @@ func New(runSvc RunServiceI, artifact ArtifactI, tasklog TaskLogI, sessions Sess
 		artifact:  artifact,
 		tasklog:   tasklog,
 		sessions:  sessions,
-		ttl:       ttl,
+		settings:  settings,
 		tick:      tick,
 		ctx:       ctx,
 		ctxCancel: cancel,
 	}
 }
 
-// Start запускает цикл очистки; ttl <= 0 — TTL ранов выключен (сессии
-// чистятся всё равно).
+// Start запускает цикл очистки; лимиты читаются из настроек на каждом
+// проходе (правки в админке подхватываются без рестарта).
 func (s *Service) Start() {
-	if s.ttl <= 0 {
-		slog.Info("run retention disabled (sessions cleanup still runs)")
-	}
-
-	slog.Info("run retention started", "ttl", s.ttl, "tick", s.tick)
+	slog.Info("run retention started", "tick", s.tick)
 	s.wg.Go(s.loop)
 }
 
@@ -92,10 +98,8 @@ func (s *Service) loop() {
 		case <-ticker.C:
 		}
 
-		if s.ttl > 0 {
-			if _, err := s.Sweep(s.ctx); err != nil && s.ctx.Err() == nil {
-				slog.Error("retention sweep", "error", err)
-			}
+		if _, err := s.Sweep(s.ctx); err != nil && s.ctx.Err() == nil {
+			slog.Error("retention sweep", "error", err)
 		}
 		if s.sessions != nil {
 			if _, err := s.sessions.CleanupSessions(s.ctx); err != nil && s.ctx.Err() == nil {
@@ -105,22 +109,52 @@ func (s *Service) loop() {
 	}
 }
 
-// Sweep — один проход очистки: удаляет до sweepLimit просроченных ранов,
+// Sweep — один проход очистки: по каждому дагу с завершёнными ранами
+// резолвит эффективные лимиты и удаляет до sweepLimit ранов суммарно,
 // возвращает число удалённых. Ошибка по одному рану не прерывает проход.
 func (s *Service) Sweep(ctx context.Context) (int, error) {
-	ids, err := s.runSvc.ListExpired(ctx, time.Now().Add(-s.ttl), sweepLimit)
+	dags, err := s.runSvc.ListRetentionDags(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("runSvc.ListExpired: %w", err)
+		return 0, fmt.Errorf("runSvc.ListRetentionDags: %w", err)
+	}
+	if len(dags) == 0 {
+		return 0, nil
+	}
+
+	effective, err := s.settings.ResolveForDags(ctx, dags)
+	if err != nil {
+		return 0, fmt.Errorf("settings.ResolveForDags: %w", err)
 	}
 
 	deleted := 0
-	for _, id := range ids {
-		if err = s.deleteRun(ctx, id); err != nil {
-			slog.Error("retention delete run", "run_id", id, "error", err)
+	for _, dag := range dags {
+		eff := effective[dag]
+		if eff.RunTTL <= 0 && eff.RunKeepLast <= 0 {
 			continue
 		}
-		deleted++
-		slog.Info("run deleted by retention", "run_id", id)
+		if deleted >= sweepLimit {
+			break
+		}
+
+		var before *time.Time
+		if eff.RunTTL > 0 {
+			before = new(time.Now().Add(-eff.RunTTL))
+		}
+
+		ids, err := s.runSvc.ListExpired(ctx, dag, before, eff.RunKeepLast, int64(sweepLimit-deleted))
+		if err != nil {
+			slog.Error("retention list expired", "dag", dag, "error", err)
+			continue
+		}
+
+		for _, id := range ids {
+			if err = s.deleteRun(ctx, id); err != nil {
+				slog.Error("retention delete run", "run_id", id, "error", err)
+				continue
+			}
+			deleted++
+			slog.Info("run deleted by retention", "run_id", id)
+		}
 	}
 
 	return deleted, nil

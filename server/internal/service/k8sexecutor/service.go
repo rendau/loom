@@ -63,7 +63,6 @@ const (
 type Service struct {
 	clientset kubernetes.Interface
 	namespace string
-	jobTTL    time.Duration
 	// pullSecret — imagePullSecrets подов попыток (приватные образы дагов);
 	// пусто — без секрета.
 	pullSecret string
@@ -85,12 +84,11 @@ type Service struct {
 }
 
 func New(clientset kubernetes.Interface, metricsClient metricsclient.Interface, namespace string,
-	jobTTL time.Duration, pullSecret string, metricsTick time.Duration,
+	pullSecret string, metricsTick time.Duration,
 ) *Service {
 	return &Service{
 		clientset:     clientset,
 		namespace:     namespace,
-		jobTTL:        jobTTL,
 		pullSecret:    pullSecret,
 		metricsClient: metricsClient,
 		metricsTick:   metricsTick,
@@ -234,6 +232,13 @@ func (s *Service) buildJob(spec runModel.LaunchSpec) (*batchv1.Job, error) {
 		return nil, err
 	}
 
+	// TTL завершённого Job'а — настройка k8s_job_ttl, резолвится
+	// планировщиком при launch; 0 — Job не удаляется
+	var ttl *int32
+	if spec.JobTTL > 0 {
+		ttl = new(int32(spec.JobTTL / time.Second))
+	}
+
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        jobName(spec),
@@ -243,7 +248,7 @@ func (s *Service) buildJob(spec runModel.LaunchSpec) (*batchv1.Job, error) {
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            new(int32(0)),
-			TTLSecondsAfterFinished: new(int32(s.jobTTL / time.Second)),
+			TTLSecondsAfterFinished: ttl,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      labels,

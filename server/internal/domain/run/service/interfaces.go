@@ -14,7 +14,8 @@ type RepoDbI interface {
 	CreateRun(ctx context.Context, obj *model.Main) error
 	UpdateRun(ctx context.Context, id string, obj *model.Edit) error
 	FinishRun(ctx context.Context, runId, status string) (bool, error)
-	ListExpiredRuns(ctx context.Context, before time.Time, limit int64) ([]string, error)
+	ListRetentionDags(ctx context.Context) ([]string, error)
+	ListExpiredRuns(ctx context.Context, dagName string, before *time.Time, keepLast, limit int64) ([]string, error)
 	DeleteRun(ctx context.Context, runId string) error
 	CountActiveTaskInstances(ctx context.Context) (map[string]int64, error)
 	ListPoolUsage(ctx context.Context) ([]model.PoolUsage, error)

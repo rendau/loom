@@ -1,6 +1,6 @@
 import { apiFetch } from '~/api/client'
 import type { ListParams, PaginationInfo } from '~/types/common'
-import type { Dag, DagRegistration, DagStats } from '~/types/dag'
+import type { Dag, DagRegistration, DagStats, TaskResourcesOverride } from '~/types/dag'
 
 export type DagListQuery = {
   list_params: ListParams
@@ -74,4 +74,31 @@ export function setDagAutoUpdate(name: string, autoUpdate: boolean) {
 
 export function deleteDag(name: string) {
   return apiFetch<object>(`/dag/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
+// Оверрайды ресурсов тасков: значения манифеста — рекомендуемые, непустое
+// поле оверрайда приоритетнее и применяется при запуске попытки
+// (подхватывается ретраями без перерегистрации).
+export function listTaskResources(name: string) {
+  return apiFetch<{ results: TaskResourcesOverride[] }>(`/dag/${encodeURIComponent(name)}/task-resources`)
+}
+
+// Все поля пустые — оверрайд удаляется.
+export function setTaskResources(name: string, task: string, res: {
+  cpu_request: string
+  cpu_limit: string
+  memory_request: string
+  memory_limit: string
+}) {
+  return apiFetch<object>(
+    `/dag/${encodeURIComponent(name)}/task-resources/${encodeURIComponent(task)}`,
+    { method: 'PUT', body: { ...res } },
+  )
+}
+
+export function deleteTaskResources(name: string, task: string) {
+  return apiFetch<object>(
+    `/dag/${encodeURIComponent(name)}/task-resources/${encodeURIComponent(task)}`,
+    { method: 'DELETE' },
+  )
 }

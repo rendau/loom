@@ -609,14 +609,49 @@ func (r *Repo) ListPoolUsage(ctx context.Context) ([]model.PoolUsage, error) {
 	return result, nil
 }
 
-// ListExpiredRuns возвращает id завершённых ранов с finished_at раньше
-// before — кандидатов retention-очистки (старые первыми).
-func (r *Repo) ListExpiredRuns(ctx context.Context, before time.Time, limit int64) ([]string, error) {
+// ListRetentionDags возвращает имена дагов, у которых есть завершённые
+// раны — скоупы retention-прохода (включая даги, уже удалённые из dag:
+// их раны тоже подлежат очистке, настройки резолвятся до глобальных).
+func (r *Repo) ListRetentionDags(ctx context.Context) ([]string, error) {
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT id FROM run
-		WHERE finished_at IS NOT NULL AND finished_at < $1
+		SELECT DISTINCT dag_name FROM run WHERE finished_at IS NOT NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("ListRetentionDags: %w", err)
+	}
+	defer rows.Close()
+
+	var result []string
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("ListRetentionDags scan: %w", err)
+		}
+		result = append(result, name)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListRetentionDags rows: %w", err)
+	}
+	return result, nil
+}
+
+// ListExpiredRuns возвращает id завершённых ранов дага, нарушающих любой
+// из retention-лимитов (старые первыми): finished_at раньше before
+// (nil — по времени не чистить) либо за пределами keepLast последних
+// завершённых (0 — количество не ограничено).
+func (r *Repo) ListExpiredRuns(ctx context.Context, dagName string, before *time.Time,
+	keepLast, limit int64,
+) ([]string, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
+		SELECT id FROM (
+			SELECT id, finished_at,
+				row_number() OVER (ORDER BY finished_at DESC) AS rn
+			FROM run
+			WHERE dag_name = $1 AND finished_at IS NOT NULL
+		) t
+		WHERE ($2::timestamptz IS NOT NULL AND finished_at < $2)
+			OR ($3::bigint > 0 AND rn > $3)
 		ORDER BY finished_at
-		LIMIT $2`, before, limit)
+		LIMIT $4`, dagName, before, keepLast, limit)
 	if err != nil {
 		return nil, fmt.Errorf("ListExpiredRuns: %w", err)
 	}

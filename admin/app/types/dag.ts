@@ -12,6 +12,17 @@ export interface DagTaskResources {
   memory_limit: string
 }
 
+// Оверрайд ресурсов таска из админки: значения манифеста — рекомендуемые,
+// непустое поле оверрайда приоритетнее при запуске попытки.
+export interface TaskResourcesOverride {
+  task: string
+  cpu_request: string
+  cpu_limit: string
+  memory_request: string
+  memory_limit: string
+  modified_at?: string
+}
+
 export interface DagTaskEnvSecret {
   env: string
   secret: string

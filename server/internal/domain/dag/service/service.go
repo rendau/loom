@@ -62,6 +62,86 @@ func (s *Service) Get(ctx context.Context, name string, errNE bool) (*model.Main
 // ими управляет админка (SetSchedule/SetPaused); autoUpdate обновляется
 // только при явном значении — nil сохраняет текущее (в частности,
 // авто-перерегистрация dagsync флаг не трогает).
+// ── task_resources: оверрайды ресурсов тасков из админки ─────────────────
+
+// ListTaskResources — оверрайды ресурсов тасков дага.
+func (s *Service) ListTaskResources(ctx context.Context, dagName string) ([]*model.TaskResourcesEntry, error) {
+	if _, _, err := s.Get(ctx, dagName, true); err != nil {
+		return nil, err
+	}
+	result, err := s.repoDb.ListTaskResources(ctx, dagName)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.ListTaskResources: %w", err)
+	}
+	return result, nil
+}
+
+// SetTaskResources задаёт оверрайд ресурсов таска: значения манифеста —
+// рекомендуемые, непустое поле оверрайда приоритетнее при launch. Таск
+// должен существовать в текущем манифесте дага; все поля пустые —
+// оверрайд удаляется.
+func (s *Service) SetTaskResources(ctx context.Context, dagName, task string, res model.TaskResources) error {
+	dag, _, err := s.Get(ctx, dagName, true)
+	if err != nil {
+		return err
+	}
+	if !lo.ContainsBy(dag.Tasks, func(t model.Task) bool { return t.Name == task }) {
+		return errs.ErrFull{Err: errs.TaskNotFound,
+			Desc: fmt.Sprintf("таска %q нет в манифесте дага %q", task, dagName)}
+	}
+
+	for _, q := range []struct{ name, value string }{
+		{"cpu_request", res.CPURequest},
+		{"cpu_limit", res.CPULimit},
+		{"memory_request", res.MemoryRequest},
+		{"memory_limit", res.MemoryLimit},
+	} {
+		if q.value == "" {
+			continue
+		}
+		if _, err = k8sResource.ParseQuantity(q.value); err != nil {
+			return errs.ErrFull{Err: errs.InvalidRequest,
+				Desc: fmt.Sprintf("некорректное значение %s=%q", q.name, q.value)}
+		}
+	}
+
+	if res == (model.TaskResources{}) {
+		if _, err = s.repoDb.DeleteTaskResources(ctx, dagName, task); err != nil {
+			return fmt.Errorf("repoDb.DeleteTaskResources: %w", err)
+		}
+		return nil
+	}
+
+	if err = s.repoDb.SetTaskResources(ctx, dagName, task, res); err != nil {
+		return fmt.Errorf("repoDb.SetTaskResources: %w", err)
+	}
+	return nil
+}
+
+// DeleteTaskResources снимает оверрайд таска (возврат к манифесту).
+func (s *Service) DeleteTaskResources(ctx context.Context, dagName, task string) error {
+	if _, _, err := s.Get(ctx, dagName, true); err != nil {
+		return err
+	}
+	found, err := s.repoDb.DeleteTaskResources(ctx, dagName, task)
+	if err != nil {
+		return fmt.Errorf("repoDb.DeleteTaskResources: %w", err)
+	}
+	if !found {
+		return errs.ObjectNotFound
+	}
+	return nil
+}
+
+// GetTaskResources — оверрайд одного таска для launch; nil — оверрайда нет.
+func (s *Service) GetTaskResources(ctx context.Context, dagName, task string) (*model.TaskResources, error) {
+	res, err := s.repoDb.GetTaskResources(ctx, dagName, task)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.GetTaskResources: %w", err)
+	}
+	return res, nil
+}
+
 // ListLastRuns — последние perDag ранов каждого дага (статус-стрип админки).
 func (s *Service) ListLastRuns(ctx context.Context, dagNames []string, perDag int) (map[string][]model.LastRun, error) {
 	if len(dagNames) == 0 {

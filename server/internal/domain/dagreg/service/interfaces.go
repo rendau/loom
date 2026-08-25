@@ -5,7 +5,13 @@ import (
 	"time"
 
 	"github.com/rendau/loom/server/internal/domain/dagreg/model"
+	settingModel "github.com/rendau/loom/server/internal/domain/setting/model"
 )
+
+// SettingsI — TTL истории регистраций (глобальная настройка dag_reg_ttl).
+type SettingsI interface {
+	Resolve(ctx context.Context, dagName string) (settingModel.Effective, error)
+}
 
 type RepoDbI interface {
 	Create(ctx context.Context, m *model.Main) error

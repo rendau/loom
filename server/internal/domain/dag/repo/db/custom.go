@@ -2,8 +2,11 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/rendau/loom/server/internal/domain/dag/model"
 )
@@ -119,4 +122,73 @@ func (r *Repo) AdvanceNextRun(ctx context.Context, name string, from, to time.Ti
 		return false, fmt.Errorf("AdvanceNextRun: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// ── task_resources: оверрайды ресурсов тасков из админки ─────────────────
+
+// SetTaskResources создаёт или перезаписывает оверрайд ресурсов таска.
+func (r *Repo) SetTaskResources(ctx context.Context, dagName, task string, res model.TaskResources) error {
+	_, err := r.TxM.GetConnection(ctx).Exec(ctx, `
+		INSERT INTO task_resources (dag_name, task, cpu_request, cpu_limit, memory_request, memory_limit)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (dag_name, task) DO UPDATE SET
+			cpu_request = excluded.cpu_request,
+			cpu_limit = excluded.cpu_limit,
+			memory_request = excluded.memory_request,
+			memory_limit = excluded.memory_limit,
+			modified_at = now()`,
+		dagName, task, res.CPURequest, res.CPULimit, res.MemoryRequest, res.MemoryLimit)
+	if err != nil {
+		return fmt.Errorf("SetTaskResources: %w", err)
+	}
+	return nil
+}
+
+func (r *Repo) DeleteTaskResources(ctx context.Context, dagName, task string) (bool, error) {
+	tag, err := r.TxM.GetConnection(ctx).Exec(ctx,
+		`DELETE FROM task_resources WHERE dag_name = $1 AND task = $2`, dagName, task)
+	if err != nil {
+		return false, fmt.Errorf("DeleteTaskResources: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+func (r *Repo) ListTaskResources(ctx context.Context, dagName string) ([]*model.TaskResourcesEntry, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
+		SELECT task, cpu_request, cpu_limit, memory_request, memory_limit, modified_at
+		FROM task_resources WHERE dag_name = $1 ORDER BY task`, dagName)
+	if err != nil {
+		return nil, fmt.Errorf("ListTaskResources: %w", err)
+	}
+	defer rows.Close()
+
+	var result []*model.TaskResourcesEntry
+	for rows.Next() {
+		var e model.TaskResourcesEntry
+		if err = rows.Scan(&e.Task, &e.Res.CPURequest, &e.Res.CPULimit,
+			&e.Res.MemoryRequest, &e.Res.MemoryLimit, &e.ModifiedAt); err != nil {
+			return nil, fmt.Errorf("ListTaskResources scan: %w", err)
+		}
+		result = append(result, &e)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListTaskResources rows: %w", err)
+	}
+	return result, nil
+}
+
+// GetTaskResources — оверрайд одного таска; nil — оверрайда нет.
+func (r *Repo) GetTaskResources(ctx context.Context, dagName, task string) (*model.TaskResources, error) {
+	var res model.TaskResources
+	err := r.TxM.GetConnection(ctx).QueryRow(ctx, `
+		SELECT cpu_request, cpu_limit, memory_request, memory_limit
+		FROM task_resources WHERE dag_name = $1 AND task = $2`, dagName, task).
+		Scan(&res.CPURequest, &res.CPULimit, &res.MemoryRequest, &res.MemoryLimit)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("GetTaskResources: %w", err)
+	}
+	return &res, nil
 }

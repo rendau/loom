@@ -246,6 +246,12 @@ const busyPools = computed(() =>
                   <span class="text-xs tabular-nums text-muted">{{ formatBytes(storage.logs.used_bytes) }}</span>
                 </div>
                 <div class="flex items-baseline justify-between gap-2 border-t border-default pt-2">
+                  <span class="font-medium">Всего</span>
+                  <span class="text-xs font-medium tabular-nums">
+                    {{ formatBytes(Number(storage.data.used_bytes) + Number(storage.logs.used_bytes)) }}
+                  </span>
+                </div>
+                <div class="flex items-baseline justify-between gap-2">
                   <span class="text-muted">Свободно на volume</span>
                   <span class="text-xs tabular-nums text-muted">
                     {{ formatBytes(storage.data.free_bytes) }} из {{ formatBytes(storage.data.total_bytes) }}

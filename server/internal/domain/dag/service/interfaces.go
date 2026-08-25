@@ -14,6 +14,11 @@ type RepoDbI interface {
 	Update(ctx context.Context, name string, obj *model.Edit) error
 	Delete(ctx context.Context, name string) error
 
+	SetTaskResources(ctx context.Context, dagName, task string, res model.TaskResources) error
+	DeleteTaskResources(ctx context.Context, dagName, task string) (bool, error)
+	ListTaskResources(ctx context.Context, dagName string) ([]*model.TaskResourcesEntry, error)
+	GetTaskResources(ctx context.Context, dagName, task string) (*model.TaskResources, error)
+
 	SetNextRun(ctx context.Context, name string, t *time.Time) error
 	ListLastRuns(ctx context.Context, dagNames []string, perDag int) (map[string][]model.LastRun, error)
 	ListDueNames(ctx context.Context) ([]string, error)

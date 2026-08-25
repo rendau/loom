@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { DropdownMenuItem, TableColumn, TableRow, TabsItem } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
-import { getDag, getDagStats, listDagRegistrations, setDagAutoUpdate, setDagPaused, syncDag } from '~/api/dag.api'
+import { getDag, getDagStats, listDagRegistrations, listTaskResources, setDagAutoUpdate, setDagPaused, syncDag } from '~/api/dag.api'
 import { listRuns } from '~/api/run.api'
-import type { Dag, DagRegistration, DagTask, DagTaskStat } from '~/types/dag'
+import type { Dag, DagRegistration, DagTask, DagTaskStat, TaskResourcesOverride } from '~/types/dag'
 import type { Run } from '~/types/run'
 
 // Карточка дага — два лица (design/02): таба «Обзор» — как даг себя ведёт
@@ -97,14 +97,43 @@ async function loadStats() {
   }
 }
 
-// лимиты памяти — из манифеста
+// ── оверрайды ресурсов тасков (админка приоритетнее кода) ──
+
+const resourceOverrides = ref<TaskResourcesOverride[]>([])
+
+async function loadOverrides() {
+  try {
+    resourceOverrides.value = (await listTaskResources(dagName)).results ?? []
+  }
+  catch {
+    // секция останется на значениях манифеста — не критично
+  }
+}
+
+const overrideByTask = computed(() =>
+  new Map(resourceOverrides.value.map(o => [o.task, o])))
+
+// эффективный лимит памяти: оверрайд из админки перекрывает манифест
 const memoryLimitByTask = computed(() =>
-  new Map((dag.value?.tasks ?? []).map(t => [t.name, t.resources?.memory_limit || undefined])))
+  new Map((dag.value?.tasks ?? []).map((t) => {
+    const override = overrideByTask.value.get(t.name)?.memory_limit
+    return [t.name, {
+      value: override || t.resources?.memory_limit || undefined,
+      overridden: Boolean(override),
+    }]
+  })))
+
+// редактор оверрайда: открывается по имени таска из обеих таб
+const resourcesTarget = ref<DagTask | null>(null)
+
+function openResources(taskName: string) {
+  resourcesTarget.value = dag.value?.tasks.find(t => t.name === taskName) ?? null
+}
 
 // пока идёт регистрация/обновление — частый поллинг карточки; раны
 // обновляются фоновым тиком на табе «Обзор»
 onMounted(async () => {
-  await Promise.all([load(), loadRuns(), loadStats()])
+  await Promise.all([load(), loadRuns(), loadStats(), loadOverrides()])
 })
 usePolling(() => load(true), 3000, () => isUpdating.value)
 usePolling(() => {
@@ -234,8 +263,23 @@ function formatSeconds(sec: number): string {
   return `${sec}с`
 }
 
-function formatResources(t: DagTask): string {
+// эффективные ресурсы: непустое поле оверрайда из админки перекрывает
+// значение манифеста
+function effectiveResources(t: DagTask) {
   const r = t.resources
+  const o = overrideByTask.value.get(t.name)
+  if (!o)
+    return r
+  return {
+    cpu_request: o.cpu_request || r?.cpu_request || '',
+    cpu_limit: o.cpu_limit || r?.cpu_limit || '',
+    memory_request: o.memory_request || r?.memory_request || '',
+    memory_limit: o.memory_limit || r?.memory_limit || '',
+  }
+}
+
+function formatResources(t: DagTask): string {
+  const r = effectiveResources(t)
   if (!r)
     return '—'
   const parts: string[] = []
@@ -427,7 +471,18 @@ const regColumns: TableColumn<DagRegistration>[] = [
                 <span v-else class="text-muted">—</span>
               </template>
               <template #limit-cell="{ row }">
-                <span class="font-mono text-xs">{{ memoryLimitByTask.get(row.original.task) ?? '—' }}</span>
+                <div class="flex items-center gap-1.5">
+                  <span class="font-mono text-xs">{{ memoryLimitByTask.get(row.original.task)?.value ?? '—' }}</span>
+                  <UTooltip v-if="memoryLimitByTask.get(row.original.task)?.overridden" text="задан в админке; значение из кода — рекомендуемое">
+                    <UBadge color="info" variant="subtle" size="sm">админка</UBadge>
+                  </UTooltip>
+                  <UTooltip v-if="canManage" text="Изменить лимиты таска">
+                    <UButton
+                      icon="i-lucide-pencil" size="xs" color="neutral" variant="ghost"
+                      aria-label="Изменить лимиты таска" @click="openResources(row.original.task)"
+                    />
+                  </UTooltip>
+                </div>
               </template>
             </UTable>
             <p class="mt-1.5 flex items-center gap-1 text-xs text-muted">
@@ -436,6 +491,8 @@ const regColumns: TableColumn<DagRegistration>[] = [
               (семплы executor'а) и может отсутствовать у коротких попыток.
             </p>
           </section>
+
+          <DagSettingsCard :dag-name="dagName" :can-manage="canManage" />
         </template>
 
         <!-- ── Схема: как даг устроен ── -->
@@ -478,7 +535,18 @@ const regColumns: TableColumn<DagRegistration>[] = [
                 {{ formatSeconds(row.original.timeout_sec) }}
               </template>
               <template #resources-cell="{ row }">
-                <span class="font-mono text-xs">{{ formatResources(row.original) }}</span>
+                <div class="flex items-center gap-1.5">
+                  <span class="font-mono text-xs">{{ formatResources(row.original) }}</span>
+                  <UTooltip v-if="overrideByTask.has(row.original.name)" text="лимиты заданы в админке; значения из кода — рекомендуемые">
+                    <UBadge color="info" variant="subtle" size="sm">админка</UBadge>
+                  </UTooltip>
+                  <UTooltip v-if="canManage" text="Изменить лимиты таска">
+                    <UButton
+                      icon="i-lucide-pencil" size="xs" color="neutral" variant="ghost"
+                      aria-label="Изменить лимиты таска" @click="openResources(row.original.name)"
+                    />
+                  </UTooltip>
+                </div>
               </template>
               <template #pool-cell="{ row }">
                 {{ row.original.pool || 'default' }}
@@ -541,6 +609,13 @@ const regColumns: TableColumn<DagRegistration>[] = [
         </template>
       </template>
 
+      <DagTaskResourcesModal
+        :dag-name="dagName"
+        :task="resourcesTarget"
+        :override="resourcesTarget ? (overrideByTask.get(resourcesTarget.name) ?? null) : null"
+        @close="resourcesTarget = null"
+        @saved="loadOverrides"
+      />
       <DagTriggerModal :dag="triggerTarget" @close="triggerTarget = null" />
       <DagBackfillModal :dag="backfillTarget" @close="backfillTarget = null" />
       <DagScheduleModal :dag="scheduleTarget" @close="scheduleTarget = null" @saved="onScheduleSaved" />

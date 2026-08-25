@@ -318,6 +318,25 @@ func (e *env) taskStatuses(t *testing.T, runId string) map[string]string {
 	return lo.SliceToMap(tis, func(ti *runModel.TaskInstance) (string, string) { return ti.Task, ti.Status })
 }
 
+// taskPools — пул каждого таска рана (денормализован в task_instance при
+// триггере).
+func (e *env) taskPools(t *testing.T, runId string) map[string]string {
+	t.Helper()
+	rows, err := e.pool.Query(context.Background(),
+		`SELECT task, pool FROM task_instance WHERE run_id = $1`, runId)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	result := map[string]string{}
+	for rows.Next() {
+		var task, pool string
+		require.NoError(t, rows.Scan(&task, &pool))
+		result[task] = pool
+	}
+	require.NoError(t, rows.Err())
+	return result
+}
+
 func (e *env) runStatus(t *testing.T, runId string) string {
 	t.Helper()
 	run, _, err := e.runSvc.Get(context.Background(), runId, true)
@@ -799,10 +818,11 @@ func TestCancelRunFreesQueue(t *testing.T) {
 		"sdk_version": "0.1.0",
 		"name": "cancel-queue",
 		"tasks": [
-			{"name": "a", "pool": "tiny"},
-			{"name": "b", "pool": "tiny"}
+			{"name": "a"},
+			{"name": "b"}
 		]
 	}`)
+	require.NoError(t, e.dagSvc.SetPool(context.Background(), dagName, "tiny"))
 
 	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
@@ -1199,10 +1219,11 @@ func TestPoolSlotsAndPriority(t *testing.T) {
 		"sdk_version": "0.1.0",
 		"name": "pool-dag",
 		"tasks": [
-			{"name": "low", "pool": "tiny", "priority": 1},
-			{"name": "high", "pool": "tiny", "priority": 5}
+			{"name": "low", "priority": 1},
+			{"name": "high", "priority": 5}
 		]
 	}`)
+	require.NoError(t, e.dagSvc.SetPool(context.Background(), dagName, "tiny"))
 
 	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
@@ -1226,6 +1247,46 @@ func TestPoolSlotsAndPriority(t *testing.T) {
 	err = e.poolSvc.CheckExist(context.Background(), []string{"default", "ghost"})
 	assert.ErrorIs(t, err, errs.PoolNotFound)
 	require.NoError(t, e.poolSvc.CheckExist(context.Background(), []string{"default", "tiny"}))
+}
+
+// Пул задаётся только на даге (в коде дага его нет) и действует на все его
+// таски; пусто — default. Резолв при триггере, поэтому смена применяется со
+// следующего рана.
+func TestDagPool(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	require.NoError(t, e.poolSvc.Set(ctx, "heavy", 4))
+
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "dag-pool",
+		"tasks": [
+			{"name": "first"},
+			{"name": "second"}
+		]
+	}`)
+
+	// пул дага не задан — таски уходят в общий default
+	run1, err := e.runUsecase.Trigger(ctx, dagName, nil)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"first": "default", "second": "default"}, e.taskPools(t, run1))
+
+	// пул дага накрывает все его таски
+	require.NoError(t, e.dagSvc.SetPool(ctx, dagName, "heavy"))
+	run2, err := e.runUsecase.Trigger(ctx, dagName, nil)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"first": "heavy", "second": "heavy"}, e.taskPools(t, run2))
+	// у уже созданного рана пул зафиксирован
+	assert.Equal(t, "default", e.taskPools(t, run1)["first"])
+
+	// снятие пула — возврат к default
+	require.NoError(t, e.dagSvc.SetPool(ctx, dagName, ""))
+	run3, err := e.runUsecase.Trigger(ctx, dagName, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "default", e.taskPools(t, run3)["first"])
+
+	// имя пула валидируется
+	assert.ErrorIs(t, e.dagSvc.SetPool(ctx, dagName, "bad name"), errs.InvalidRequest)
 }
 
 // max_active_runs: второй ран дага ждёт завершения первого.

@@ -232,6 +232,30 @@ func (s *Service) SetPaused(ctx context.Context, name string, paused bool) error
 	return nil
 }
 
+// SetPool задаёт пул слотов дага: он действует на все его таски (в коде
+// дага пула нет). Пустая строка снимает пул — таски уедут в default.
+// Существование пула проверяет usecase (PoolCheckerI). Пул резолвится при
+// триггере рана, поэтому смена действует со следующего рана: у уже
+// созданных task instance'ов пул денормализован.
+func (s *Service) SetPool(ctx context.Context, name, pool string) error {
+	if _, _, err := s.Get(ctx, name, true); err != nil {
+		return err
+	}
+	if pool != "" && !nameRe.MatchString(pool) {
+		return errs.ErrFull{Err: errs.InvalidRequest,
+			Desc: fmt.Sprintf("недопустимое имя пула %q", pool)}
+	}
+
+	err := s.repoDb.Update(ctx, name, &model.Edit{
+		Pool:       &pool,
+		ModifiedAt: new(time.Now()),
+	})
+	if err != nil {
+		return fmt.Errorf("repoDb.Update: %w", err)
+	}
+	return nil
+}
+
 // SetAutoUpdate включает/выключает poll-синк новой версии образа дага
 // .
 func (s *Service) SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error {
@@ -365,9 +389,6 @@ func ValidateManifest(m *model.Manifest) error {
 		}
 		if err := validateResources(t.Name, t.Resources); err != nil {
 			return err
-		}
-		if t.Pool != "" && !nameRe.MatchString(t.Pool) {
-			return fail(fmt.Sprintf("таск %q: недопустимое имя пула %q", t.Name, t.Pool))
 		}
 		// env-инъекции секретов и переменных делят одно пространство имён —
 		// seenEnv общий

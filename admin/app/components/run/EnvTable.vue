@@ -2,7 +2,8 @@
 import type { TableColumn } from '@nuxt/ui'
 import type { RunEnvBinding } from '~/utils/runenv'
 
-// Окружение рана/таска: env-имя → тип → источник (имя + скоуп) → значение.
+// Окружение рана/таска: переменная/секрет — под тем именем, под которым
+// заведена в админке (env-имя контейнера — деталь кода дага, в тултипе).
 // snapshot=true — данные из run_env (фактическая инъекция при launch);
 // false — fallback для старых ранов: текущие значения с обязательной
 // пометкой. Секрет — только имя, «••••» и переход в /env (показ под RBAC).
@@ -13,9 +14,8 @@ const props = defineProps<{
 }>()
 
 const columns: TableColumn<RunEnvBinding>[] = [
-  { accessorKey: 'env', header: 'Env' },
+  { id: 'source', header: 'Имя' },
   { accessorKey: 'kind', header: 'Тип' },
-  { id: 'source', header: 'Источник' },
   { id: 'value', header: 'Значение' },
 ]
 
@@ -32,10 +32,6 @@ function envLink(b: RunEnvBinding): string {
 <template>
   <div>
     <UTable :data="bindings" :columns="columns" :ui="denseTableUi">
-      <template #env-cell="{ row }">
-        <span class="font-mono text-xs font-medium text-highlighted">{{ row.original.env }}</span>
-      </template>
-
       <template #kind-cell="{ row }">
         <UBadge
           :color="row.original.kind === 'secret' ? 'warning' : 'neutral'"
@@ -49,9 +45,11 @@ function envLink(b: RunEnvBinding): string {
 
       <template #source-cell="{ row }">
         <div class="flex items-center gap-1.5">
-          <NuxtLink :to="envLink(row.original)" class="font-mono text-xs hover:text-primary hover:underline">
-            {{ row.original.name }}
-          </NuxtLink>
+          <UTooltip :text="`в контейнере: ${row.original.env}`">
+            <NuxtLink :to="envLink(row.original)" class="font-mono text-xs font-medium text-highlighted hover:text-primary hover:underline">
+              {{ row.original.name }}
+            </NuxtLink>
+          </UTooltip>
           <UBadge v-if="row.original.scope === undefined" color="error" variant="subtle" size="sm">
             не найдена — запуск таска упадёт
           </UBadge>

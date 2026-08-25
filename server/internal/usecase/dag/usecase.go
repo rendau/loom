@@ -120,6 +120,13 @@ func (u *Usecase) Register(ctx context.Context, spec dagregModel.EnqueueSpec) (*
 		}
 	}
 
+	// пул — тоже до очереди: ошибку «нет такого пула» нужно вернуть форме
+	if spec.Pool != nil && *spec.Pool != "" {
+		if err := u.pools.CheckExist(ctx, []string{*spec.Pool}); err != nil {
+			return nil, err
+		}
+	}
+
 	spec.Source = dagregModel.SourceManual
 	spec.DagName = ""
 
@@ -145,15 +152,6 @@ func (u *Usecase) Process(ctx context.Context, reg *dagregModel.Main) (string, e
 		return reg.DagName, fmt.Errorf("разбор манифеста: %w", err)
 	}
 
-	// пулы манифеста должны существовать: таск с неизвестным пулом навсегда
-	// завис бы в очереди
-	pools := lo.Uniq(lo.FilterMap(m.Tasks, func(t model.Task, _ int) (string, bool) {
-		return t.Pool, t.Pool != ""
-	}))
-	if err = u.pools.CheckExist(ctx, pools); err != nil {
-		return m.Name, err
-	}
-
 	_, existed, err := u.svc.Get(ctx, m.Name, false)
 	if err != nil {
 		return m.Name, fmt.Errorf("svc.Get: %w", err)
@@ -169,6 +167,11 @@ func (u *Usecase) Process(ctx context.Context, reg *dagregModel.Main) (string, e
 		if reg.Paused != nil && *reg.Paused {
 			if err = u.svc.SetPaused(ctx, m.Name, true); err != nil {
 				return m.Name, fmt.Errorf("svc.SetPaused: %w", err)
+			}
+		}
+		if reg.Pool != nil && *reg.Pool != "" {
+			if err = u.svc.SetPool(ctx, m.Name, *reg.Pool); err != nil {
+				return m.Name, fmt.Errorf("svc.SetPool: %w", err)
 			}
 		}
 		if reg.Schedule != nil && *reg.Schedule != "" {
@@ -302,6 +305,27 @@ func (u *Usecase) SetPaused(ctx context.Context, name string, paused bool) error
 	}
 	if err := u.svc.SetPaused(ctx, name, paused); err != nil {
 		return fmt.Errorf("svc.SetPaused: %w", err)
+	}
+	return nil
+}
+
+// SetPool задаёт (или снимает — пустая строка) пул слотов дага. Пул
+// действует на все таски дага; смена применяется со следующего рана.
+func (u *Usecase) SetPool(ctx context.Context, name, pool string) error {
+	if name == "" {
+		return errs.IdRequired
+	}
+	if err := u.authz.RequireDag(ctx, name); err != nil {
+		return err
+	}
+	// неизвестный пул навсегда оставил бы таски дага в очереди
+	if pool != "" {
+		if err := u.pools.CheckExist(ctx, []string{pool}); err != nil {
+			return err
+		}
+	}
+	if err := u.svc.SetPool(ctx, name, pool); err != nil {
+		return fmt.Errorf("svc.SetPool: %w", err)
 	}
 	return nil
 }

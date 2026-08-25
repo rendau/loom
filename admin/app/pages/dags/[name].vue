@@ -298,9 +298,8 @@ const taskColumns: TableColumn<DagTask>[] = [
   { accessorKey: 'retries', header: 'Ретраи' },
   { id: 'timeout', header: 'Таймаут' },
   { id: 'resources', header: 'Ресурсы (req/lim)' },
-  { accessorKey: 'pool', header: 'Пул' },
   { accessorKey: 'priority', header: 'Приоритет' },
-  { id: 'injections', header: 'Инъекции (env)' },
+  { id: 'injections', header: 'Инъекции' },
 ]
 
 // таба «Настройки»: эффективные ресурсы тасков + источник
@@ -403,6 +402,9 @@ const regColumns: TableColumn<DagRegistration>[] = [
               </template>
             </MetaItem>
             <MetaItem label="Лимит активных ранов">{{ dag.max_active_runs || 'без лимита' }}</MetaItem>
+            <MetaItem label="Пул слотов">
+              <span class="font-mono">{{ dag.pool || 'default' }}</span>
+            </MetaItem>
             <MetaItem label="Переменные и секреты">
               <NuxtLink :to="`/env?dag_name=${encodeURIComponent(dag.name)}`" class="text-primary hover:underline">
                 env дага →
@@ -557,24 +559,21 @@ const regColumns: TableColumn<DagRegistration>[] = [
                   </UTooltip>
                 </div>
               </template>
-              <template #pool-cell="{ row }">
-                {{ row.original.pool || 'default' }}
-              </template>
               <template #priority-cell="{ row }">
                 {{ row.original.priority || '—' }}
               </template>
               <template #injections-cell="{ row }">
                 <div v-if="row.original.secrets?.length || row.original.variables?.length" class="flex flex-wrap gap-1">
-                  <UTooltip v-for="s in row.original.secrets" :key="`s-${s.env}`" :text="`секрет ${s.secret}`">
+                  <UTooltip v-for="s in row.original.secrets" :key="`s-${s.env}`" :text="`env ${s.env}`">
                     <UBadge color="warning" variant="subtle" size="sm" class="font-mono">
                       <UIcon name="i-lucide-key-round" class="size-3" />
-                      {{ s.env }}
+                      {{ s.secret }}
                     </UBadge>
                   </UTooltip>
-                  <UTooltip v-for="v in row.original.variables" :key="`v-${v.env}`" :text="`переменная ${v.variable}`">
+                  <UTooltip v-for="v in row.original.variables" :key="`v-${v.env}`" :text="`env ${v.env}`">
                     <UBadge color="neutral" variant="subtle" size="sm" class="font-mono">
                       <UIcon name="i-lucide-variable" class="size-3" />
-                      {{ v.env }}
+                      {{ v.variable }}
                     </UBadge>
                   </UTooltip>
                 </div>
@@ -619,6 +618,13 @@ const regColumns: TableColumn<DagRegistration>[] = [
 
         <!-- ── Настройки: хранение, лимиты, ресурсы тасков ── -->
         <template v-else>
+          <DagPoolCard
+            :dag-name="dagName"
+            :pool="dag.pool"
+            :can-manage="canManage"
+            @saved="load()"
+          />
+
           <DagSettingsCard :dag-name="dagName" :can-manage="canManage" />
 
           <section>

@@ -142,8 +142,8 @@ const columns: TableColumn<Run>[] = [
   { id: 'actions', header: '' },
 ]
 
-// клик по строке открывает ран; UTable сам игнорирует клики по кнопкам и
-// ссылкам внутри строки (имя дага ведёт на карточку дага)
+// клик по строке открывает ран; UTable сам игнорирует клики по кнопкам
+// внутри строки
 function openRun(_e: Event, row: TableRow<Run>) {
   navigateTo(`/runs/${row.original.id}`)
 }
@@ -230,12 +230,9 @@ async function confirmCancel() {
         </template>
 
         <template #dag_name-cell="{ row }">
-          <NuxtLink
-            :to="`/dags/${encodeURIComponent(row.original.dag_name)}`"
-            class="font-medium text-highlighted hover:text-primary hover:underline"
-          >
-            {{ row.original.dag_name }}
-          </NuxtLink>
+          <!-- имя дага — только контекст строки: клик по строке ведёт в ран,
+               отдельной ссылки на даг здесь нет -->
+          <span class="font-medium text-highlighted">{{ row.original.dag_name }}</span>
         </template>
 
         <template #logical_date-cell="{ row }">

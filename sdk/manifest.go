@@ -24,7 +24,6 @@ type TaskManifest struct {
 	RetryDelaySec int                `json:"retry_delay_sec,omitempty"`
 	TimeoutSec    int                `json:"timeout_sec,omitempty"`
 	Resources     *ResourcesManifest `json:"resources,omitempty"`
-	Pool          string             `json:"pool,omitempty"`
 	Priority      int                `json:"priority,omitempty"`
 	Secrets       []SecretManifest   `json:"secrets,omitempty"`
 	Variables     []VariableManifest `json:"variables,omitempty"`
@@ -67,7 +66,6 @@ func (d *DAG) Manifest() Manifest {
 				Retries:       t.retries,
 				RetryDelaySec: int(t.retryDelay / time.Second),
 				TimeoutSec:    int(t.timeout / time.Second),
-				Pool:          t.pool,
 				Priority:      t.priority,
 			}
 			if len(t.deps) > 0 {

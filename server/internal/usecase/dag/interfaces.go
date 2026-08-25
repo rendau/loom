@@ -18,6 +18,7 @@ type ServiceI interface {
 	DeleteTaskResources(ctx context.Context, dagName, task string) error
 	SetSchedule(ctx context.Context, name, schedule string, catchup bool) error
 	SetPaused(ctx context.Context, name string, paused bool) error
+	SetPool(ctx context.Context, name, pool string) error
 	SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error
 	Delete(ctx context.Context, name string) error
 }

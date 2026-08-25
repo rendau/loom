@@ -105,9 +105,6 @@ func (d *DAG) Validate() error {
 		if t.timeout < 0 {
 			errs = append(errs, fmt.Errorf("task %q: negative timeout %s", name, t.timeout))
 		}
-		if t.pool != "" && !nameRe.MatchString(t.pool) {
-			errs = append(errs, fmt.Errorf("task %q: invalid pool name %q", name, t.pool))
-		}
 
 		// env-инъекции секретов и переменных делят одно пространство имён —
 		// seenEnv общий

@@ -19,7 +19,6 @@ type Task struct {
 	retryDelay time.Duration
 	timeout    time.Duration
 	resources  ResourceSpec
-	pool       string
 	priority   int
 	secrets    []secretRef
 	variables  []variableRef
@@ -97,16 +96,9 @@ func Resources(spec ResourceSpec) TaskOption {
 	return func(t *Task) { t.resources = spec }
 }
 
-// Pool относит таск к пулу слотов параллелизма control plane: таски всех
-// дагов конкурируют за слоты своего пула. Пул должен существовать на
-// control plane к моменту регистрации; по умолчанию — пул "default".
-// В локальном режиме игнорируется.
-func Pool(name string) TaskOption {
-	return func(t *Task) { t.pool = name }
-}
-
 // Priority задаёт приоритет таска в очереди: при конкуренции за слоты
-// таски с бОльшим приоритетом забираются первыми (по умолчанию 0).
+// пула таски с бОльшим приоритетом забираются первыми (по умолчанию 0).
+// Сам пул задаётся в админке — на даге, а не в коде.
 // В локальном режиме игнорируется.
 func Priority(n int) TaskOption {
 	return func(t *Task) { t.priority = n }

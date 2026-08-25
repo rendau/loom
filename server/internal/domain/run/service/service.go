@@ -122,8 +122,9 @@ func (s *Service) Trigger(ctx context.Context, dag *dagModel.Main, spec model.Tr
 
 		tasks := lo.Map(dag.Tasks, func(t dagModel.Task, _ int) model.TaskSeed {
 			return model.TaskSeed{
-				Task:     t.Name,
-				Pool:     lo.CoalesceOrEmpty(t.Pool, poolModel.DefaultPool),
+				Task: t.Name,
+				// пул задаётся только на даге (админка); пусто — default
+				Pool:     lo.CoalesceOrEmpty(dag.Pool, poolModel.DefaultPool),
 				Priority: int32(t.Priority),
 			}
 		})

@@ -40,7 +40,6 @@ export interface DagTask {
   retry_delay_sec: number
   timeout_sec: number
   resources?: DagTaskResources
-  pool: string // пусто — default
   priority: number
   secrets: DagTaskEnvSecret[]
   variables: DagTaskEnvVariable[]
@@ -66,6 +65,9 @@ export interface Dag {
   catchup: boolean
   max_active_runs: number // 0 — без лимита
   auto_update: boolean // poll-синк новой версии образа (решение №30)
+  // Пул слотов дага (задаётся только в админке): действует на все его
+  // таски. Пусто — таски уходят в общий пул default.
+  pool: string
   // Последние раны (новые первыми, до 5).
   last_runs?: DagLastRun[]
 }
@@ -99,6 +101,7 @@ export interface DagRegistration {
   catchup?: boolean
   paused?: boolean
   auto_update?: boolean
+  pool?: string
   created_at: string
   started_at?: string
   finished_at?: string

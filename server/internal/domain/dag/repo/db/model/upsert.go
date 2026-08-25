@@ -15,6 +15,7 @@ type Upsert struct {
 	Catchup     *bool
 	Paused      *bool
 	AutoUpdate  *bool
+	Pool        *string
 	Manifest    *[]byte
 	ModifiedAt  *time.Time
 }
@@ -38,6 +39,9 @@ func (m *Upsert) CreateColumnMap() map[string]any {
 	}
 	if m.AutoUpdate != nil {
 		result["auto_update"] = *m.AutoUpdate
+	}
+	if m.Pool != nil {
+		result["pool"] = *m.Pool
 	}
 	if m.Manifest != nil {
 		result["manifest"] = *m.Manifest
@@ -72,6 +76,7 @@ func DecodeUpsert(v *domainModel.Edit) *Upsert {
 		Catchup:     v.Catchup,
 		Paused:      v.Paused,
 		AutoUpdate:  v.AutoUpdate,
+		Pool:        v.Pool,
 		Manifest:    v.Manifest,
 		ModifiedAt:  v.ModifiedAt,
 	}

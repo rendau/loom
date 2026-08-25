@@ -15,6 +15,7 @@ type Select struct {
 	Catchup     bool
 	Paused      bool
 	AutoUpdate  bool
+	Pool        string
 	Manifest    []byte
 	NextRunAt   sql.NullTime
 	CreatedAt   time.Time
@@ -30,6 +31,7 @@ func (m *Select) ListColumnMap() map[string]any {
 		"catchup":      &m.Catchup,
 		"paused":       &m.Paused,
 		"auto_update":  &m.AutoUpdate,
+		"pool":         &m.Pool,
 		"manifest":     &m.Manifest,
 		"next_run_at":  &m.NextRunAt,
 		"created_at":   &m.CreatedAt,
@@ -59,6 +61,7 @@ func EncodeSelect(v *Select, _ int) *domainModel.Main {
 		MaxActiveRuns: m.MaxActiveRuns,
 		Paused:        v.Paused,
 		AutoUpdate:    v.AutoUpdate,
+		Pool:          v.Pool,
 		SdkVersion:    m.SdkVersion,
 		Tasks:         m.Tasks,
 		Manifest:      v.Manifest,

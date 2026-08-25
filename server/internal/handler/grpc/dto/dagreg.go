@@ -25,6 +25,7 @@ func EncodeDagRegistrationMain(v *domainModel.Main, _ int) *pb.DagRegistrationMa
 		Catchup:    v.Catchup,
 		Paused:     v.Paused,
 		AutoUpdate: v.AutoUpdate,
+		Pool:       v.Pool,
 		CreatedAt:  timestamppb.New(v.CreatedAt),
 	}
 	if !v.StartedAt.IsZero() {
@@ -56,5 +57,6 @@ func DecodeDagRegisterReq(v *pb.DagRegisterReq) domainModel.EnqueueSpec {
 		Catchup:    v.Catchup,
 		Paused:     v.Paused,
 		AutoUpdate: v.AutoUpdate,
+		Pool:       v.Pool,
 	}
 }

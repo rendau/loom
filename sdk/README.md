@@ -73,11 +73,11 @@ go run . run --params='{"day":"x"}'  # с параметрами рана
 
 ## Ключевые опции
 
-- **Дага**: `MaxActiveRuns(n)`. Cron-расписание и catchup в коде не задаются —
-  ими управляет админка control plane после регистрации дага.
+- **Дага**: `MaxActiveRuns(n)`. Cron-расписание, catchup и пул слотов в коде
+  не задаются — ими управляет админка control plane после регистрации дага.
 - **Таска**: `After(dep)` — ждать успеха отправителя; `AfterStreamed(dep)` —
   ко-старт и чтение по мере записи; `Retries(n)`, `RetryDelay(d)`,
-  `Timeout(d)`, `Resources(spec)`, `Pool(name)`, `Priority(n)`,
+  `Timeout(d)`, `Resources(spec)`, `Priority(n)`,
   `Secret(envName, secretName)`, `Variable(envName, varName)` — инъекции
   секретов и переменных control plane в env контейнера (в локальном режиме
   не инжектятся — задавайте окружением процесса).

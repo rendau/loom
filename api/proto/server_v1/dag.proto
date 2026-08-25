@@ -80,6 +80,17 @@ service DagService {
     };
   }
 
+  // SetDagPool задаёт пул слотов дага: он действует на все его таски (в
+  // коде дага пула нет). Пустая строка снимает пул — таски уедут в
+  // default. Пул резолвится при триггере рана — смена действует со
+  // следующего рана, уже созданные таски не переезжают.
+  rpc SetDagPool(DagSetPoolReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      put: "/dag/{name}/pool"
+      body: "*"
+    };
+  }
+
   // SyncDag — принудительное обновление дага из registry: перерегистрация
   // текущего образа дага (pull + describe) прямо сейчас, не дожидаясь тика
   // авто-обновления. Кладётся в ту же очередь, что и RegisterDag, — статус
@@ -168,6 +179,9 @@ message DagMain {
   bool auto_update = 13;
   // Последние раны (новые первыми, до 5) — статус-стрип в списке дагов.
   repeated DagLastRun last_runs = 14;
+  // Пул слотов дага (задаётся только из админки): действует на все его
+  // таски. Пусто — таски уходят в общий пул default.
+  string pool = 15;
 }
 
 message DagLastRun {
@@ -182,7 +196,7 @@ message DagTaskMain {
   int32 retry_delay_sec = 4; // базовая пауза backoff'а; 0 — дефолт сервера
   int32 timeout_sec = 5;     // 0 — без таймаута
   optional DagTaskResources resources = 6;
-  string pool = 7;           // пул слотов; пусто — default
+  reserved 7;                // был pool: пул задаётся на даге, не в коде
   int32 priority = 8;        // больше — раньше из очереди
   // Инъекции секретов в env контейнера таска (имена, не значения).
   repeated DagTaskEnvSecret secrets = 9;
@@ -225,6 +239,7 @@ message DagRegisterReq {
   optional string schedule = 3; // cron; пусто/отсутствует — без расписания
   optional bool catchup = 4;
   optional bool paused = 5; // true — оставить на ручном запуске
+  optional string pool = 6; // пул слотов дага; пусто/отсутствует — не задан
 }
 
 message DagRegisterRep {
@@ -246,6 +261,7 @@ message DagRegistrationMain {
   optional bool catchup = 8;
   optional bool paused = 9;
   optional bool auto_update = 10;
+  optional string pool = 14;
   google.protobuf.Timestamp created_at = 11;
   optional google.protobuf.Timestamp started_at = 12;
   optional google.protobuf.Timestamp finished_at = 13;
@@ -324,6 +340,13 @@ message DagSetScheduleReq {
 message DagSetPausedReq {
   string name = 1;
   bool paused = 2;
+}
+
+// Pool
+
+message DagSetPoolReq {
+  string name = 1;
+  string pool = 2; // пусто — снять пул дага
 }
 
 // Sync

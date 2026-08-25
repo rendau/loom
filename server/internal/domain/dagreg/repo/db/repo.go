@@ -23,9 +23,9 @@ func New(base *commonRepoPg.Base) *Repo {
 func (r *Repo) Create(ctx context.Context, m *model.Main) error {
 	_, err := r.TxM.GetConnection(ctx).Exec(ctx, `
 		INSERT INTO dag_registration
-			(id, image, source, schedule, catchup, paused, auto_update, dag_name)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		m.Id, m.Image, m.Source, m.Schedule, m.Catchup, m.Paused, m.AutoUpdate, m.DagName)
+			(id, image, source, schedule, catchup, paused, auto_update, pool, dag_name)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		m.Id, m.Image, m.Source, m.Schedule, m.Catchup, m.Paused, m.AutoUpdate, m.Pool, m.DagName)
 	if err != nil {
 		return fmt.Errorf("Create: %w", err)
 	}
@@ -152,7 +152,7 @@ func (r *Repo) DeleteFinishedBefore(ctx context.Context, before time.Time) (int6
 	return tag.RowsAffected(), nil
 }
 
-const selectColumns = `id, image, source, schedule, catchup, paused, auto_update,
+const selectColumns = `id, image, source, schedule, catchup, paused, auto_update, pool,
 	status, error, dag_name, created_at, started_at, finished_at`
 
 type pgRows interface {
@@ -167,7 +167,7 @@ func scanMains(rows pgRows) ([]*model.Main, error) {
 		var m model.Main
 		var startedAt, finishedAt *time.Time
 		err := rows.Scan(&m.Id, &m.Image, &m.Source, &m.Schedule, &m.Catchup, &m.Paused,
-			&m.AutoUpdate, &m.Status, &m.Error, &m.DagName, &m.CreatedAt, &startedAt, &finishedAt)
+			&m.AutoUpdate, &m.Pool, &m.Status, &m.Error, &m.DagName, &m.CreatedAt, &startedAt, &finishedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}

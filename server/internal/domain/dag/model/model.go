@@ -22,6 +22,9 @@ type Main struct {
 	// AutoUpdate — poll-синк новой версии образа: свойство
 	// деплоя, не манифеста; хранится в БД.
 	AutoUpdate bool
+	// Pool — пул слотов дага (задаётся только из админки, в манифесте его
+	// нет): действует на все таски дага. Пусто — общий пул default.
+	Pool       string
 	SdkVersion string
 	Tasks      []Task
 	Manifest   []byte
@@ -48,8 +51,7 @@ type Task struct {
 	RetryDelaySec int
 	TimeoutSec    int
 	Resources     *TaskResources
-	Pool          string // пул слотов; пусто — "default"
-	Priority      int    // больше — раньше из очереди
+	Priority      int // больше — раньше из очереди
 	Secrets       []SecretRef
 	Variables     []VariableRef
 }
@@ -106,6 +108,7 @@ type Edit struct {
 	Catchup     *bool
 	Paused      *bool
 	AutoUpdate  *bool
+	Pool        *string
 	Manifest    *[]byte
 	ModifiedAt  *time.Time
 }

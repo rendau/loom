@@ -26,7 +26,6 @@ type manifestTask struct {
 	RetryDelaySec int                `json:"retry_delay_sec"`
 	TimeoutSec    int                `json:"timeout_sec"`
 	Resources     *manifestResources `json:"resources"`
-	Pool          string             `json:"pool"`
 	Priority      int                `json:"priority"`
 	Secrets       []manifestSecret   `json:"secrets"`
 	Variables     []manifestVariable `json:"variables"`
@@ -75,7 +74,6 @@ func encodeManifestTask(v manifestTask, _ int) dagModel.Task {
 		Retries:       v.Retries,
 		RetryDelaySec: v.RetryDelaySec,
 		TimeoutSec:    v.TimeoutSec,
-		Pool:          v.Pool,
 		Priority:      v.Priority,
 		Secrets: lo.Map(v.Secrets, func(s manifestSecret, _ int) dagModel.SecretRef {
 			return dagModel.SecretRef{Env: s.Env, Secret: s.Secret}

@@ -60,6 +60,7 @@ func TestDagRegistrationQueue(t *testing.T) {
 		Source:   dagregModel.SourceManual,
 		Schedule: new("@daily"),
 		Paused:   new(true),
+		Pool:     new("heavy"),
 	})
 	require.NoError(t, err)
 	require.NotNil(t, reg)
@@ -73,6 +74,8 @@ func TestDagRegistrationQueue(t *testing.T) {
 	assert.Equal(t, dagregModel.StatusRunning, claimed[0].Status)
 	require.NotNil(t, claimed[0].Schedule)
 	assert.Equal(t, "@daily", *claimed[0].Schedule)
+	require.NotNil(t, claimed[0].Pool)
+	assert.Equal(t, "heavy", *claimed[0].Pool)
 
 	again, err := repo.ClaimPending(ctx, 10)
 	require.NoError(t, err)

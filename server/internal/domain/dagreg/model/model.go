@@ -27,6 +27,7 @@ type Main struct {
 	Catchup    *bool
 	Paused     *bool
 	AutoUpdate *bool
+	Pool       *string
 	Status     string
 	Error      string
 	DagName    string // manual: пусто до успешного describe
@@ -44,6 +45,7 @@ type EnqueueSpec struct {
 	Catchup    *bool
 	Paused     *bool
 	AutoUpdate *bool
+	Pool       *string
 }
 
 // ListReq — выборка регистраций (без пагинации: записи транзиентны,

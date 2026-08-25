@@ -7,20 +7,28 @@ import type { TaskInstance, TaskStatus } from '~/types/run'
 // зависимостей. Рёбра — кривые Безье, стримовые (ко-старт) — пунктиром.
 // Клик по таску выбирает его (инспектор на странице рана). Без tasks
 // (карточка дага до запуска) — нейтральная раскраска, узлы некликабельны.
+//
+// На странице рана граф заменяет таблицу тасков: в узле — статус, номер
+// попытки, длительность, пик памяти и кнопка ретрая.
 
 const props = defineProps<{
   manifestTasks: DagTask[] // структура графа из снапшота манифеста рана
   tasks?: TaskInstance[] // статусы task instance'ов; нет — режим «схема дага»
-  selected?: string // выделенный таск (синхронно со списком/инспектором)
-  compact?: boolean // ограниченная высота (страница рана: граф — обзор, не главный экран)
+  selected?: string // выделенный таск (синхронно с инспектором)
+  compact?: boolean // ограниченная высота (карточка дага: граф — обзор)
+  peakByTask?: Record<string, number> // пик памяти текущей попытки таска
+  retryTasks?: string[] // таски, которые можно отправить на ретрай
 }>()
 
-const emit = defineEmits<{ select: [task: TaskInstance] }>()
+const emit = defineEmits<{
+  select: [task: TaskInstance]
+  retry: [task: TaskInstance]
+}>()
 
-const NODE_W = 176
-const NODE_H = 52
-const GAP_X = 64
-const GAP_Y = 24
+const NODE_W = 208
+const NODE_H = 76
+const GAP_X = 56
+const GAP_Y = 20
 const PAD = 8
 
 interface GraphNode {
@@ -148,20 +156,45 @@ function statusText(ti?: TaskInstance): string {
   if (!ti)
     return props.tasks ? '—' : ''
   const label = taskStatusLabel(ti.status)
-  return ti.attempt > 1 ? `${label} #${ti.attempt}` : label
+  return ti.attempt > 1 ? `${label} · попытка ${ti.attempt}` : label
+}
+
+// живой тик — только для длительности выполняющихся тасков
+const now = useTimeTick()
+
+// метрики попытки: длительность и пик памяти (память приблизительна и у
+// коротких попыток может отсутствовать)
+function metricsText(ti?: TaskInstance): string {
+  if (!ti || !ti.started_at)
+    return ''
+  const live = ti.status === 'running' || ti.status === 'starting'
+  const parts = [formatDuration(ti.started_at, ti.finished_at, live ? now.value : undefined)]
+  const peak = props.peakByTask?.[ti.task]
+  if (peak !== undefined)
+    parts.push(formatBytes(peak))
+  return parts.join(' · ')
 }
 
 function truncate(name: string): string {
-  return name.length > 20 ? `${name.slice(0, 19)}…` : name
+  return name.length > 22 ? `${name.slice(0, 21)}…` : name
 }
 
 function clickable(n: GraphNode): boolean {
   return !!n.ti
 }
 
+function retryable(n: GraphNode): boolean {
+  return !!n.ti && (props.retryTasks?.includes(n.name) ?? false)
+}
+
 function onNodeClick(n: GraphNode) {
   if (clickable(n) && n.ti)
     emit('select', n.ti)
+}
+
+function onRetryClick(n: GraphNode) {
+  if (n.ti)
+    emit('retry', n.ti)
 }
 </script>
 
@@ -184,7 +217,7 @@ function onNodeClick(n: GraphNode) {
           <!-- подписи узлов клипаются по ширине узла: truncate по символам —
                эвристика, широкий шрифт вылезал бы за рамку -->
           <clipPath id="dag-node-text-clip">
-            <rect x="0" y="0" :width="NODE_W - 16" :height="NODE_H" />
+            <rect x="0" y="0" :width="NODE_W - 40" :height="NODE_H" />
           </clipPath>
         </defs>
 
@@ -235,12 +268,35 @@ function onNodeClick(n: GraphNode) {
             :class="n.ti?.status === 'running' || n.ti?.status === 'starting' ? 'animate-pulse' : ''"
           />
           <g clip-path="url(#dag-node-text-clip)">
-            <text x="12" :y="statusText(n.ti) ? 21 : 31" font-size="13" font-weight="500" fill="var(--ui-text-highlighted)">
+            <text x="12" :y="statusText(n.ti) ? 24 : NODE_H / 2 + 5" font-size="13" font-weight="500" fill="var(--ui-text-highlighted)">
               {{ truncate(n.name) }}
             </text>
-            <text v-if="statusText(n.ti)" x="12" y="39" font-size="11" :fill="n.ti ? statusVar(n.ti.status) : 'var(--ui-text-muted)'">
+            <text v-if="statusText(n.ti)" x="12" y="44" font-size="11" :fill="n.ti ? statusVar(n.ti.status) : 'var(--ui-text-muted)'">
               {{ statusText(n.ti) }}
             </text>
+            <text v-if="metricsText(n.ti)" x="12" y="62" font-size="11" fill="var(--ui-text-muted)">
+              {{ metricsText(n.ti) }}
+            </text>
+          </g>
+
+          <!-- ретрай прямо в узле: таблицы тасков на странице рана нет -->
+          <g
+            v-if="retryable(n)"
+            role="button"
+            tabindex="0"
+            :aria-label="`Ретрай таска ${n.name}`"
+            class="cursor-pointer"
+            :transform="`translate(${NODE_W - 30}, 8)`"
+            @click.stop="onRetryClick(n)"
+            @keydown.enter.stop.prevent="onRetryClick(n)"
+          >
+            <title>Ретрай таска {{ n.name }}</title>
+            <rect width="22" height="22" rx="6" fill="var(--ui-bg-elevated)" stroke="var(--ui-border-accented)" />
+            <!-- lucide rotate-ccw, 24×24 → 14×14 -->
+            <g transform="translate(4, 4) scale(0.583)" fill="none" stroke="var(--ui-text-toned)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </g>
           </g>
         </g>
       </svg>
@@ -254,6 +310,10 @@ function onNodeClick(n: GraphNode) {
       <span class="flex items-center gap-1.5">
         <svg width="28" height="8" class="shrink-0"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--ui-border-accented)" stroke-width="1.5" stroke-dasharray="6 4" /></svg>
         стримовое (ко-старт, чтение по мере записи)
+      </span>
+      <span v-if="retryTasks?.length" class="flex items-center gap-1.5">
+        <UIcon name="i-lucide-rotate-ccw" class="size-3.5 shrink-0" />
+        ретрай таска (сбрасывает его downstream-подграф)
       </span>
     </div>
   </div>

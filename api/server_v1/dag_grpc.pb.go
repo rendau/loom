@@ -28,6 +28,7 @@ const (
 	DagService_GetDagStats_FullMethodName         = "/server_v1.DagService/GetDagStats"
 	DagService_SetDagSchedule_FullMethodName      = "/server_v1.DagService/SetDagSchedule"
 	DagService_SetDagPaused_FullMethodName        = "/server_v1.DagService/SetDagPaused"
+	DagService_SetDagPool_FullMethodName          = "/server_v1.DagService/SetDagPool"
 	DagService_SyncDag_FullMethodName             = "/server_v1.DagService/SyncDag"
 	DagService_SetDagAutoUpdate_FullMethodName    = "/server_v1.DagService/SetDagAutoUpdate"
 	DagService_DeleteDag_FullMethodName           = "/server_v1.DagService/DeleteDag"
@@ -69,6 +70,11 @@ type DagServiceClient interface {
 	// SetDagPaused ставит даг на паузу / снимает с паузы. Пауза останавливает
 	// только запуски по расписанию; ручной триггер работает.
 	SetDagPaused(ctx context.Context, in *DagSetPausedReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// SetDagPool задаёт пул слотов дага: он действует на все его таски (в
+	// коде дага пула нет). Пустая строка снимает пул — таски уедут в
+	// default. Пул резолвится при триггере рана — смена действует со
+	// следующего рана, уже созданные таски не переезжают.
+	SetDagPool(ctx context.Context, in *DagSetPoolReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// SyncDag — принудительное обновление дага из registry: перерегистрация
 	// текущего образа дага (pull + describe) прямо сейчас, не дожидаясь тика
 	// авто-обновления. Кладётся в ту же очередь, что и RegisterDag, — статус
@@ -185,6 +191,16 @@ func (c *dagServiceClient) SetDagPaused(ctx context.Context, in *DagSetPausedReq
 	return out, nil
 }
 
+func (c *dagServiceClient) SetDagPool(ctx context.Context, in *DagSetPoolReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, DagService_SetDagPool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *dagServiceClient) SyncDag(ctx context.Context, in *DagSyncReq, opts ...grpc.CallOption) (*DagSyncRep, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DagSyncRep)
@@ -287,6 +303,11 @@ type DagServiceServer interface {
 	// SetDagPaused ставит даг на паузу / снимает с паузы. Пауза останавливает
 	// только запуски по расписанию; ручной триггер работает.
 	SetDagPaused(context.Context, *DagSetPausedReq) (*emptypb.Empty, error)
+	// SetDagPool задаёт пул слотов дага: он действует на все его таски (в
+	// коде дага пула нет). Пустая строка снимает пул — таски уедут в
+	// default. Пул резолвится при триггере рана — смена действует со
+	// следующего рана, уже созданные таски не переезжают.
+	SetDagPool(context.Context, *DagSetPoolReq) (*emptypb.Empty, error)
 	// SyncDag — принудительное обновление дага из registry: перерегистрация
 	// текущего образа дага (pull + describe) прямо сейчас, не дожидаясь тика
 	// авто-обновления. Кладётся в ту же очередь, что и RegisterDag, — статус
@@ -346,6 +367,9 @@ func (UnimplementedDagServiceServer) SetDagSchedule(context.Context, *DagSetSche
 }
 func (UnimplementedDagServiceServer) SetDagPaused(context.Context, *DagSetPausedReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetDagPaused not implemented")
+}
+func (UnimplementedDagServiceServer) SetDagPool(context.Context, *DagSetPoolReq) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetDagPool not implemented")
 }
 func (UnimplementedDagServiceServer) SyncDag(context.Context, *DagSyncReq) (*DagSyncRep, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SyncDag not implemented")
@@ -533,6 +557,24 @@ func _DagService_SetDagPaused_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DagService_SetDagPool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DagSetPoolReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DagServiceServer).SetDagPool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DagService_SetDagPool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DagServiceServer).SetDagPool(ctx, req.(*DagSetPoolReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DagService_SyncDag_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DagSyncReq)
 	if err := dec(in); err != nil {
@@ -697,6 +739,10 @@ var DagService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetDagPaused",
 			Handler:    _DagService_SetDagPaused_Handler,
+		},
+		{
+			MethodName: "SetDagPool",
+			Handler:    _DagService_SetDagPool_Handler,
 		},
 		{
 			MethodName: "SyncDag",

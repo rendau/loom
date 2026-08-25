@@ -24,6 +24,7 @@ export interface DagRegisterBody {
   schedule?: string
   catchup?: boolean
   paused?: boolean
+  pool?: string
 }
 
 // Регистрация асинхронная: ответ — id записи очереди, статус поллится
@@ -66,6 +67,12 @@ export function setDagSchedule(name: string, schedule: string, catchup: boolean)
 
 export function setDagPaused(name: string, paused: boolean) {
   return apiFetch<object>(`/dag/${encodeURIComponent(name)}/paused`, { method: 'PUT', body: { paused } })
+}
+
+// Пул слотов дага: действует на все его таски (в коде дага пула нет).
+// Пустая строка снимает пул; применяется со следующего рана.
+export function setDagPool(name: string, pool: string) {
+  return apiFetch<object>(`/dag/${encodeURIComponent(name)}/pool`, { method: 'PUT', body: { pool } })
 }
 
 export function setDagAutoUpdate(name: string, autoUpdate: boolean) {

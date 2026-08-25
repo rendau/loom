@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { TableColumn, TableRow } from '@nuxt/ui'
 import { listRunArtifacts } from '~/api/artifact.api'
 import { apiErrorMessage } from '~/api/client'
 import { cancelRun, getRun, listRunValues, retryTask } from '~/api/run.api'
@@ -12,9 +11,10 @@ import type { RunEnvBinding } from '~/utils/runenv'
 import type { SecretMeta } from '~/types/secret'
 import type { Variable } from '~/types/variable'
 
-// Страница рана — master-detail (design/05 §5): компактный список тасков +
-// инспектор выбранного таска (лог/попытки/значения/env). У failed-рана
-// первый упавший таск выбирается автоматически — лог виден без кликов.
+// Страница рана — master-detail (design/05 §5): граф тасков (статус,
+// попытка, длительность, пик памяти, ретрай прямо в узле) + инспектор
+// выбранного таска (лог/попытки/значения/env). У failed-рана первый
+// упавший таск выбирается автоматически — лог виден без кликов.
 // Выбор и таба — в URL (?task=&tab=), ссылку можно переслать.
 
 const route = useRoute()
@@ -218,28 +218,9 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
-// ── список тасков ───────────────────────────────────────
+// ── метрики тасков ──────────────────────────────────────
 
 const now = useTimeTick()
-
-function taskDuration(ti: TaskInstance): string {
-  const live = ti.status === 'running' || ti.status === 'starting'
-  return formatDuration(ti.started_at, ti.finished_at, live ? now.value : undefined)
-}
-
-const taskColumns: TableColumn<TaskInstance>[] = [
-  { accessorKey: 'status', header: 'Статус' },
-  { accessorKey: 'task', header: 'Таск' },
-  { accessorKey: 'attempt', header: 'Попытка' },
-  { accessorKey: 'started_at', header: 'Старт' },
-  { id: 'duration', header: 'Длительность' },
-  { id: 'memory', header: 'Пик памяти' },
-  { id: 'actions', header: '' },
-]
-
-function onTaskRowSelect(_e: Event, row: TableRow<TaskInstance>) {
-  selectTask(row.original.task)
-}
 
 // пик памяти текущей попытки таска (attempts содержит все попытки)
 const peakByTask = computed(() => {
@@ -264,12 +245,6 @@ const memorySummary = computed(() => {
   }
 })
 
-// ── граф (сворачиваемый, состояние запоминается) ────────
-
-const GRAPH_KEY = 'loom-run-graph-open'
-const graphOpen = ref(localStorage.getItem(GRAPH_KEY) !== '0')
-watch(graphOpen, v => localStorage.setItem(GRAPH_KEY, v ? '1' : '0'))
-
 // ── действия ────────────────────────────────────────────
 
 const action = useApiAction()
@@ -284,6 +259,8 @@ function canRetry(ti: TaskInstance | null): boolean {
     && (ti.status === 'failed' || ti.status === 'success' || ti.status === 'canceled')
     && canManageDag(run.value?.dag_name)
 }
+
+const retryTasks = computed(() => tasks.value.filter(canRetry).map(t => t.task))
 
 // downstream-подграф таска (сбрасывается ретраем) — по снапшоту манифеста
 function downstreamOf(task: string): string[] {
@@ -406,9 +383,6 @@ async function confirmCancel() {
           <MetaItem v-if="memorySummary" label="Память (max / Σ пиков)">
             {{ formatBytes(memorySummary.max) }} / {{ formatBytes(memorySummary.sum) }}
           </MetaItem>
-          <MetaItem label="Образ" span>
-            <CopyText :text="run.image" mono />
-          </MetaItem>
           <div class="col-span-2 flex items-baseline gap-6 lg:col-span-4">
             <UCollapsible v-if="run.params">
               <UButton
@@ -440,81 +414,16 @@ async function confirmCancel() {
         </MetaGrid>
 
         <section v-if="manifestTasks.length">
-          <SectionHeader title="Граф">
-            <UButton
-              :icon="graphOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-              size="xs"
-              color="neutral"
-              variant="ghost"
-              :aria-label="graphOpen ? 'Свернуть граф' : 'Развернуть граф'"
-              @click="graphOpen = !graphOpen"
-            />
-          </SectionHeader>
+          <SectionHeader title="Таски" :count="tasks.length" />
           <RunDagGraph
-            v-if="graphOpen"
             :manifest-tasks="manifestTasks"
             :tasks="tasks"
             :selected="selectedTask"
-            compact
+            :peak-by-task="peakByTask"
+            :retry-tasks="retryTasks"
             @select="ti => selectTask(ti.task)"
+            @retry="ti => retryTarget = ti"
           />
-        </section>
-
-        <section>
-          <SectionHeader title="Таски" :count="tasks.length" />
-          <UTable
-            :data="tasks"
-            :columns="taskColumns"
-            :ui="{ ...denseTableUi, tr: 'cursor-pointer' }"
-            @select="onTaskRowSelect"
-          >
-            <template #status-cell="{ row }">
-              <div class="flex items-center gap-2">
-                <StatusBadge kind="task" :status="row.original.status" size="sm" />
-                <span v-if="row.original.status === 'up_for_retry'" class="text-xs text-muted">
-                  ретрай в {{ formatTime(row.original.retry_at) }}
-                </span>
-              </div>
-            </template>
-            <template #task-cell="{ row }">
-              <!-- маркер выбора — нейтральный (primary совпадает с
-                   success-зелёным и на failed-таске врал бы про статус) -->
-              <span class="flex items-center gap-1 font-medium text-highlighted">
-                <UIcon
-                  v-if="row.original.task === selectedTask"
-                  name="i-lucide-chevron-right"
-                  class="size-3.5 shrink-0"
-                />
-                {{ row.original.task }}
-              </span>
-            </template>
-            <template #attempt-cell="{ row }">
-              {{ row.original.attempt || '—' }}
-            </template>
-            <template #started_at-cell="{ row }">
-              <RelativeTime :time="row.original.started_at" />
-            </template>
-            <template #duration-cell="{ row }">
-              <span class="whitespace-nowrap tabular-nums">{{ taskDuration(row.original) }}</span>
-            </template>
-            <template #memory-cell="{ row }">
-              {{ formatBytes(peakByTask[row.original.task]) }}
-            </template>
-            <template #actions-cell="{ row }">
-              <div class="flex justify-end">
-                <UTooltip v-if="canRetry(row.original)" text="Ретрай таска">
-                  <UButton
-                    icon="i-lucide-rotate-ccw"
-                    size="sm"
-                    color="neutral"
-                    variant="ghost"
-                    aria-label="Ретрай таска"
-                    @click="retryTarget = row.original"
-                  />
-                </UTooltip>
-              </div>
-            </template>
-          </UTable>
         </section>
 
         <RunTaskInspector
@@ -534,7 +443,7 @@ async function confirmCancel() {
           @retry="retryTarget = selectedTi"
         />
         <p v-else class="text-sm text-muted">
-          Выберите таск в списке или на графе — здесь откроются его лог, попытки, значения и окружение.
+          Выберите таск на графе — здесь откроются его лог, попытки, значения и окружение.
         </p>
       </template>
 

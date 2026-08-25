@@ -79,6 +79,7 @@ func (s *Service) Enqueue(ctx context.Context, spec model.EnqueueSpec) (*model.M
 		Catchup:    spec.Catchup,
 		Paused:     spec.Paused,
 		AutoUpdate: spec.AutoUpdate,
+		Pool:       spec.Pool,
 		Status:     model.StatusPending,
 	}
 	if err := s.repoDb.Create(ctx, m); err != nil {

@@ -2,7 +2,9 @@
 import type { DropdownMenuItem, TableColumn, TableRow } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
 import { listDags, listDagRegistrations, registerDag, setDagAutoUpdate, setDagPaused, syncDag } from '~/api/dag.api'
+import { listPools } from '~/api/pool.api'
 import type { Dag, DagRegistration } from '~/types/dag'
+import type { Pool } from '~/types/pool'
 
 // Список дагов: узкая таблица-обзор парка (имя+бейджи, расписание, таски,
 // обновлён) — образ/digest/SDK живут в карточке. Частые действия
@@ -104,7 +106,7 @@ function stopRegPolling() {
 }
 
 onMounted(async () => {
-  await load()
+  await Promise.all([load(), loadPools()])
   await loadRegistrations()
   if (activeRegistrations.value.length > 0)
     ensureRegPolling()
@@ -120,6 +122,26 @@ const registerSchedule = ref('')
 const registerCatchup = ref(false)
 const registerStartScheduled = ref(true)
 
+// пул дага: действует на все его таски (в коде дага пула нет).
+// reka-ui Select не принимает '' как value — «не задан» через sentinel.
+const NO_POOL = '__none__'
+const registerPool = ref(NO_POOL)
+const pools = ref<Pool[]>([])
+
+const poolItems = computed(() => [
+  { label: 'default (общий пул)', value: NO_POOL },
+  ...pools.value.map(p => ({ label: `${p.name} · ${p.slots} слотов`, value: p.name })),
+])
+
+async function loadPools() {
+  try {
+    pools.value = (await listPools()).results ?? []
+  }
+  catch {
+    // селект останется с одним «не задан» — регистрация всё равно возможна
+  }
+}
+
 async function submitRegister() {
   const image = registerImage.value.trim()
   if (!image)
@@ -132,6 +154,7 @@ async function submitRegister() {
     schedule: schedule || undefined,
     catchup: schedule ? registerCatchup.value : undefined,
     paused: schedule ? !registerStartScheduled.value : undefined,
+    pool: registerPool.value === NO_POOL ? undefined : registerPool.value,
   }), { success: 'Регистрация поставлена в очередь' })
 
   if (rep) {
@@ -141,6 +164,7 @@ async function submitRegister() {
     registerSchedule.value = ''
     registerCatchup.value = false
     registerStartScheduled.value = true
+    registerPool.value = NO_POOL
     await loadRegistrations()
     ensureRegPolling()
   }
@@ -427,7 +451,10 @@ const columns: TableColumn<Dag>[] = [
               label="Авто-обновление образа"
               description="Server будет следить за digest'ом тега в registry и перерегистрировать даг при изменении."
             />
-            <UFormField label="Cron-расписание (опционально)" hint="только для нового дага; пусто — запуск вручную">
+            <UFormField label="Пул слотов" description="Действует на все таски дага.">
+              <USelectMenu v-model="registerPool" :items="poolItems" value-key="value" class="w-full" />
+            </UFormField>
+            <UFormField label="Cron-расписание (опционально)" hint="пусто — запуск вручную">
               <UInput
                 v-model="registerSchedule"
                 class="w-full font-mono"

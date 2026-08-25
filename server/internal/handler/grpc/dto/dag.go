@@ -22,6 +22,7 @@ func EncodeDagMain(v *domainModel.Main, _ int) *pb.DagMain {
 		Schedule:      v.Schedule,
 		Paused:        v.Paused,
 		AutoUpdate:    v.AutoUpdate,
+		Pool:          v.Pool,
 		SdkVersion:    v.SdkVersion,
 		Catchup:       v.Catchup,
 		MaxActiveRuns: int32(v.MaxActiveRuns),
@@ -47,7 +48,6 @@ func EncodeDagTaskMain(v domainModel.Task, _ int) *pb.DagTaskMain {
 		Retries:       int32(v.Retries),
 		RetryDelaySec: int32(v.RetryDelaySec),
 		TimeoutSec:    int32(v.TimeoutSec),
-		Pool:          v.Pool,
 		Priority:      int32(v.Priority),
 		Secrets: lo.Map(v.Secrets, func(s domainModel.SecretRef, _ int) *pb.DagTaskEnvSecret {
 			return &pb.DagTaskEnvSecret{Env: s.Env, Secret: s.Secret}

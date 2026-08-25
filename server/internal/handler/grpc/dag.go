@@ -113,6 +113,13 @@ func (h *Dag) SetDagPaused(ctx context.Context, req *pb.DagSetPausedReq) (*empty
 	return &emptypb.Empty{}, nil
 }
 
+func (h *Dag) SetDagPool(ctx context.Context, req *pb.DagSetPoolReq) (*emptypb.Empty, error) {
+	if err := h.usecase.SetPool(ctx, req.GetName(), req.GetPool()); err != nil {
+		return nil, encodeErr(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
 func (h *Dag) SyncDag(ctx context.Context, req *pb.DagSyncReq) (*pb.DagSyncRep, error) {
 	reg, err := h.usecase.Sync(ctx, req.GetName())
 	if err != nil {

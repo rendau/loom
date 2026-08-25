@@ -18,6 +18,7 @@ const props = defineProps<{
 const columns: TableColumn<RunEnvBinding>[] = [
   { id: 'source', header: 'Имя' },
   { id: 'value', header: 'Значение' },
+  { id: 'scope', header: 'Скоуп' },
 ]
 
 const hasVariables = computed(() => props.bindings.some(b => b.kind === 'variable'))
@@ -49,11 +50,6 @@ function envLink(b: RunEnvBinding): string {
               {{ row.original.name }}
             </NuxtLink>
           </UTooltip>
-          <UBadge v-if="row.original.scope === undefined" color="error" variant="subtle" size="sm">
-            не найдена — запуск таска упадёт
-          </UBadge>
-          <UBadge v-else-if="row.original.scope === ''" color="neutral" variant="subtle" size="sm">глобальный</UBadge>
-          <UBadge v-else color="info" variant="subtle" size="sm">{{ row.original.scope }}</UBadge>
         </div>
       </template>
 
@@ -65,6 +61,15 @@ function envLink(b: RunEnvBinding): string {
         </template>
         <span v-else-if="row.original.kind === 'secret' && row.original.scope !== undefined" class="font-mono text-xs text-muted">••••••</span>
         <span v-else class="text-muted">—</span>
+      </template>
+
+      <!-- скоуп — последней колонкой: имя и значение должны стоять рядом -->
+      <template #scope-cell="{ row }">
+        <UBadge v-if="row.original.scope === undefined" color="error" variant="subtle" size="sm">
+          не найдена — запуск таска упадёт
+        </UBadge>
+        <UBadge v-else-if="row.original.scope === ''" color="neutral" variant="subtle" size="sm">глобальный</UBadge>
+        <UBadge v-else color="info" variant="subtle" size="sm">{{ row.original.scope }}</UBadge>
       </template>
 
       <template #empty>

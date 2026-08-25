@@ -321,11 +321,12 @@ async function confirmDelete() {
   }
 }
 
+// тип — иконкой слева от имени (и фильтром-вкладкой сверху): колонка ради
+// одного слова съедала место, которое нужнее значению
 const columns: TableColumn<EnvEntry>[] = [
   { accessorKey: 'name', header: 'Имя' },
-  { accessorKey: 'kind', header: 'Тип' },
-  { accessorKey: 'dag_name', header: 'Скоуп' },
   { id: 'value', header: 'Значение' },
+  { accessorKey: 'dag_name', header: 'Скоуп' },
   { id: 'updated', header: 'Обновлено' },
   { id: 'actions', header: '' },
 ]
@@ -379,19 +380,15 @@ const columns: TableColumn<EnvEntry>[] = [
       <UTable :data="filtered" :columns="columns" :loading="loading" :ui="denseTableUi">
         <template #name-cell="{ row }">
           <div class="flex items-center gap-2">
-            <UIcon
-              :name="kindMeta[row.original.kind].icon"
-              class="size-4 shrink-0"
-              :class="row.original.kind === 'secret' ? 'text-warning' : 'text-muted'"
-            />
+            <UTooltip :text="kindMeta[row.original.kind].label">
+              <UIcon
+                :name="kindMeta[row.original.kind].icon"
+                class="size-4 shrink-0"
+                :class="row.original.kind === 'secret' ? 'text-warning' : 'text-muted'"
+              />
+            </UTooltip>
             <span class="font-mono font-medium text-highlighted">{{ row.original.name }}</span>
           </div>
-        </template>
-
-        <template #kind-cell="{ row }">
-          <UBadge :color="kindMeta[row.original.kind].color" variant="subtle" size="sm">
-            {{ kindMeta[row.original.kind].label }}
-          </UBadge>
         </template>
 
         <template #dag_name-cell="{ row }">
@@ -405,7 +402,7 @@ const columns: TableColumn<EnvEntry>[] = [
           <div class="flex items-center gap-1">
             <template v-if="visibleValue(row.original) !== undefined">
               <span
-                class="min-w-0 max-w-72 truncate font-mono text-xs"
+                class="min-w-0 max-w-72 truncate font-mono text-xs font-medium text-highlighted"
                 :title="visibleValue(row.original)"
               >
                 {{ visibleValue(row.original) || '—' }}

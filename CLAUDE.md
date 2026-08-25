@@ -44,9 +44,10 @@ docker-образ = один даг, таски запускаются экзе�
   длительность, пик памяти и кнопка ретрая. Переходы между
   страницами анимированы (`app.pageTransition` + классы `.page-*`).
   Цветовая тема (акцент + затонированный под него фон) выбирается в подвале
-  сайдбара: `emerald` (дефолт), `indigo`, `amber` — палитры в
-  `main.css` (`:root[data-loom-theme=…]`), выбор в localStorage, семантика
-  статусов от темы не зависит. Раздаётся server'ом на `ADMIN_PORT` (8081)
+  сайдбара: `emerald` (дефолт), `classic` (прежний стиль), `indigo`, `amber`
+  — палитры в `main.css` (`:root[data-loom-theme=…]`), выбор в localStorage,
+  семантика статусов от темы не зависит. Раздаётся server'ом на
+  `ADMIN_PORT` (8081)
   из `ADMIN_DIR` (`make build-admin`), рантайм-конфиг — `/config.js` из env
   `ADMIN_API_BASE_URL`; дев — `pnpm dev` + `.env` (+ `HTTP_CORS=true` на
   gateway). После правок: `pnpm typecheck` → `pnpm lint`. См. `admin/README.md`

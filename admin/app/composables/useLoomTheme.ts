@@ -5,6 +5,7 @@
 export const LOOM_THEME_STORAGE_KEY = 'loom-theme'
 
 export const LOOM_THEMES = [
+  { value: 'classic', label: 'Slate Classic', description: 'прежний стиль: сланцевый фон, зелёный акцент' },
   { value: 'emerald', label: 'Emerald Carbon', description: 'тёмно-зелёный, изумрудный акцент' },
   { value: 'indigo', label: 'Indigo Obsidian', description: 'почти чёрный, индиго-акцент' },
   { value: 'amber', label: 'Amber Ember', description: 'тёплый угольный, янтарный акцент' },

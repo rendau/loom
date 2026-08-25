@@ -150,3 +150,32 @@
   --ui-color-neutral-900: oklch(14% 0.07 55);
   --ui-color-neutral-950: oklch(8% 0.06 55);
 }
+
+/* Slate Classic — прежний стиль админки: сланцевый фон, зелёный акцент
+   (дефолтная палитра Nuxt UI, с которой админка жила до появления тем;
+   выписана явно, чтобы выбор темы был обратим из любой другой). */
+:root[data-loom-theme='classic'] {
+  --ui-color-primary-50: oklch(98.2% 0.018 155.826);
+  --ui-color-primary-100: oklch(96.2% 0.044 156.743);
+  --ui-color-primary-200: oklch(92.5% 0.084 155.995);
+  --ui-color-primary-300: oklch(87.1% 0.15 154.449);
+  --ui-color-primary-400: oklch(79.2% 0.209 151.711);
+  --ui-color-primary-500: oklch(72.3% 0.219 149.579);
+  --ui-color-primary-600: oklch(62.7% 0.194 149.214);
+  --ui-color-primary-700: oklch(52.7% 0.154 150.069);
+  --ui-color-primary-800: oklch(44.8% 0.119 151.328);
+  --ui-color-primary-900: oklch(39.3% 0.095 152.535);
+  --ui-color-primary-950: oklch(26.6% 0.065 152.934);
+
+  --ui-color-neutral-50: oklch(98.4% 0.003 247.858);
+  --ui-color-neutral-100: oklch(96.8% 0.007 247.896);
+  --ui-color-neutral-200: oklch(92.9% 0.013 255.508);
+  --ui-color-neutral-300: oklch(86.9% 0.022 252.894);
+  --ui-color-neutral-400: oklch(70.4% 0.04 256.788);
+  --ui-color-neutral-500: oklch(55.4% 0.046 257.417);
+  --ui-color-neutral-600: oklch(44.6% 0.043 257.281);
+  --ui-color-neutral-700: oklch(37.2% 0.044 257.287);
+  --ui-color-neutral-800: oklch(27.9% 0.041 260.031);
+  --ui-color-neutral-900: oklch(20.8% 0.042 265.755);
+  --ui-color-neutral-950: oklch(12.9% 0.042 264.695);
+}

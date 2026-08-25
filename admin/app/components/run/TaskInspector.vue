@@ -227,7 +227,10 @@ const exitInfo = computed(() => {
 </script>
 
 <template>
-  <section class="flex min-h-0 flex-col overflow-hidden rounded-lg border border-default">
+  <!-- shrink-0: панель не должна сжиматься flex'ом при низком окне — иначе
+       она схлопывается под overflow-hidden и до неё «нельзя доскролить»;
+       переполнение уходит в скролл body страницы -->
+  <section class="flex shrink-0 flex-col overflow-hidden rounded-lg border border-default">
     <!-- ручка ресайза высоты контента -->
     <div
       role="separator"

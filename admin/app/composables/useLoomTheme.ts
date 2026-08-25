@@ -13,7 +13,8 @@ export const LOOM_THEMES = [
 
 export type LoomTheme = (typeof LOOM_THEMES)[number]['value']
 
-export const DEFAULT_LOOM_THEME: LoomTheme = 'emerald'
+// Дефолт — прежний вид админки: тот, кто тему не выбирал, ничего не теряет.
+export const DEFAULT_LOOM_THEME: LoomTheme = 'classic'
 
 export function isLoomTheme(v: unknown): v is LoomTheme {
   return LOOM_THEMES.some(t => t.value === v)

@@ -89,14 +89,28 @@ function ensureRegPolling() {
     const finished = [...wasActive].filter(id => !nowActive.has(id))
     if (finished.length > 0)
       await load()
-    for (const id of finished) {
-      const reg = registrations.value.find(r => r.id === id)
-      if (!reg)
-        continue
-      if (reg.status === 'success')
-        toast.add({ title: `Даг ${reg.dag_name} зарегистрирован`, color: 'success' })
-      else if (reg.status === 'failed')
-        toast.add({ title: `Регистрация ${reg.image} не удалась`, description: reg.error, color: 'error' })
+    // пачка доезжает разом — тосты по одному завалили бы экран, поэтому
+    // за тик поллинга не больше двух: успехи и провалы одной сводкой
+    const done = finished.map(id => registrations.value.find(r => r.id === id)).filter(r => !!r)
+    const succeeded = done.filter(r => r.status === 'success')
+    const errored = done.filter(r => r.status === 'failed')
+    if (succeeded.length === 1)
+      toast.add({ title: `Даг ${succeeded[0]!.dag_name} зарегистрирован`, color: 'success' })
+    else if (succeeded.length > 1) {
+      toast.add({
+        title: `Дагов зарегистрировано: ${succeeded.length}`,
+        description: succeeded.map(r => r.dag_name).join(', '),
+        color: 'success',
+      })
+    }
+    if (errored.length === 1)
+      toast.add({ title: `Регистрация ${errored[0]!.image} не удалась`, description: errored[0]!.error, color: 'error' })
+    else if (errored.length > 1) {
+      toast.add({
+        title: `Регистраций не удалось: ${errored.length}`,
+        description: 'Причины — в панели над списком дагов.',
+        color: 'error',
+      })
     }
 
     if (activeRegistrations.value.length === 0)
@@ -344,27 +358,9 @@ const columns: TableColumn<Dag>[] = [
         :actions="[{ label: 'Повторить', color: 'error', variant: 'soft', onClick: () => load() }]"
       />
 
-      <!-- активные и недавно провалившиеся регистрации -->
-      <div v-if="activeRegistrations.length > 0 || failedRegistrations.length > 0" class="space-y-2">
-        <UAlert
-          v-for="reg in activeRegistrations"
-          :key="reg.id"
-          color="info"
-          variant="subtle"
-          icon="i-lucide-loader-circle"
-          :title="`Регистрация ${reg.image}`"
-          :description="reg.status === 'pending' ? 'В очереди…' : 'Выполняется pull + describe…'"
-        />
-        <UAlert
-          v-for="reg in failedRegistrations"
-          :key="reg.id"
-          color="error"
-          variant="subtle"
-          icon="i-lucide-circle-x"
-          :title="`Регистрация ${reg.dag_name || reg.image} не удалась (${formatDateTime(reg.finished_at)})`"
-          :description="reg.error"
-        />
-      </div>
+      <!-- активные и недавно провалившиеся регистрации: пачка сворачивается
+           в одну строку, иначе список дагов уезжает за экран -->
+      <DagRegistrationQueue :active="activeRegistrations" :failed="failedRegistrations" />
 
       <UTable
         :data="dags"

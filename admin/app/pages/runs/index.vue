@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import type { TableColumn, TableRow } from '@nuxt/ui'
+import type { TableColumn, TableRow, TabsItem } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
+import { listDags } from '~/api/dag.api'
 import { cancelRun, listRuns } from '~/api/run.api'
 import type { Run } from '~/types/run'
+
+// Живой список ранов: авто-поллинг, фильтры (даг — селект, статус — чипы)
+// в URL — срез можно переслать ссылкой. Колонки — только для решения
+// «куда смотреть»: статус, даг, дата данных, запущен, длительность.
 
 const PAGE_SIZE = 30
 
@@ -10,26 +15,51 @@ const runs = ref<Run[]>([])
 const totalCount = ref(0)
 const page = ref(1) // UPagination — 1-based, API — 0-based
 const loading = ref(false)
+const loadError = ref('')
 
-// фильтр по дагу инициализируется из query (?dag_name=...) — так на раны
-// конкретного дага ведут ссылки с его карточки
+// фильтры инициализируются из query (?dag_name=…&status=…) — так сюда
+// ведут ссылки с карточки дага и дашборда
 const route = useRoute()
-const dagFilter = ref(String(route.query.dag_name ?? ''))
-const statusFilter = ref<string | undefined>(
-  typeof route.query.status === 'string' ? route.query.status : undefined,
+const router = useRouter()
+
+// reka-ui Select не принимает '' как value — «все даги» через sentinel
+const ALL_DAGS = '__all__'
+const ALL_STATUSES = 'all'
+
+const dagFilter = ref<string>(
+  typeof route.query.dag_name === 'string' && route.query.dag_name ? route.query.dag_name : ALL_DAGS,
 )
-const statusOptions = [
-  { label: 'Все статусы', value: undefined },
-  { label: 'выполняется', value: 'running' },
-  { label: 'успех', value: 'success' },
-  { label: 'провал', value: 'failed' },
-  { label: 'остановлен', value: 'canceled' },
+const statusFilter = ref<string>(
+  typeof route.query.status === 'string' && route.query.status ? route.query.status : ALL_STATUSES,
+)
+
+const statusItems: TabsItem[] = [
+  { label: 'Все', value: ALL_STATUSES },
+  { label: 'Выполняются', value: 'running' },
+  { label: 'Провалы', value: 'failed' },
+  { label: 'Успех', value: 'success' },
+  { label: 'Остановлены', value: 'canceled' },
 ]
 
-const toast = useToast()
+const dagNames = ref<string[]>([])
+const dagItems = computed(() => [
+  { label: 'Все даги', value: ALL_DAGS },
+  ...dagNames.value.map(n => ({ label: n, value: n })),
+])
 
-async function load() {
-  loading.value = true
+async function loadDagNames() {
+  try {
+    const rep = await listDags({ list_params: { page_size: 500, sort: ['name'] } })
+    dagNames.value = rep.results.map(d => d.name)
+  }
+  catch {
+    // селект просто останется без вариантов — фильтр по URL всё ещё работает
+  }
+}
+
+async function load(background = false) {
+  if (!background)
+    loading.value = true
   try {
     const rep = await listRuns({
       list_params: {
@@ -38,47 +68,62 @@ async function load() {
         with_total_count: true,
         sort: ['-created_at'],
       },
-      dag_name: dagFilter.value.trim() || undefined,
-      status: statusFilter.value,
+      dag_name: dagFilter.value === ALL_DAGS ? undefined : dagFilter.value,
+      status: statusFilter.value === ALL_STATUSES ? undefined : statusFilter.value,
     })
     runs.value = rep.results
     totalCount.value = Number(rep.pagination_info.total_count)
+    loadError.value = ''
   }
   catch (error) {
-    toast.add({ title: 'Ошибка загрузки ранов', description: apiErrorMessage(error), color: 'error' })
+    loadError.value = apiErrorMessage(error)
   }
   finally {
-    loading.value = false
+    if (!background)
+      loading.value = false
   }
 }
 
-onMounted(load)
-watch([page], load)
-
-// текстовый фильтр — с debounce (иначе запрос на каждый символ)
-const reloadFiltered = debounceFn(() => {
-  page.value = 1
-  load()
+onMounted(async () => {
+  await Promise.all([load(), loadDagNames()])
 })
-watch(dagFilter, reloadFiltered)
-watch(statusFilter, () => {
+watch(page, () => load())
+watch([dagFilter, statusFilter], () => {
   page.value = 1
   load()
 })
 
-// id рана и логическая дата в таблицу не выведены (она и так широкая): id
-// виден в карточке рана, куда ведёт клик по строке, там же — логическая дата
+// фильтры живут в URL — ссылку на срез («провалы дага X») можно передать
+watch([dagFilter, statusFilter], () => {
+  const query: Record<string, string> = {}
+  if (dagFilter.value !== ALL_DAGS)
+    query.dag_name = dagFilter.value
+  if (statusFilter.value !== ALL_STATUSES)
+    query.status = statusFilter.value
+  router.replace({ query })
+})
+
+// список — живой: фоновый рефреш без спиннера
+usePolling(() => load(true), 10_000)
+
+// тикающая длительность running-ранов
+const now = useTimeTick()
+
+function runDuration(run: Run): string {
+  return formatDuration(run.created_at, run.finished_at, run.status === 'running' ? now.value : undefined)
+}
+
 const columns: TableColumn<Run>[] = [
-  { accessorKey: 'dag_name', header: 'Даг' },
-  { accessorKey: 'trigger', header: 'Триггер' },
   { accessorKey: 'status', header: 'Статус' },
-  { accessorKey: 'created_at', header: 'Создан' },
+  { accessorKey: 'dag_name', header: 'Даг' },
+  { accessorKey: 'logical_date', header: 'Дата данных' },
+  { id: 'started', header: 'Запущен' },
   { id: 'duration', header: 'Длительность' },
   { id: 'actions', header: '' },
 ]
 
 // клик по строке открывает ран; UTable сам игнорирует клики по кнопкам и
-// ссылкам внутри строки, так что иконка остановки продолжает работать
+// ссылкам внутри строки (имя дага ведёт на карточку дага)
 function openRun(_e: Event, row: TableRow<Run>) {
   navigateTo(`/runs/${row.original.id}`)
 }
@@ -112,58 +157,82 @@ async function confirmCancel() {
     <template #header>
       <UDashboardNavbar title="Раны">
         <template #right>
-          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load" />
+          <UButton
+            icon="i-lucide-refresh-cw"
+            color="neutral"
+            variant="ghost"
+            :loading="loading"
+            aria-label="Обновить список"
+            @click="load()"
+          />
         </template>
       </UDashboardNavbar>
       <UDashboardToolbar>
         <template #left>
-          <UInput
-            v-model="dagFilter"
-            icon="i-lucide-search"
-            placeholder="Фильтр по дагу"
-            class="w-56"
-          />
-          <USelect
+          <UTabs
             v-model="statusFilter"
-            :items="statusOptions"
+            :items="statusItems"
+            :content="false"
+            color="neutral"
+            variant="pill"
+            size="sm"
+          />
+          <USelectMenu
+            v-model="dagFilter"
+            :items="dagItems"
             value-key="value"
-            class="w-44"
+            class="w-56"
+            :search-input="{ placeholder: 'Поиск дага' }"
           />
         </template>
       </UDashboardToolbar>
     </template>
 
     <template #body>
+      <UAlert
+        v-if="loadError"
+        color="error"
+        variant="subtle"
+        title="Ошибка загрузки ранов"
+        :description="loadError"
+        :actions="[{ label: 'Повторить', color: 'error', variant: 'soft', onClick: () => load() }]"
+      />
+
       <UTable
         :data="runs"
         :columns="columns"
         :loading="loading"
-        :ui="{ tr: 'cursor-pointer' }"
+        :ui="{ ...denseTableUi, tr: 'cursor-pointer' }"
         @select="openRun"
       >
-        <template #trigger-cell="{ row }">
+        <template #status-cell="{ row }">
+          <StatusBadge kind="run" :status="row.original.status" size="sm" />
+        </template>
+
+        <template #dag_name-cell="{ row }">
+          <NuxtLink
+            :to="`/dags/${encodeURIComponent(row.original.dag_name)}`"
+            class="font-medium text-highlighted hover:text-primary hover:underline"
+          >
+            {{ row.original.dag_name }}
+          </NuxtLink>
+        </template>
+
+        <template #logical_date-cell="{ row }">
+          <span class="whitespace-nowrap">{{ formatDateShort(row.original.logical_date) }}</span>
+        </template>
+
+        <template #started-cell="{ row }">
           <div class="flex items-center gap-1.5">
+            <RelativeTime :time="row.original.created_at" />
             <UBadge :color="runTriggerColor(row.original.trigger)" variant="subtle" size="sm">
               {{ runTriggerLabel(row.original.trigger) }}
             </UBadge>
-            <UTooltip v-if="row.original.params" text="Ран с параметрами">
-              <UIcon name="i-lucide-braces" class="size-3.5 text-muted" />
-            </UTooltip>
           </div>
         </template>
 
-        <template #status-cell="{ row }">
-          <UBadge :color="runStatusColor(row.original.status)" variant="subtle">
-            {{ runStatusLabel(row.original.status) }}
-          </UBadge>
-        </template>
-
-        <template #created_at-cell="{ row }">
-          {{ formatDateTime(row.original.created_at) }}
-        </template>
-
         <template #duration-cell="{ row }">
-          {{ formatDuration(row.original.created_at, row.original.finished_at) }}
+          <span class="whitespace-nowrap tabular-nums">{{ runDuration(row.original) }}</span>
         </template>
 
         <template #actions-cell="{ row }">
@@ -174,19 +243,31 @@ async function confirmCancel() {
                 size="sm"
                 color="error"
                 variant="ghost"
+                aria-label="Остановить ран"
                 @click="cancelTarget = row.original"
               />
             </UTooltip>
           </div>
         </template>
+
+        <template #empty>
+          <!-- при ошибке загрузки пустота — не «ранов нет», причина в алерте выше -->
+          <div v-if="loadError" class="py-6" />
+          <EmptyState v-else icon="i-lucide-list" title="Ранов не найдено">
+            <UButton
+              v-if="dagFilter !== ALL_DAGS || statusFilter !== ALL_STATUSES"
+              size="sm"
+              color="neutral"
+              variant="subtle"
+              label="Сбросить фильтры"
+              @click="dagFilter = ALL_DAGS; statusFilter = ALL_STATUSES"
+            />
+          </EmptyState>
+        </template>
       </UTable>
 
-      <div v-if="!loading && runs.length === 0" class="p-8 text-center text-muted">
-        Ранов не найдено.
-      </div>
-
-      <div v-if="totalCount > PAGE_SIZE" class="flex justify-center border-t border-default p-3">
-        <UPagination v-model:page="page" :total="totalCount" :items-per-page="PAGE_SIZE" />
+      <div v-if="totalCount > PAGE_SIZE" class="flex justify-end border-t border-default p-2">
+        <UPagination v-model:page="page" :total="totalCount" :items-per-page="PAGE_SIZE" size="sm" />
       </div>
 
       <UModal :open="cancelTarget !== null" title="Остановить ран?" @update:open="cancelTarget = null">

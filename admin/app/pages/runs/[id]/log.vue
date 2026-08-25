@@ -13,7 +13,7 @@ const follow = route.query.follow === '1'
     <template #header>
       <UDashboardNavbar :title="`Лог: ${task} · попытка ${attempt}`">
         <template #leading>
-          <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" :to="`/runs/${encodeURIComponent(runId)}`" />
+          <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" :to="`/runs/${encodeURIComponent(runId)}`" aria-label="К рану" />
         </template>
         <template #right>
           <span class="font-mono text-xs text-muted">{{ runId }}</span>

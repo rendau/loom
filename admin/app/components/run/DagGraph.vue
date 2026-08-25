@@ -5,15 +5,17 @@ import type { TaskInstance, TaskStatus } from '~/types/run'
 // Граф дага со статусами тасков. Раскладка слоистая: колонка таска — его
 // ранг (длиннейший путь от корня), порядок внутри колонки — барицентр
 // зависимостей. Рёбра — кривые Безье, стримовые (ко-старт) — пунктиром.
-// Клик по таску с попытками открывает лог. Без tasks (карточка дага до
-// запуска) — нейтральная раскраска, узлы некликабельны.
+// Клик по таску выбирает его (инспектор на странице рана). Без tasks
+// (карточка дага до запуска) — нейтральная раскраска, узлы некликабельны.
 
 const props = defineProps<{
   manifestTasks: DagTask[] // структура графа из снапшота манифеста рана
   tasks?: TaskInstance[] // статусы task instance'ов; нет — режим «схема дага»
+  selected?: string // выделенный таск (синхронно со списком/инспектором)
+  compact?: boolean // ограниченная высота (страница рана: граф — обзор, не главный экран)
 }>()
 
-const emit = defineEmits<{ openLog: [task: TaskInstance] }>()
+const emit = defineEmits<{ select: [task: TaskInstance] }>()
 
 const NODE_W = 176
 const NODE_H = 52
@@ -127,16 +129,17 @@ function statusVar(status?: TaskStatus): string {
     case 'queued': return 'var(--ui-secondary)'
     case 'starting':
     case 'running': return 'var(--ui-info)'
-    case 'up_for_retry':
-    case 'upstream_failed': return 'var(--ui-warning)'
+    case 'up_for_retry': return 'var(--ui-warning)'
     case 'success': return 'var(--ui-success)'
     case 'failed': return 'var(--ui-error)'
-    default: return 'var(--ui-border-accented)' // pending
+    // upstream_failed — следствие чужого провала: приглушаем, чтобы не
+    // отвлекать от реально упавшего таска (design/06 §3)
+    default: return 'var(--ui-border-accented)' // pending, upstream_failed, canceled
   }
 }
 
 function nodeFill(status?: TaskStatus): string {
-  if (!status || status === 'pending')
+  if (!status || status === 'pending' || status === 'upstream_failed' || status === 'canceled')
     return 'var(--ui-bg-elevated)'
   return `color-mix(in srgb, ${statusVar(status)} 10%, var(--ui-bg))`
 }
@@ -153,18 +156,18 @@ function truncate(name: string): string {
 }
 
 function clickable(n: GraphNode): boolean {
-  return !!n.ti && n.ti.attempt >= 1
+  return !!n.ti
 }
 
 function onNodeClick(n: GraphNode) {
   if (clickable(n) && n.ti)
-    emit('openLog', n.ti)
+    emit('select', n.ti)
 }
 </script>
 
 <template>
   <div>
-    <div class="max-h-[420px] overflow-auto rounded-lg border border-default p-2">
+    <div class="overflow-auto rounded-lg border border-default p-2" :class="compact ? 'max-h-[280px]' : 'max-h-[420px]'">
       <svg :width="layout.width" :height="layout.height" class="block">
         <defs>
           <marker
@@ -203,11 +206,25 @@ function onNodeClick(n: GraphNode) {
           :class="clickable(n) ? 'cursor-pointer' : ''"
           :role="clickable(n) ? 'button' : undefined"
           :tabindex="clickable(n) ? 0 : undefined"
-          :aria-label="clickable(n) ? `Лог таска ${n.name}` : undefined"
+          :aria-label="clickable(n) ? `Таск ${n.name}` : undefined"
           @click="onNodeClick(n)"
           @keydown.enter.prevent="onNodeClick(n)"
         >
           <title>{{ n.name }}{{ statusText(n.ti) ? ` — ${statusText(n.ti)}` : '' }}</title>
+          <!-- выделение выбранного — нейтральная внешняя рамка: цвет рамки
+               узла остаётся статусным (primary совпадает с success-зелёным
+               и на failed-узле читался бы как «успех») -->
+          <rect
+            v-if="n.name === selected"
+            x="-3.5"
+            y="-3.5"
+            :width="NODE_W + 7"
+            :height="NODE_H + 7"
+            rx="11"
+            fill="none"
+            stroke="var(--ui-text-highlighted)"
+            stroke-width="1.5"
+          />
           <rect
             :width="NODE_W"
             :height="NODE_H"

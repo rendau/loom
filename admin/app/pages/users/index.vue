@@ -12,16 +12,17 @@ const { me } = useAuth()
 const users = ref<User[]>([])
 const dagNames = ref<string[]>([])
 const loading = ref(false)
+const loadError = ref('')
 const action = useApiAction()
-const toast = useToast()
 
 async function load() {
   loading.value = true
   try {
     users.value = (await listUsers()).results ?? []
+    loadError.value = ''
   }
   catch (error) {
-    toast.add({ title: 'Ошибка загрузки пользователей', description: apiErrorMessage(error), color: 'error' })
+    loadError.value = apiErrorMessage(error)
   }
   finally {
     loading.value = false
@@ -132,14 +133,23 @@ const columns: TableColumn<User>[] = [
     <template #header>
       <UDashboardNavbar title="Пользователи">
         <template #right>
-          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load" />
+          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" aria-label="Обновить список" @click="load" />
           <UButton icon="i-lucide-user-plus" label="Создать" @click="openCreate" />
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <UTable :data="users" :columns="columns" :loading="loading" :ui="{ td: 'whitespace-normal' }">
+      <UAlert
+        v-if="loadError"
+        color="error"
+        variant="subtle"
+        title="Ошибка загрузки пользователей"
+        :description="loadError"
+        :actions="[{ label: 'Повторить', color: 'error', variant: 'soft', onClick: () => load() }]"
+      />
+
+      <UTable :data="users" :columns="columns" :loading="loading" :ui="denseTableUi">
         <template #username-cell="{ row }">
           <div class="flex items-center gap-2">
             <UIcon name="i-lucide-user" class="size-4 shrink-0 text-muted" />
@@ -157,24 +167,30 @@ const columns: TableColumn<User>[] = [
         <template #dags-cell="{ row }">
           <span v-if="row.original.role === 'admin'" class="text-muted">все</span>
           <div v-else-if="row.original.dag_names.length" class="flex flex-wrap gap-1">
-            <UBadge v-for="name in row.original.dag_names" :key="name" color="info" variant="subtle" size="sm">
+            <UBadge v-for="name in row.original.dag_names.slice(0, 5)" :key="name" color="info" variant="subtle" size="sm">
               {{ name }}
             </UBadge>
+            <UTooltip
+              v-if="row.original.dag_names.length > 5"
+              :text="row.original.dag_names.slice(5).join(', ')"
+            >
+              <UBadge color="neutral" variant="subtle" size="sm">+{{ row.original.dag_names.length - 5 }}</UBadge>
+            </UTooltip>
           </div>
           <span v-else class="text-muted">— (только чтение)</span>
         </template>
 
         <template #created_at-cell="{ row }">
-          {{ formatDateTime(row.original.created_at) }}
+          <RelativeTime :time="row.original.created_at" />
         </template>
 
         <template #actions-cell="{ row }">
           <div class="flex justify-end gap-1">
             <UTooltip text="Изменить">
-              <UButton icon="i-lucide-pencil" size="sm" color="neutral" variant="ghost" @click="openEdit(row.original)" />
+              <UButton icon="i-lucide-pencil" size="sm" color="neutral" variant="ghost" aria-label="Изменить" @click="openEdit(row.original)" />
             </UTooltip>
             <UTooltip v-if="row.original.id !== me?.id" text="Удалить">
-              <UButton icon="i-lucide-trash-2" size="sm" color="error" variant="ghost" @click="deleteTarget = row.original" />
+              <UButton icon="i-lucide-trash-2" size="sm" color="error" variant="ghost" aria-label="Удалить" @click="deleteTarget = row.original" />
             </UTooltip>
           </div>
         </template>

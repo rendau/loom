@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import type { TableColumn } from '@nuxt/ui'
+import type { DropdownMenuItem, TableColumn, TableRow, TabsItem } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
 import { getDag, listDagRegistrations, setDagAutoUpdate, setDagPaused, syncDag } from '~/api/dag.api'
+import { getRun, listRuns } from '~/api/run.api'
 import type { Dag, DagRegistration, DagTask } from '~/types/dag'
+import type { Run } from '~/types/run'
 
-// Карточка дага: схема (граф) и параметры тасков видны сразу после
-// регистрации, до первого запуска; здесь же история регистраций.
+// Карточка дага — два лица (design/02): таба «Обзор» — как даг себя ведёт
+// (последние раны, таски по ресурсам), таба «Схема» — как устроен (граф,
+// манифест, история регистраций, служебное). Обзор — дефолт: поведение
+// смотрят чаще устройства.
 
 const route = useRoute()
+const router = useRouter()
 const dagName = String(route.params.name)
 
 const { isAdmin, canManageDag } = useAuth()
@@ -39,18 +44,112 @@ async function load(background = false) {
   }
 }
 
-// пока идёт регистрация/обновление — фоновый поллинг
-let pollTimer: ReturnType<typeof setInterval> | undefined
-onMounted(async () => {
-  await load()
-  pollTimer = setInterval(() => {
-    if (isUpdating.value)
-      load(true)
-  }, 3000)
-})
-onBeforeUnmount(() => clearInterval(pollTimer))
+// ── табы (?tab=): overview — дефолт ─────────────────────
 
-// действия
+const tab = ref(route.query.tab === 'schema' ? 'schema' : 'overview')
+
+const tabItems: TabsItem[] = [
+  { label: 'Обзор', value: 'overview', icon: 'i-lucide-activity' },
+  { label: 'Схема', value: 'schema', icon: 'i-lucide-workflow' },
+]
+
+watch(tab, () => {
+  const query = { ...route.query } as Record<string, string>
+  delete query.tab
+  if (tab.value !== 'overview')
+    query.tab = tab.value
+  router.replace({ query })
+})
+
+// ── последние раны и таски по ресурсам (таба «Обзор») ───
+
+const runs = ref<Run[]>([])
+const runsError = ref('')
+
+async function loadRuns() {
+  try {
+    const rep = await listRuns({
+      list_params: { page_size: 20, sort: ['-created_at'] },
+      dag_name: dagName,
+    })
+    runs.value = rep.results
+    runsError.value = ''
+  }
+  catch (error) {
+    runsError.value = apiErrorMessage(error)
+  }
+}
+
+// «жирные таски»: длительность и пик памяти по последнему завершённому
+// рану (агрегата за историю в API пока нет — design/07 №4; пометка в UI)
+interface TaskStat {
+  task: string
+  durationSec: number
+  memory?: number
+  memoryLimit?: string
+}
+
+const lastFinished = computed(() => runs.value.find(r => r.status !== 'running'))
+const taskStats = ref<TaskStat[]>([])
+let statsForRun = ''
+
+watch(lastFinished, async (r) => {
+  if (!r || r.id === statsForRun)
+    return
+  statsForRun = r.id
+  try {
+    const rep = await getRun(r.id)
+    const limits = new Map((rep.manifest_tasks ?? []).map(t => [t.name, t.resources?.memory_limit]))
+    taskStats.value = rep.tasks
+      .filter(t => t.started_at)
+      .map((t) => {
+        const attempt = rep.attempts.find(a => a.task === t.task && a.attempt === t.attempt)
+        return {
+          task: t.task,
+          durationSec: t.finished_at && t.started_at
+            ? (new Date(t.finished_at).getTime() - new Date(t.started_at).getTime()) / 1000
+            : 0,
+          memory: attempt?.peak_memory_bytes !== undefined ? Number(attempt.peak_memory_bytes) : undefined,
+          memoryLimit: limits.get(t.task) || undefined,
+        }
+      })
+      .sort((a, b) => (b.memory ?? -1) - (a.memory ?? -1) || b.durationSec - a.durationSec)
+  }
+  catch {
+    // секция просто останется пустой — не критично
+  }
+})
+
+// пока идёт регистрация/обновление — частый поллинг карточки; раны
+// обновляются фоновым тиком на табе «Обзор»
+onMounted(async () => {
+  await Promise.all([load(), loadRuns()])
+})
+usePolling(() => load(true), 3000, () => isUpdating.value)
+usePolling(loadRuns, 10_000, () => tab.value === 'overview')
+
+const runColumns: TableColumn<Run>[] = [
+  { accessorKey: 'status', header: 'Статус' },
+  { accessorKey: 'logical_date', header: 'Дата данных' },
+  { id: 'started', header: 'Запущен' },
+  { id: 'duration', header: 'Длительность' },
+]
+
+function openRun(_e: Event, row: TableRow<Run>) {
+  navigateTo(`/runs/${row.original.id}`)
+}
+
+const nowTick = useTimeTick()
+
+const statColumns: TableColumn<TaskStat>[] = [
+  { accessorKey: 'task', header: 'Таск' },
+  { id: 'duration', header: 'Длительность' },
+  { id: 'memory', header: 'Пик памяти' },
+  { id: 'limit', header: 'Лимит памяти' },
+]
+
+// ── действия ────────────────────────────────────────────
+
 const triggerTarget = ref<Dag | null>(null)
 const backfillTarget = ref<Dag | null>(null)
 const scheduleTarget = ref<Dag | null>(null)
@@ -105,6 +204,42 @@ async function toggleAutoUpdate() {
     await load()
 }
 
+// редкие действия — в «⋯»-меню (design/05 §3): inline остаются только
+// запуск и пауза
+const menuItems = computed<DropdownMenuItem[][]>(() => {
+  const d = dag.value
+  if (!d)
+    return []
+  const main: DropdownMenuItem[] = []
+  if (canManage.value) {
+    main.push({ label: 'Расписание…', icon: 'i-lucide-alarm-clock', onSelect: () => { scheduleTarget.value = d } })
+    if (d.schedule)
+      main.push({ label: 'Backfill за период…', icon: 'i-lucide-calendar-clock', onSelect: () => { backfillTarget.value = d } })
+  }
+  if (isAdmin.value) {
+    main.push({
+      label: 'Обновить из registry',
+      icon: 'i-lucide-cloud-download',
+      disabled: isUpdating.value,
+      onSelect: () => sync(),
+    })
+    main.push({
+      label: d.auto_update ? 'Выключить авто-обновление' : 'Включить авто-обновление',
+      icon: 'i-lucide-refresh-ccw-dot',
+      onSelect: () => toggleAutoUpdate(),
+    })
+  }
+
+  const groups: DropdownMenuItem[][] = []
+  if (main.length > 0)
+    groups.push(main)
+  if (isAdmin.value)
+    groups.push([{ label: 'Удалить даг…', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => { deleteTarget.value = d } }])
+  return groups
+})
+
+// ── таблицы табы «Схема» ────────────────────────────────
+
 function formatSeconds(sec: number): string {
   if (!sec)
     return '—'
@@ -145,26 +280,6 @@ const regColumns: TableColumn<DagRegistration>[] = [
   { accessorKey: 'created_at', header: 'Создана' },
   { accessorKey: 'finished_at', header: 'Завершена' },
 ]
-
-const tableUi = { td: 'whitespace-normal' }
-
-function regStatusColor(status: DagRegistration['status']) {
-  switch (status) {
-    case 'success': return 'success' as const
-    case 'failed': return 'error' as const
-    case 'running': return 'info' as const
-    default: return 'neutral' as const
-  }
-}
-
-function regStatusLabel(status: DagRegistration['status']): string {
-  switch (status) {
-    case 'pending': return 'в очереди'
-    case 'running': return 'выполняется'
-    case 'success': return 'успех'
-    case 'failed': return 'провал'
-  }
-}
 </script>
 
 <template>
@@ -172,7 +287,7 @@ function regStatusLabel(status: DagRegistration['status']): string {
     <template #header>
       <UDashboardNavbar :title="dagName">
         <template #leading>
-          <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/dags" />
+          <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/dags" aria-label="К списку дагов" />
         </template>
         <template #right>
           <UBadge v-if="dag?.paused" color="warning" variant="subtle" size="lg">пауза</UBadge>
@@ -180,190 +295,258 @@ function regStatusLabel(status: DagRegistration['status']): string {
             <UIcon name="i-lucide-loader-circle" class="animate-spin" />
             обновляется
           </UBadge>
-          <UTooltip v-if="canManage" text="Запустить ран">
-            <UButton icon="i-lucide-play" color="primary" variant="ghost" @click="triggerTarget = dag" />
-          </UTooltip>
-          <UTooltip v-if="dag?.schedule && canManage" text="Backfill за период">
-            <UButton icon="i-lucide-calendar-clock" color="secondary" variant="ghost" @click="backfillTarget = dag" />
-          </UTooltip>
-          <UTooltip v-if="canManage" text="Расписание">
-            <UButton icon="i-lucide-alarm-clock" color="neutral" variant="ghost" @click="scheduleTarget = dag" />
-          </UTooltip>
-          <UTooltip v-if="isAdmin" text="Обновить из registry сейчас">
-            <UButton
-              icon="i-lucide-cloud-download"
-              color="info"
-              variant="ghost"
-              :disabled="isUpdating"
-              @click="sync"
-            />
-          </UTooltip>
-          <UTooltip v-if="isAdmin" :text="dag?.auto_update ? 'Выключить авто-обновление образа' : 'Включить авто-обновление образа'">
-            <UButton
-              icon="i-lucide-refresh-ccw-dot"
-              :color="dag?.auto_update ? 'info' : 'neutral'"
-              variant="ghost"
-              @click="toggleAutoUpdate"
-            />
-          </UTooltip>
+          <UButton
+            v-if="canManage"
+            icon="i-lucide-play"
+            label="Запустить"
+            color="primary"
+            variant="soft"
+            @click="triggerTarget = dag"
+          />
           <UTooltip v-if="canManage" :text="dag?.paused ? 'Снять с паузы' : 'Поставить на паузу'">
             <UButton
               :icon="dag?.paused ? 'i-lucide-play-circle' : 'i-lucide-pause-circle'"
               color="warning"
               variant="ghost"
+              :aria-label="dag?.paused ? 'Снять с паузы' : 'Поставить на паузу'"
               @click="togglePaused"
             />
           </UTooltip>
-          <UTooltip v-if="isAdmin" text="Удалить даг">
-            <UButton icon="i-lucide-trash-2" color="error" variant="ghost" @click="deleteTarget = dag" />
-          </UTooltip>
-          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load()" />
+          <RowMenu v-if="menuItems.length" :items="menuItems" size="md" />
+          <UButton
+            icon="i-lucide-refresh-cw"
+            color="neutral"
+            variant="ghost"
+            :loading="loading"
+            aria-label="Обновить"
+            @click="load(); loadRuns()"
+          />
         </template>
       </UDashboardNavbar>
+      <UDashboardToolbar>
+        <template #left>
+          <UTabs
+            v-model="tab"
+            :items="tabItems"
+            :content="false"
+            color="neutral"
+            variant="pill"
+            size="sm"
+          />
+        </template>
+      </UDashboardToolbar>
     </template>
 
     <template #body>
-      <UAlert v-if="loadError" color="error" variant="subtle" :title="loadError" />
+      <UAlert
+        v-if="loadError"
+        color="error"
+        variant="subtle"
+        title="Ошибка загрузки дага"
+        :description="loadError"
+        :actions="[{ label: 'Повторить', color: 'error', variant: 'soft', onClick: () => load() }]"
+      />
 
       <template v-if="dag">
-        <div class="grid grid-cols-2 gap-x-8 gap-y-1 text-sm lg:grid-cols-4">
-          <div>
-            <div class="text-muted">Расписание</div>
-            <div v-if="dag.schedule">
-              <span class="font-mono">{{ dag.schedule }}</span>
-              <UBadge v-if="dag.catchup" color="info" variant="subtle" size="sm" class="ml-1.5">catchup</UBadge>
-            </div>
-            <div v-else class="text-muted">— (запуск вручную)</div>
-          </div>
-          <div>
-            <div class="text-muted">Следующий запуск</div>
-            <div>{{ dag.next_run_at && !dag.paused ? formatDateTime(dag.next_run_at) : '—' }}</div>
-          </div>
-          <div>
-            <div class="text-muted">SDK</div>
-            <div>{{ dag.sdk_version }}</div>
-          </div>
-          <div>
-            <div class="text-muted">Лимит активных ранов</div>
-            <div>{{ dag.max_active_runs || 'без лимита' }}</div>
-          </div>
-          <div class="col-span-2">
-            <div class="text-muted">Образ</div>
-            <CopyText :text="dag.image" mono />
-          </div>
-          <div class="col-span-2">
-            <div class="text-muted">Digest</div>
-            <CopyText :text="dag.image_digest" mono />
-          </div>
-          <div>
-            <div class="text-muted">Зарегистрирован</div>
-            <div>{{ formatDateTime(dag.created_at) }}</div>
-          </div>
-          <div>
-            <div class="text-muted">Обновлён</div>
-            <div>{{ formatDateTime(dag.modified_at) }}</div>
-          </div>
-          <div class="col-span-2 flex items-end gap-6">
-            <NuxtLink :to="`/runs?dag_name=${encodeURIComponent(dag.name)}`" class="text-primary hover:underline">
-              Раны дага →
-            </NuxtLink>
-            <NuxtLink :to="`/env?dag_name=${encodeURIComponent(dag.name)}`" class="text-primary hover:underline">
-              Переменные и секреты дага →
-            </NuxtLink>
-          </div>
-        </div>
+        <!-- ── Обзор: как даг себя ведёт ── -->
+        <template v-if="tab === 'overview'">
+          <MetaGrid>
+            <MetaItem label="Расписание">
+              <template v-if="dag.schedule">
+                <span class="font-mono">{{ dag.schedule }}</span>
+                <UBadge v-if="dag.catchup" color="info" variant="subtle" size="sm" class="ml-1.5">catchup</UBadge>
+              </template>
+              <span v-else class="text-muted">— (запуск вручную)</span>
+            </MetaItem>
+            <MetaItem label="Следующий запуск">
+              <template v-if="dag.next_run_at && !dag.paused">
+                <RelativeTime :time="dag.next_run_at" />
+              </template>
+            </MetaItem>
+            <MetaItem label="Лимит активных ранов">{{ dag.max_active_runs || 'без лимита' }}</MetaItem>
+            <MetaItem label="Переменные и секреты">
+              <NuxtLink :to="`/env?dag_name=${encodeURIComponent(dag.name)}`" class="text-primary hover:underline">
+                env дага →
+              </NuxtLink>
+            </MetaItem>
+            <MetaItem label="Образ" span>
+              <CopyText :text="dag.image" mono />
+            </MetaItem>
+          </MetaGrid>
 
-        <section>
-          <h3 class="mb-2 font-semibold text-highlighted">Граф</h3>
-          <RunDagGraph :manifest-tasks="dag.tasks" />
-        </section>
-
-        <section>
-          <h3 class="mb-2 font-semibold text-highlighted">Таски</h3>
-          <UTable :data="dag.tasks" :columns="taskColumns" :ui="tableUi">
-            <template #name-cell="{ row }">
-              <span class="font-medium">{{ row.original.name }}</span>
-            </template>
-            <template #depends_on-cell="{ row }">
-              <div v-if="row.original.depends_on.length" class="flex flex-wrap gap-1">
-                <UBadge
-                  v-for="dep in row.original.depends_on"
-                  :key="dep.task"
+          <section>
+            <SectionHeader title="Последние раны" :count="runs.length">
+              <div class="flex items-center gap-3">
+                <DagRunSpark v-if="runs.length > 1" :runs="runs" />
+                <UButton
+                  :to="`/runs?dag_name=${encodeURIComponent(dag.name)}`"
+                  label="Все раны"
+                  trailing-icon="i-lucide-arrow-right"
                   color="neutral"
-                  variant="subtle"
-                  size="sm"
-                >
-                  {{ dep.task }}{{ dep.streamed ? ' (stream)' : '' }}
-                </UBadge>
+                  variant="ghost"
+                  size="xs"
+                />
               </div>
-              <span v-else class="text-muted">—</span>
-            </template>
-            <template #retries-cell="{ row }">
-              <template v-if="row.original.retries">
-                {{ row.original.retries }}
-                <span v-if="row.original.retry_delay_sec" class="text-xs text-muted">
-                  · пауза {{ formatSeconds(row.original.retry_delay_sec) }}
+            </SectionHeader>
+            <UAlert v-if="runsError" color="error" variant="subtle" :title="runsError" />
+            <UTable
+              v-else
+              :data="runs"
+              :columns="runColumns"
+              :ui="{ ...denseTableUi, tr: 'cursor-pointer' }"
+              @select="openRun"
+            >
+              <template #status-cell="{ row }">
+                <StatusBadge kind="run" :status="row.original.status" size="sm" />
+              </template>
+              <template #logical_date-cell="{ row }">
+                <span class="whitespace-nowrap">{{ formatDateShort(row.original.logical_date) }}</span>
+              </template>
+              <template #started-cell="{ row }">
+                <div class="flex items-center gap-1.5">
+                  <RelativeTime :time="row.original.created_at" />
+                  <UBadge :color="runTriggerColor(row.original.trigger)" variant="subtle" size="sm">
+                    {{ runTriggerLabel(row.original.trigger) }}
+                  </UBadge>
+                </div>
+              </template>
+              <template #duration-cell="{ row }">
+                <span class="whitespace-nowrap tabular-nums">
+                  {{ formatDuration(row.original.created_at, row.original.finished_at, row.original.status === 'running' ? nowTick : undefined) }}
                 </span>
               </template>
-              <span v-else class="text-muted">—</span>
-            </template>
-            <template #timeout-cell="{ row }">
-              {{ formatSeconds(row.original.timeout_sec) }}
-            </template>
-            <template #resources-cell="{ row }">
-              <span class="font-mono text-xs">{{ formatResources(row.original) }}</span>
-            </template>
-            <template #pool-cell="{ row }">
-              {{ row.original.pool || 'default' }}
-            </template>
-            <template #priority-cell="{ row }">
-              {{ row.original.priority || '—' }}
-            </template>
-            <template #injections-cell="{ row }">
-              <div v-if="row.original.secrets?.length || row.original.variables?.length" class="flex flex-wrap gap-1">
-                <UTooltip v-for="s in row.original.secrets" :key="`s-${s.env}`" :text="`секрет ${s.secret}`">
-                  <UBadge color="warning" variant="subtle" size="sm" class="font-mono">
-                    <UIcon name="i-lucide-key-round" class="size-3" />
-                    {{ s.env }}
-                  </UBadge>
-                </UTooltip>
-                <UTooltip v-for="v in row.original.variables" :key="`v-${v.env}`" :text="`переменная ${v.variable}`">
-                  <UBadge color="neutral" variant="subtle" size="sm" class="font-mono">
-                    <UIcon name="i-lucide-variable" class="size-3" />
-                    {{ v.env }}
-                  </UBadge>
-                </UTooltip>
-              </div>
-              <span v-else class="text-muted">—</span>
-            </template>
-          </UTable>
-        </section>
+              <template #empty>
+                <EmptyState icon="i-lucide-list" title="Ранов ещё не было">
+                  <UButton v-if="canManage" size="sm" icon="i-lucide-play" label="Запустить" @click="triggerTarget = dag" />
+                </EmptyState>
+              </template>
+            </UTable>
+          </section>
 
-        <section v-if="registrations.length">
-          <h3 class="mb-2 font-semibold text-highlighted">История регистраций</h3>
-          <UTable :data="registrations" :columns="regColumns" :ui="tableUi">
-            <template #status-cell="{ row }">
-              <div class="flex flex-col gap-0.5">
-                <UBadge :color="regStatusColor(row.original.status)" variant="subtle" class="w-fit">
-                  {{ regStatusLabel(row.original.status) }}
-                </UBadge>
-                <span v-if="row.original.error" class="text-xs text-error">{{ row.original.error }}</span>
-              </div>
-            </template>
-            <template #source-cell="{ row }">
-              {{ row.original.source === 'auto' ? 'авто (digest)' : 'вручную' }}
-            </template>
-            <template #image-cell="{ row }">
-              <span class="font-mono text-xs">{{ row.original.image }}</span>
-            </template>
-            <template #created_at-cell="{ row }">
-              {{ formatDateTime(row.original.created_at) }}
-            </template>
-            <template #finished_at-cell="{ row }">
-              {{ formatDateTime(row.original.finished_at) }}
-            </template>
-          </UTable>
-        </section>
+          <section v-if="taskStats.length">
+            <SectionHeader title="Таски по ресурсам" />
+            <UTable :data="taskStats" :columns="statColumns" :ui="denseTableUi">
+              <template #task-cell="{ row }">
+                <span class="font-medium">{{ row.original.task }}</span>
+              </template>
+              <template #duration-cell="{ row }">
+                <span class="tabular-nums">{{ formatSeconds(Math.round(row.original.durationSec)) }}</span>
+              </template>
+              <template #memory-cell="{ row }">
+                {{ formatBytes(row.original.memory) }}
+              </template>
+              <template #limit-cell="{ row }">
+                <span class="font-mono text-xs">{{ row.original.memoryLimit ?? '—' }}</span>
+              </template>
+            </UTable>
+            <p class="mt-1.5 flex items-center gap-1 text-xs text-muted">
+              <UIcon name="i-lucide-info" class="size-3.5 shrink-0" />
+              По последнему завершённому рану ({{ lastFinished?.id }}) — агрегата за историю пока нет.
+            </p>
+          </section>
+        </template>
+
+        <!-- ── Схема: как даг устроен ── -->
+        <template v-else>
+          <section>
+            <SectionHeader title="Граф" />
+            <RunDagGraph :manifest-tasks="dag.tasks" />
+          </section>
+
+          <section>
+            <SectionHeader title="Таски" :count="dag.tasks.length" />
+            <UTable :data="dag.tasks" :columns="taskColumns" :ui="denseTableUi">
+              <template #name-cell="{ row }">
+                <span class="font-medium">{{ row.original.name }}</span>
+              </template>
+              <template #depends_on-cell="{ row }">
+                <div v-if="row.original.depends_on.length" class="flex flex-wrap gap-1">
+                  <UBadge
+                    v-for="dep in row.original.depends_on"
+                    :key="dep.task"
+                    color="neutral"
+                    variant="subtle"
+                    size="sm"
+                  >
+                    {{ dep.task }}{{ dep.streamed ? ' (stream)' : '' }}
+                  </UBadge>
+                </div>
+                <span v-else class="text-muted">—</span>
+              </template>
+              <template #retries-cell="{ row }">
+                <template v-if="row.original.retries">
+                  {{ row.original.retries }}
+                  <span v-if="row.original.retry_delay_sec" class="text-xs text-muted">
+                    · пауза {{ formatSeconds(row.original.retry_delay_sec) }}
+                  </span>
+                </template>
+                <span v-else class="text-muted">—</span>
+              </template>
+              <template #timeout-cell="{ row }">
+                {{ formatSeconds(row.original.timeout_sec) }}
+              </template>
+              <template #resources-cell="{ row }">
+                <span class="font-mono text-xs">{{ formatResources(row.original) }}</span>
+              </template>
+              <template #pool-cell="{ row }">
+                {{ row.original.pool || 'default' }}
+              </template>
+              <template #priority-cell="{ row }">
+                {{ row.original.priority || '—' }}
+              </template>
+              <template #injections-cell="{ row }">
+                <div v-if="row.original.secrets?.length || row.original.variables?.length" class="flex flex-wrap gap-1">
+                  <UTooltip v-for="s in row.original.secrets" :key="`s-${s.env}`" :text="`секрет ${s.secret}`">
+                    <UBadge color="warning" variant="subtle" size="sm" class="font-mono">
+                      <UIcon name="i-lucide-key-round" class="size-3" />
+                      {{ s.env }}
+                    </UBadge>
+                  </UTooltip>
+                  <UTooltip v-for="v in row.original.variables" :key="`v-${v.env}`" :text="`переменная ${v.variable}`">
+                    <UBadge color="neutral" variant="subtle" size="sm" class="font-mono">
+                      <UIcon name="i-lucide-variable" class="size-3" />
+                      {{ v.env }}
+                    </UBadge>
+                  </UTooltip>
+                </div>
+                <span v-else class="text-muted">—</span>
+              </template>
+            </UTable>
+          </section>
+
+          <section v-if="registrations.length">
+            <SectionHeader title="История регистраций" :count="registrations.length" />
+            <UTable :data="registrations" :columns="regColumns" :ui="denseTableUi">
+              <template #status-cell="{ row }">
+                <div class="flex flex-col gap-0.5">
+                  <StatusBadge kind="registration" :status="row.original.status" size="sm" class="w-fit" />
+                  <span v-if="row.original.error" class="text-xs text-error">{{ row.original.error }}</span>
+                </div>
+              </template>
+              <template #source-cell="{ row }">
+                {{ row.original.source === 'auto' ? 'авто (digest)' : 'вручную' }}
+              </template>
+              <template #image-cell="{ row }">
+                <span class="font-mono text-xs">{{ row.original.image }}</span>
+              </template>
+              <template #created_at-cell="{ row }">
+                <RelativeTime :time="row.original.created_at" />
+              </template>
+              <template #finished_at-cell="{ row }">
+                <RelativeTime :time="row.original.finished_at" />
+              </template>
+            </UTable>
+          </section>
+
+          <MetaGrid>
+            <MetaItem label="SDK">{{ dag.sdk_version }}</MetaItem>
+            <MetaItem label="Зарегистрирован">{{ formatDateTime(dag.created_at) }}</MetaItem>
+            <MetaItem label="Обновлён">{{ formatDateTime(dag.modified_at) }}</MetaItem>
+            <MetaItem label="Digest" span>
+              <CopyText :text="dag.image_digest" mono />
+            </MetaItem>
+          </MetaGrid>
+        </template>
       </template>
 
       <DagTriggerModal :dag="triggerTarget" @close="triggerTarget = null" />

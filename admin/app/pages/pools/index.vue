@@ -1,36 +1,47 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
+import { getDashboard } from '~/api/dashboard.api'
 import { listPools, setPool } from '~/api/pool.api'
 import type { Pool } from '~/types/pool'
 
 // Пулы слотов параллелизма: таски всех дагов конкурируют за слоты своего
 // пула. Удаления нет — на пул могут ссылаться манифесты; slots = 0 ставит
-// пул на паузу.
+// пул на паузу. Занятость (busy) отдаёт только dashboard RPC — тянем его
+// же (отдельного метода в ListPool нет, design/07 №5-6).
 
 const { isAdmin } = useAuth()
 
 const pools = ref<Pool[]>([])
+const busyByName = ref<Map<string, number>>(new Map())
 const loading = ref(false)
+const loadError = ref('')
 const action = useApiAction()
 
-const toast = useToast()
-
-async function load() {
-  loading.value = true
+async function load(background = false) {
+  if (!background)
+    loading.value = true
   try {
-    const rep = await listPools()
+    const [rep, dashboard] = await Promise.all([
+      listPools(),
+      getDashboard().catch(() => null), // занятость — best effort
+    ])
     pools.value = rep.results ?? []
+    busyByName.value = new Map(
+      (dashboard?.pools ?? []).map(p => [p.name, Number(p.busy)]))
+    loadError.value = ''
   }
   catch (error) {
-    toast.add({ title: 'Ошибка загрузки пулов', description: apiErrorMessage(error), color: 'error' })
+    loadError.value = apiErrorMessage(error)
   }
   finally {
-    loading.value = false
+    if (!background)
+      loading.value = false
   }
 }
 
 onMounted(load)
+usePolling(() => load(true), 10_000)
 
 // создание пула / изменение слотов
 const editOpen = ref(false)
@@ -66,6 +77,7 @@ async function submitEdit() {
 const columns: TableColumn<Pool>[] = [
   { accessorKey: 'name', header: 'Пул' },
   { accessorKey: 'slots', header: 'Слоты' },
+  { id: 'busy', header: 'Занято' },
   { accessorKey: 'created_at', header: 'Создан' },
   { accessorKey: 'modified_at', header: 'Изменён' },
   { id: 'actions', header: '' },
@@ -77,14 +89,23 @@ const columns: TableColumn<Pool>[] = [
     <template #header>
       <UDashboardNavbar title="Пулы">
         <template #right>
-          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load" />
+          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" aria-label="Обновить список" @click="load()" />
           <UButton v-if="isAdmin" icon="i-lucide-plus" label="Создать" @click="openCreate" />
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <UTable :data="pools" :columns="columns" :loading="loading">
+      <UAlert
+        v-if="loadError"
+        color="error"
+        variant="subtle"
+        title="Ошибка загрузки пулов"
+        :description="loadError"
+        :actions="[{ label: 'Повторить', color: 'error', variant: 'soft', onClick: () => load() }]"
+      />
+
+      <UTable :data="pools" :columns="columns" :loading="loading" :ui="denseTableUi">
         <template #name-cell="{ row }">
           <div class="flex items-center gap-2">
             <span class="font-medium text-highlighted">{{ row.original.name }}</span>
@@ -94,12 +115,28 @@ const columns: TableColumn<Pool>[] = [
           </div>
         </template>
 
+        <template #busy-cell="{ row }">
+          <div v-if="row.original.slots > 0" class="flex w-36 items-center gap-2">
+            <span class="shrink-0 text-xs tabular-nums text-muted">
+              {{ busyByName.get(row.original.name) ?? 0 }} / {{ row.original.slots }}
+            </span>
+            <div class="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-elevated">
+              <div
+                class="h-full rounded-full"
+                :class="(busyByName.get(row.original.name) ?? 0) >= row.original.slots ? 'bg-warning' : 'bg-primary'"
+                :style="{ width: `${Math.min(100, ((busyByName.get(row.original.name) ?? 0) / row.original.slots) * 100)}%` }"
+              />
+            </div>
+          </div>
+          <span v-else class="text-muted">—</span>
+        </template>
+
         <template #created_at-cell="{ row }">
-          {{ formatDateTime(row.original.created_at) }}
+          <RelativeTime :time="row.original.created_at" />
         </template>
 
         <template #modified_at-cell="{ row }">
-          {{ formatDateTime(row.original.modified_at) }}
+          <RelativeTime :time="row.original.modified_at" />
         </template>
 
         <template #actions-cell="{ row }">
@@ -116,8 +153,14 @@ const columns: TableColumn<Pool>[] = [
         </template>
       </UTable>
 
-      <div v-if="!loading && pools.length === 0" class="p-8 text-center text-muted">
-        Пулов нет.
+      <div v-if="!loading && !loadError && pools.length === 0">
+        <EmptyState
+          icon="i-lucide-layers"
+          title="Пулов нет"
+          description="Таск попадает в пул опцией loom.Pool(name); слоты ограничивают число одновременных попыток."
+        >
+          <UButton v-if="isAdmin" size="sm" icon="i-lucide-plus" label="Создать" @click="openCreate" />
+        </EmptyState>
       </div>
 
       <!-- создание / изменение слотов -->

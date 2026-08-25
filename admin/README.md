@@ -1,10 +1,13 @@
 # loom admin
 
 Админка loom: Nuxt 4 SPA (`ssr: false`) + Nuxt UI v4 поверх gateway API
-control plane (grpc-gateway, порт 8082). Дашборд, даги (карточка со схемой
-до первого запуска), раны с метриками, live-логи (follow, разбор
+control plane (grpc-gateway, порт 8082). Обзор («что требует внимания»),
+даги (карточка: табы Обзор/Схема — раны и метрики + граф и манифест),
+раны (страница рана — master-detail: список тасков + инспектор с табами
+Лог/Попытки/Значения/Env, `?task=&tab=` в URL), live-логи (follow, разбор
 logfmt/JSON/ANSI), переменные и секреты одним разделом (`/env`) со
-скоупами, пользователи.
+скоупами, пользователи. Дизайн-документы редизайна — `docs/design/`
+(вьюпорт-бюджет 1180px, плотные таблицы, относительное время в списках).
 
 Вход — по логину и паролю (сессия хранится в localStorage). Пока в системе
 нет ни одного пользователя, админка открывает экран первичной настройки
@@ -44,13 +47,17 @@ gateway, каким его видит браузер). В деве `/config.js` 
 app/
   api/         # тонкие типизированные вызовы gateway (client.ts — flattenQuery)
   types/       # DTO (зеркало api/proto/server_v1)
-  composables/ # useApiAction (loading + тосты), useAuth (сессия и права)
-  utils/       # config (рантайм-конфиг), format (даты, байты), status,
-               # logparse (logfmt/JSON/ANSI), auth (токен сессии)
+  composables/ # useApiAction (loading + тосты), useAuth (сессия и права),
+               # usePolling (тик + пауза на скрытой вкладке), useTimeTick
+  utils/       # config (рантайм-конфиг), format (даты/relative/байты), status
+               # (цвет+подпись+иконка), table (denseTableUi), runenv (резолв
+               # env-привязок), logparse (logfmt/JSON/ANSI), auth (токен)
   middleware/  # auth.global — гард сессии (/login, /setup)
   layouts/     # default (UDashboardGroup/Sidebar), auth (вход без сайдбара)
-  pages/       # / (дашборд), /dags, /dags/[name], /runs, /runs/[id],
-               # /runs/[id]/log, /env (переменные и секреты), /pools, /users
-  components/  # dag/* — модалки дага; run/LogViewer — просмотр лога;
-               # dashboard/* — карточки и SVG-графики
+  pages/       # / (обзор), /dags, /dags/[name] (?tab=), /runs,
+               # /runs/[id] (?task=&tab=), /runs/[id]/log, /env, /pools, /users
+  components/  # StatusBadge/RelativeTime/RowMenu/EmptyState/SectionHeader/
+               # MetaGrid|Item — общие примитивы (docs/design/06);
+               # dag/* — модалки дага + RunSpark; run/* — LogViewer,
+               # TaskInspector, DagGraph, EnvTable; dashboard/* — SVG-графики
 ```

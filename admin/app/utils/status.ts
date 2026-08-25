@@ -1,8 +1,10 @@
 import type { AttemptStatus, RunStatus, TaskStatus } from '~/types/run'
+import type { DagRegistrationStatus } from '~/types/dag'
 import type { TaskLogSource } from '~/types/log'
 
-// Цвета и подписи статусов. Цвета — семантические токены Nuxt UI
-// (badge/button color).
+// Единый словарь статусов: цвет + подпись + иконка (рендер — компонент
+// StatusBadge). Цвета — семантические токены Nuxt UI (badge/button color).
+// Правило: цвет никогда не единственный сигнал — рядом иконка и подпись.
 
 type BadgeColor = 'neutral' | 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error'
 
@@ -13,6 +15,16 @@ export function runStatusColor(status: RunStatus): BadgeColor {
     case 'failed': return 'error'
     case 'canceled': return 'neutral'
     default: return 'neutral'
+  }
+}
+
+export function runStatusIcon(status: RunStatus): string {
+  switch (status) {
+    case 'running': return 'i-lucide-loader-circle'
+    case 'success': return 'i-lucide-circle-check'
+    case 'failed': return 'i-lucide-circle-x'
+    case 'canceled': return 'i-lucide-circle-slash'
+    default: return 'i-lucide-circle'
   }
 }
 
@@ -52,9 +64,26 @@ export function taskStatusColor(status: TaskStatus): BadgeColor {
     case 'up_for_retry': return 'warning'
     case 'success': return 'success'
     case 'failed': return 'error'
-    case 'upstream_failed': return 'warning'
+    // следствие чужого провала, не проблема сама по себе — приглушённый
+    // нейтральный, чтобы не отвлекать от реально упавшего таска
+    case 'upstream_failed': return 'neutral'
     case 'canceled': return 'neutral'
     default: return 'neutral'
+  }
+}
+
+export function taskStatusIcon(status: TaskStatus): string {
+  switch (status) {
+    case 'pending': return 'i-lucide-circle-dashed'
+    case 'queued': return 'i-lucide-clock'
+    case 'starting':
+    case 'running': return 'i-lucide-loader-circle'
+    case 'up_for_retry': return 'i-lucide-timer'
+    case 'success': return 'i-lucide-circle-check'
+    case 'failed': return 'i-lucide-circle-x'
+    case 'upstream_failed': return 'i-lucide-circle-off'
+    case 'canceled': return 'i-lucide-circle-slash'
+    default: return 'i-lucide-circle'
   }
 }
 
@@ -80,6 +109,47 @@ export function attemptStatusColor(status: AttemptStatus): BadgeColor {
     case 'success': return 'success'
     case 'failed': return 'error'
     default: return 'neutral'
+  }
+}
+
+export function attemptStatusIcon(status: AttemptStatus): string {
+  switch (status) {
+    case 'starting':
+    case 'running': return 'i-lucide-loader-circle'
+    case 'success': return 'i-lucide-circle-check'
+    case 'failed': return 'i-lucide-circle-x'
+    default: return 'i-lucide-circle'
+  }
+}
+
+// Статусы очереди регистраций дагов.
+
+export function regStatusColor(status: DagRegistrationStatus): BadgeColor {
+  switch (status) {
+    case 'success': return 'success'
+    case 'failed': return 'error'
+    case 'running': return 'info'
+    default: return 'neutral'
+  }
+}
+
+export function regStatusLabel(status: DagRegistrationStatus): string {
+  switch (status) {
+    case 'pending': return 'в очереди'
+    case 'running': return 'выполняется'
+    case 'success': return 'успех'
+    case 'failed': return 'провал'
+    default: return status
+  }
+}
+
+export function regStatusIcon(status: DagRegistrationStatus): string {
+  switch (status) {
+    case 'pending': return 'i-lucide-clock'
+    case 'running': return 'i-lucide-loader-circle'
+    case 'success': return 'i-lucide-circle-check'
+    case 'failed': return 'i-lucide-circle-x'
+    default: return 'i-lucide-circle'
   }
 }
 

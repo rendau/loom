@@ -5,15 +5,18 @@ const { me, isAdmin, logout } = useAuth()
 
 const navItems = computed<NavigationMenuItem[][]>(() => {
   const items: NavigationMenuItem[] = [
-    { label: 'Дашборд', icon: 'i-lucide-layout-dashboard', to: '/' },
+    { label: 'Обзор', icon: 'i-lucide-layout-dashboard', to: '/' },
     { label: 'Даги', icon: 'i-lucide-workflow', to: '/dags' },
     { label: 'Раны', icon: 'i-lucide-list', to: '/runs' },
-    { label: 'Пулы', icon: 'i-lucide-layers', to: '/pools' },
     { label: 'Переменные и секреты', icon: 'i-lucide-key-round', to: '/env' },
   ]
+  // администрирование — отдельной группой в конце (design/03)
+  const adminItems: NavigationMenuItem[] = [
+    { label: 'Пулы', icon: 'i-lucide-layers', to: '/pools' },
+  ]
   if (isAdmin.value)
-    items.push({ label: 'Пользователи', icon: 'i-lucide-users', to: '/users' })
-  return [items]
+    adminItems.push({ label: 'Пользователи', icon: 'i-lucide-users', to: '/users' })
+  return [items, adminItems]
 })
 
 const userMenuItems = computed<DropdownMenuItem[][]>(() => [[

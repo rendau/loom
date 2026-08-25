@@ -262,10 +262,10 @@ defineExpose({ restart: () => start() })
         </UBadge>
         <USwitch :model-value="following" label="Follow" size="sm" @update:model-value="onFollowToggle" />
         <UTooltip text="Скопировать отфильтрованное">
-          <UButton icon="i-lucide-copy" size="xs" color="neutral" variant="ghost" @click="copyAll" />
+          <UButton icon="i-lucide-copy" size="xs" color="neutral" variant="ghost" aria-label="Скопировать отфильтрованное" @click="copyAll" />
         </UTooltip>
         <UTooltip text="Скачать .log">
-          <UButton icon="i-lucide-download" size="xs" color="neutral" variant="ghost" @click="download" />
+          <UButton icon="i-lucide-download" size="xs" color="neutral" variant="ghost" aria-label="Скачать .log" @click="download" />
         </UTooltip>
       </span>
     </div>
@@ -350,6 +350,7 @@ defineExpose({ restart: () => start() })
         variant="solid"
         size="sm"
         class="absolute bottom-3 right-4 shadow-lg"
+        aria-label="К концу лога"
         @click="scrollToBottom"
       />
     </div>

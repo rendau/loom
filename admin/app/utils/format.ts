@@ -16,6 +16,19 @@ const timeFmt = new Intl.DateTimeFormat('ru-RU', {
   second: '2-digit',
 })
 
+const shortDateTimeFmt = new Intl.DateTimeFormat('ru-RU', {
+  day: '2-digit',
+  month: '2-digit',
+  year: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
+const timeShortFmt = new Intl.DateTimeFormat('ru-RU', {
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
 export function formatDateTime(iso?: string): string {
   if (!iso)
     return '—'
@@ -33,6 +46,51 @@ export function formatTime(iso?: string): string {
 export function formatTimestampMs(ms: string | number): string {
   const n = Number(ms)
   return Number.isFinite(n) ? timeFmt.format(new Date(n)) : '—'
+}
+
+// formatDateShort — компактная абсолютная дата для колонок списков
+// («25.08.26, 14:03»): без секунд и с двузначным годом, чтобы не
+// раздувать таблицы на узком экране.
+export function formatDateShort(iso?: string): string {
+  if (!iso)
+    return '—'
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '—' : shortDateTimeFmt.format(d)
+}
+
+// formatRelative — время для списков: «когда относительно сейчас».
+// Абсолютное значение показывается в tooltip (компонент RelativeTime).
+// Понимает и будущее («через 2 ч» — ближайшие запуски).
+export function formatRelative(iso?: string, now: number = Date.now()): string {
+  if (!iso)
+    return '—'
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t))
+    return '—'
+
+  const diff = now - t
+  if (diff >= 0) {
+    if (diff < 45_000)
+      return 'только что'
+    if (diff < 3_600_000)
+      return `${Math.floor(diff / 60_000)} мин назад`
+    const startOfToday = new Date(now)
+    startOfToday.setHours(0, 0, 0, 0)
+    if (t >= startOfToday.getTime())
+      return `сегодня ${timeShortFmt.format(t)}`
+    if (t >= startOfToday.getTime() - 86_400_000)
+      return `вчера ${timeShortFmt.format(t)}`
+    return shortDateTimeFmt.format(t)
+  }
+
+  const ahead = -diff
+  if (ahead < 60_000)
+    return 'меньше минуты'
+  if (ahead < 3_600_000)
+    return `через ${Math.round(ahead / 60_000)} мин`
+  if (ahead < 86_400_000)
+    return `через ${Math.round(ahead / 3_600_000)} ч`
+  return shortDateTimeFmt.format(t)
 }
 
 // formatBytes — человекочитаемый объём памяти («256.0 MiB»). Значения от
@@ -56,10 +114,12 @@ export function formatBytes(bytes?: string | number | null): string {
 }
 
 // formatDuration — длительность между двумя моментами, «1м 23с».
-export function formatDuration(fromIso?: string, toIso?: string): string {
-  if (!fromIso || !toIso)
+// nowMs — для живых объектов: без toIso считаем до «сейчас» (тикающая
+// длительность running-рана), а без nowMs незавершённое остаётся «—».
+export function formatDuration(fromIso?: string, toIso?: string, nowMs?: number): string {
+  if (!fromIso || (!toIso && nowMs === undefined))
     return '—'
-  const ms = new Date(toIso).getTime() - new Date(fromIso).getTime()
+  const ms = (toIso ? new Date(toIso).getTime() : nowMs!) - new Date(fromIso).getTime()
   if (!Number.isFinite(ms) || ms < 0)
     return '—'
 

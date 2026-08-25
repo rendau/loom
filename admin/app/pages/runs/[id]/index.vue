@@ -1,25 +1,30 @@
 <script setup lang="ts">
-import type { TableColumn } from '@nuxt/ui'
+import type { TableColumn, TableRow } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
 import { cancelRun, getRun, listRunValues, retryTask } from '~/api/run.api'
+import { listSecrets } from '~/api/secret.api'
+import { listVariables } from '~/api/variable.api'
 import type { DagTask } from '~/types/dag'
 import type { Attempt, Run, TaskInstance, TaskValue } from '~/types/run'
-import type { RunLogSlideover } from '#components'
+import type { SecretMeta } from '~/types/secret'
+import type { Variable } from '~/types/variable'
 
-// Детали рана: граф дага, статусы тасков и попыток; пока ран выполняется —
-// авто-poll.
+// Страница рана — master-detail (design/05 §5): компактный список тасков +
+// инспектор выбранного таска (лог/попытки/значения/env). У failed-рана
+// первый упавший таск выбирается автоматически — лог виден без кликов.
+// Выбор и таба — в URL (?task=&tab=), ссылку можно переслать.
 
 const route = useRoute()
+const router = useRouter()
 const runId = String(route.params.id)
 
 const run = ref<Run | null>(null)
 const tasks = ref<TaskInstance[]>([])
 const attempts = ref<Attempt[]>([])
 const manifestTasks = ref<DagTask[]>([])
+const values = ref<TaskValue[]>([])
 const loading = ref(false)
 const loadError = ref('')
-
-const values = ref<TaskValue[]>([])
 
 // background — фоновый рефреш поллинга: без спиннера, чтобы кнопка
 // обновления не мигала каждые 3 секунды
@@ -36,6 +41,8 @@ async function load(background = false) {
 
     const valuesRep = await listRunValues(runId)
     values.value = valuesRep.values ?? []
+
+    autoSelectFailed()
   }
   catch (error) {
     loadError.value = apiErrorMessage(error)
@@ -46,45 +53,231 @@ async function load(background = false) {
   }
 }
 
-function formatValue(v: unknown): string {
-  const s = JSON.stringify(v)
-  return s.length > 200 ? `${s.slice(0, 199)}…` : s
+// env-контекст: переменные и секреты всех скоупов — для резолва привязок
+// тасков (локальный перекрывает глобальный). Значения — текущие, снапшота
+// на момент launch в API нет (design/07 №3) — EnvTable показывает пометку.
+const variables = ref<Variable[]>([])
+const secrets = ref<SecretMeta[]>([])
+
+async function loadEnv() {
+  try {
+    const [v, s] = await Promise.all([listVariables(), listSecrets()])
+    variables.value = v.results ?? []
+    secrets.value = s.results ?? []
+  }
+  catch {
+    // env-таба покажет привязки без значений — не критично для остального
+  }
 }
 
 // авто-обновление, пока ран живой
-let pollTimer: ReturnType<typeof setInterval> | undefined
 onMounted(async () => {
-  await load()
-  pollTimer = setInterval(() => {
-    if (run.value?.status === 'running')
-      load(true)
-  }, 3000)
+  await Promise.all([load(), loadEnv()])
 })
-onBeforeUnmount(() => clearInterval(pollTimer))
+usePolling(() => load(true), 3000, () => run.value?.status === 'running')
 
-// лог попытки
-const logRef = ref<InstanceType<typeof RunLogSlideover> | null>(null)
+// ── выбор таска и таба инспектора (в URL) ───────────────
 
-function openTaskLog(ti: TaskInstance) {
-  if (ti.attempt < 1)
+const selectedTask = ref(typeof route.query.task === 'string' ? route.query.task : '')
+const inspectorTab = ref(typeof route.query.tab === 'string' ? route.query.tab : 'log')
+
+// автовыбор первого упавшего — только если пользователь ничего не выбрал
+// сам (и не пришёл по ссылке с ?task=); фиксируется после первого раза,
+// чтобы поллинг не перепрыгивал выбор
+let autoSelected = selectedTask.value !== ''
+
+function autoSelectFailed() {
+  if (autoSelected || run.value?.status === 'running')
     return
-  logRef.value?.show(ti.task, ti.attempt, ti.status === 'running' || ti.status === 'starting')
+  const failed = tasks.value.find(t => t.status === 'failed')
+  if (failed)
+    selectedTask.value = failed.task
+  autoSelected = true
 }
 
-function openAttemptLog(a: Attempt) {
-  logRef.value?.show(a.task, a.attempt, a.status === 'running' || a.status === 'starting')
+watch([selectedTask, inspectorTab], () => {
+  const query: Record<string, string> = { ...route.query } as Record<string, string>
+  delete query.task
+  delete query.tab
+  if (selectedTask.value) {
+    query.task = selectedTask.value
+    if (inspectorTab.value !== 'log')
+      query.tab = inspectorTab.value
+  }
+  router.replace({ query })
+})
+
+const selectedTi = computed(() => tasks.value.find(t => t.task === selectedTask.value) ?? null)
+const selectedManifest = computed(() => manifestTasks.value.find(t => t.name === selectedTask.value))
+
+const tiByName = computed(() => new Map(tasks.value.map(t => [t.task, t])))
+
+const selectedAttempts = computed(() =>
+  attempts.value.filter(a => a.task === selectedTask.value).sort((a, b) => a.attempt - b.attempt))
+
+const selectedValues = computed(() => values.value.filter(v => v.task === selectedTask.value))
+
+const selectedBindings = computed(() => {
+  const mt = selectedManifest.value
+  if (!mt || !run.value)
+    return []
+  return resolveEnvBindings([mt], run.value.dag_name, variables.value, secrets.value)
+})
+
+const selectedDeps = computed(() =>
+  (selectedManifest.value?.depends_on ?? []).map(d => ({
+    task: d.task,
+    streamed: d.streamed,
+    status: tiByName.value.get(d.task)?.status,
+  })))
+
+// окружение всего рана — объединение привязок всех тасков
+const runBindings = computed(() => {
+  if (!run.value || manifestTasks.value.length === 0)
+    return []
+  return resolveEnvBindings(manifestTasks.value, run.value.dag_name, variables.value, secrets.value)
+})
+
+function selectTask(name: string) {
+  selectedTask.value = name
 }
+
+// клавиатура (design/05): ↑/↓ — по таскам, Esc — закрыть инспектор.
+// Не срабатывает в полях ввода, модалках и на ручке ресайза.
+function onKeydown(e: KeyboardEvent) {
+  const target = e.target
+  if (target instanceof Element
+    && target.closest('input, textarea, select, [contenteditable], [role="dialog"], [role="separator"]'))
+    return
+
+  if (e.key === 'Escape') {
+    if (selectedTask.value) {
+      selectedTask.value = ''
+      e.preventDefault()
+    }
+    return
+  }
+
+  if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || tasks.value.length === 0)
+    return
+  const idx = tasks.value.findIndex(t => t.task === selectedTask.value)
+  const next = e.key === 'ArrowDown'
+    ? Math.min(tasks.value.length - 1, idx + 1)
+    : Math.max(0, idx <= 0 ? 0 : idx - 1)
+  selectedTask.value = tasks.value[next]!.task
+  e.preventDefault()
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+
+// ── список тасков ───────────────────────────────────────
+
+const now = useTimeTick()
+
+function taskDuration(ti: TaskInstance): string {
+  const live = ti.status === 'running' || ti.status === 'starting'
+  return formatDuration(ti.started_at, ti.finished_at, live ? now.value : undefined)
+}
+
+const taskColumns: TableColumn<TaskInstance>[] = [
+  { accessorKey: 'status', header: 'Статус' },
+  { accessorKey: 'task', header: 'Таск' },
+  { accessorKey: 'attempt', header: 'Попытка' },
+  { accessorKey: 'started_at', header: 'Старт' },
+  { id: 'duration', header: 'Длительность' },
+  { id: 'memory', header: 'Пик памяти' },
+  { id: 'actions', header: '' },
+]
+
+function onTaskRowSelect(_e: Event, row: TableRow<TaskInstance>) {
+  selectTask(row.original.task)
+}
+
+// пик памяти текущей попытки таска (attempts содержит все попытки)
+const peakByTask = computed(() => {
+  const result: Record<string, number> = {}
+  for (const a of attempts.value) {
+    const ti = tiByName.value.get(a.task)
+    if (!ti || a.attempt !== ti.attempt || a.peak_memory_bytes === undefined)
+      continue
+    result[a.task] = Number(a.peak_memory_bytes)
+  }
+  return result
+})
+
+// агрегаты рана: max и сумма пиков по текущим попыткам тасков
+const memorySummary = computed(() => {
+  const peaks = Object.values(peakByTask.value)
+  if (peaks.length === 0)
+    return null
+  return {
+    max: Math.max(...peaks),
+    sum: peaks.reduce((s, v) => s + v, 0),
+  }
+})
+
+// ── граф (сворачиваемый, состояние запоминается) ────────
+
+const GRAPH_KEY = 'loom-run-graph-open'
+const graphOpen = ref(localStorage.getItem(GRAPH_KEY) !== '0')
+watch(graphOpen, v => localStorage.setItem(GRAPH_KEY, v ? '1' : '0'))
+
+// ── действия ────────────────────────────────────────────
+
+const action = useApiAction()
+const { canManageDag } = useAuth()
 
 // ретрай таска: доступен на завершённом ране для исполнявшихся тасков
 // (failed | success | canceled); upstream_failed не исполнялся — ретраить нечего
-const action = useApiAction()
 const retryTarget = ref<TaskInstance | null>(null)
-const { canManageDag } = useAuth()
 
-function canRetry(ti: TaskInstance): boolean {
-  return run.value?.status !== 'running'
+function canRetry(ti: TaskInstance | null): boolean {
+  return !!ti && run.value?.status !== 'running'
     && (ti.status === 'failed' || ti.status === 'success' || ti.status === 'canceled')
     && canManageDag(run.value?.dag_name)
+}
+
+// downstream-подграф таска (сбрасывается ретраем) — по снапшоту манифеста
+function downstreamOf(task: string): string[] {
+  const dependents = new Map<string, string[]>()
+  for (const t of manifestTasks.value) {
+    for (const d of t.depends_on ?? []) {
+      const list = dependents.get(d.task) ?? []
+      list.push(t.name)
+      dependents.set(d.task, list)
+    }
+  }
+  const out: string[] = []
+  const queue = [task]
+  const seen = new Set<string>([task])
+  while (queue.length) {
+    for (const dep of dependents.get(queue.shift()!) ?? []) {
+      if (seen.has(dep))
+        continue
+      seen.add(dep)
+      out.push(dep)
+      queue.push(dep)
+    }
+  }
+  return out
+}
+
+const retryDownstream = computed(() =>
+  retryTarget.value ? downstreamOf(retryTarget.value.task) : [])
+
+async function confirmRetry() {
+  const target = retryTarget.value
+  if (!target)
+    return
+  const ok = await action.run(
+    () => retryTask(runId, target.task),
+    { success: `Таск ${target.task} отправлен на ретрай` },
+  )
+  if (ok !== undefined) {
+    retryTarget.value = null
+    await load()
+  }
 }
 
 // принудительная остановка рана: живые таски убиваются, незавершённые
@@ -104,137 +297,69 @@ async function confirmCancel() {
     await load()
   }
 }
-
-async function confirmRetry() {
-  const target = retryTarget.value
-  if (!target)
-    return
-  const ok = await action.run(
-    () => retryTask(runId, target.task),
-    { success: `Таск ${target.task} отправлен на ретрай` },
-  )
-  if (ok !== undefined) {
-    retryTarget.value = null
-    await load()
-  }
-}
-
-const taskColumns: TableColumn<TaskInstance>[] = [
-  { accessorKey: 'task', header: 'Таск' },
-  { accessorKey: 'status', header: 'Статус' },
-  { accessorKey: 'attempt', header: 'Попытка' },
-  { accessorKey: 'started_at', header: 'Старт' },
-  { accessorKey: 'finished_at', header: 'Завершён' },
-  { id: 'duration', header: 'Длительность' },
-  { id: 'memory', header: 'Пик памяти' },
-  { id: 'actions', header: '' },
-]
-
-// пик памяти текущей попытки таска (attempts содержит все попытки)
-const peakByTask = computed(() => {
-  const result: Record<string, number> = {}
-  for (const a of attempts.value) {
-    const ti = tasks.value.find(t => t.task === a.task)
-    if (!ti || a.attempt !== ti.attempt || a.peak_memory_bytes === undefined)
-      continue
-    result[a.task] = Number(a.peak_memory_bytes)
-  }
-  return result
-})
-
-// агрегаты рана: max и сумма пиков по текущим попыткам тасков
-const memorySummary = computed(() => {
-  const peaks = Object.values(peakByTask.value)
-  if (peaks.length === 0)
-    return null
-  return {
-    max: Math.max(...peaks),
-    sum: peaks.reduce((s, v) => s + v, 0),
-  }
-})
-
-const attemptColumns: TableColumn<Attempt>[] = [
-  { accessorKey: 'task', header: 'Таск' },
-  { accessorKey: 'attempt', header: '№' },
-  { accessorKey: 'status', header: 'Статус' },
-  { accessorKey: 'created_at', header: 'Создана' },
-  { accessorKey: 'finished_at', header: 'Завершена' },
-  { id: 'memory', header: 'Пик памяти' },
-  { id: 'exit', header: 'Исход' },
-  { id: 'actions', header: '' },
-]
-
-const valueColumns: TableColumn<TaskValue>[] = [
-  { accessorKey: 'task', header: 'Таск' },
-  { accessorKey: 'key', header: 'Ключ' },
-  { accessorKey: 'value', header: 'Значение' },
-  { accessorKey: 'modified_at', header: 'Обновлено' },
-]
-
-// снятие whitespace-nowrap темы UTable: длинные русские статусы и значения
-// должны переноситься, а не растягивать таблицу в горизонтальный скролл
-const tableUi = { td: 'whitespace-normal' }
 </script>
 
 <template>
   <UDashboardPanel id="run-details">
     <template #header>
-      <UDashboardNavbar :title="runId">
+      <UDashboardNavbar :title="run ? `${run.dag_name} / ${runId}` : runId">
         <template #leading>
-          <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/runs" />
+          <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/runs" aria-label="К списку ранов" />
         </template>
         <template #right>
-          <UBadge v-if="run" :color="runStatusColor(run.status)" variant="subtle" size="lg">
-            {{ runStatusLabel(run.status) }}
-          </UBadge>
+          <StatusBadge v-if="run" kind="run" :status="run.status" size="lg" />
           <UTooltip v-if="canCancel" text="Остановить ран">
-            <UButton icon="i-lucide-circle-stop" color="error" variant="ghost" @click="cancelOpen = true" />
+            <UButton icon="i-lucide-circle-stop" color="error" variant="ghost" aria-label="Остановить ран" @click="cancelOpen = true" />
           </UTooltip>
-          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load()" />
+          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" aria-label="Обновить" @click="load()" />
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <UAlert v-if="loadError" color="error" variant="subtle" :title="loadError" />
+      <UAlert
+        v-if="loadError"
+        color="error"
+        variant="subtle"
+        title="Ошибка загрузки рана"
+        :description="loadError"
+        :actions="[{ label: 'Повторить', color: 'error', variant: 'soft', onClick: () => load() }]"
+      />
 
       <template v-if="run">
+        <UAlert
+          v-if="run.status === 'canceled'"
+          color="neutral"
+          variant="subtle"
+          icon="i-lucide-circle-slash"
+          title="Ран остановлен"
+          description="Успешные таски сохранены — ран можно доиграть ретраем нужного таска."
+        />
+
         <!-- вертикальный ритм секций — только gap слота #body, без mb-* -->
-        <div class="grid grid-cols-2 gap-x-8 gap-y-1 text-sm lg:grid-cols-4">
-          <div>
-            <div class="text-muted">Даг</div>
-            <div class="font-medium">{{ run.dag_name }}</div>
-          </div>
-          <div>
-            <div class="text-muted">Триггер</div>
-            <div>{{ runTriggerLabel(run.trigger) }}</div>
-          </div>
-          <div>
-            <div class="text-muted">Логическая дата</div>
-            <div>{{ formatDateTime(run.logical_date) }}</div>
-          </div>
-          <div>
-            <div class="text-muted">Создан</div>
-            <div>{{ formatDateTime(run.created_at) }}</div>
-          </div>
-          <div>
-            <div class="text-muted">Длительность</div>
-            <div>{{ formatDuration(run.created_at, run.finished_at) }}</div>
-          </div>
-          <div>
-            <div class="text-muted">Ран</div>
+        <MetaGrid>
+          <MetaItem label="Даг">
+            <NuxtLink :to="`/dags/${encodeURIComponent(run.dag_name)}`" class="font-medium text-highlighted hover:text-primary hover:underline">
+              {{ run.dag_name }}
+            </NuxtLink>
+          </MetaItem>
+          <MetaItem label="Триггер">{{ runTriggerLabel(run.trigger) }}</MetaItem>
+          <MetaItem label="Дата данных">{{ formatDateTime(run.logical_date) }}</MetaItem>
+          <MetaItem label="Запущен">{{ formatDateTime(run.created_at) }}</MetaItem>
+          <MetaItem label="Длительность">
+            {{ formatDuration(run.created_at, run.finished_at, run.status === 'running' ? now : undefined) }}
+          </MetaItem>
+          <MetaItem label="Ран">
             <CopyText :text="runId" mono />
-          </div>
-          <div v-if="memorySummary">
-            <div class="text-muted">Память (max / Σ пиков)</div>
-            <div>{{ formatBytes(memorySummary.max) }} / {{ formatBytes(memorySummary.sum) }}</div>
-          </div>
-          <div class="col-span-2">
-            <div class="text-muted">Образ</div>
+          </MetaItem>
+          <MetaItem v-if="memorySummary" label="Память (max / Σ пиков)">
+            {{ formatBytes(memorySummary.max) }} / {{ formatBytes(memorySummary.sum) }}
+          </MetaItem>
+          <MetaItem label="Образ" span>
             <CopyText :text="run.image" mono />
-          </div>
-          <div v-if="run.params" class="col-span-2 lg:col-span-4">
-            <UCollapsible>
+          </MetaItem>
+          <div class="col-span-2 flex items-baseline gap-6 lg:col-span-4">
+            <UCollapsible v-if="run.params">
               <UButton
                 label="Параметры рана"
                 color="neutral"
@@ -247,137 +372,118 @@ const tableUi = { td: 'whitespace-normal' }
                 <pre class="mt-1 max-h-64 overflow-auto rounded-md border border-default bg-muted/30 p-2 font-mono text-xs">{{ JSON.stringify(run.params, null, 2) }}</pre>
               </template>
             </UCollapsible>
+            <UCollapsible v-if="runBindings.length" class="min-w-0 flex-1">
+              <UButton
+                :label="`Окружение рана (${runBindings.length})`"
+                color="neutral"
+                variant="link"
+                trailing-icon="i-lucide-chevron-down"
+                class="group p-0"
+                :ui="{ trailingIcon: 'transition-transform duration-200 group-data-[state=open]:rotate-180' }"
+              />
+              <template #content>
+                <RunEnvTable :bindings="runBindings" class="mt-1" />
+              </template>
+            </UCollapsible>
           </div>
-        </div>
+        </MetaGrid>
 
         <section v-if="manifestTasks.length">
-          <h3 class="mb-2 font-semibold text-highlighted">Граф</h3>
+          <SectionHeader title="Граф">
+            <UButton
+              :icon="graphOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              :aria-label="graphOpen ? 'Свернуть граф' : 'Развернуть граф'"
+              @click="graphOpen = !graphOpen"
+            />
+          </SectionHeader>
           <RunDagGraph
+            v-if="graphOpen"
             :manifest-tasks="manifestTasks"
             :tasks="tasks"
-            @open-log="openTaskLog"
+            :selected="selectedTask"
+            compact
+            @select="ti => selectTask(ti.task)"
           />
         </section>
 
         <section>
-          <h3 class="mb-2 font-semibold text-highlighted">Таски</h3>
-          <UTable :data="tasks" :columns="taskColumns" :ui="tableUi">
-          <template #task-cell="{ row }">
-            <span class="font-medium">{{ row.original.task }}</span>
-          </template>
-          <template #status-cell="{ row }">
-            <div class="flex items-center gap-2">
-              <UBadge :color="taskStatusColor(row.original.status)" variant="subtle">
-                {{ taskStatusLabel(row.original.status) }}
-              </UBadge>
-              <span v-if="row.original.status === 'up_for_retry'" class="text-xs text-muted">
-                ретрай в {{ formatTime(row.original.retry_at) }}
-              </span>
-            </div>
-          </template>
-          <template #attempt-cell="{ row }">
-            {{ row.original.attempt || '—' }}
-          </template>
-          <template #started_at-cell="{ row }">
-            {{ formatDateTime(row.original.started_at) }}
-          </template>
-          <template #finished_at-cell="{ row }">
-            {{ formatDateTime(row.original.finished_at) }}
-          </template>
-          <template #duration-cell="{ row }">
-            {{ formatDuration(row.original.started_at, row.original.finished_at) }}
-          </template>
-          <template #memory-cell="{ row }">
-            {{ formatBytes(peakByTask[row.original.task]) }}
-          </template>
-          <template #actions-cell="{ row }">
-            <div class="flex justify-end gap-1">
-              <UTooltip v-if="canRetry(row.original)" text="Ретрай таска">
-                <UButton
-                  icon="i-lucide-rotate-ccw"
-                  size="sm"
-                  color="neutral"
-                  variant="ghost"
-                  @click="retryTarget = row.original"
-                />
-              </UTooltip>
-              <UTooltip v-if="row.original.attempt >= 1" text="Лог таска">
-                <UButton
-                  icon="i-lucide-scroll-text"
-                  size="sm"
-                  color="neutral"
-                  variant="ghost"
-                  @click="openTaskLog(row.original)"
-                />
-              </UTooltip>
-            </div>
-          </template>
-          </UTable>
-        </section>
-
-        <section v-if="values.length">
-          <h3 class="mb-2 font-semibold text-highlighted">Значения</h3>
-          <UTable :data="values" :columns="valueColumns" :ui="tableUi">
-            <template #task-cell="{ row }">
-              <span class="font-medium">{{ row.original.task }}</span>
-            </template>
-            <template #key-cell="{ row }">
-              <span class="font-mono text-xs">{{ row.original.key }}</span>
-            </template>
-            <template #value-cell="{ row }">
-              <div class="max-w-lg break-all font-mono text-xs" :title="formatValue(row.original.value)">
-                {{ formatValue(row.original.value) }}
+          <SectionHeader title="Таски" :count="tasks.length" />
+          <UTable
+            :data="tasks"
+            :columns="taskColumns"
+            :ui="{ ...denseTableUi, tr: 'cursor-pointer' }"
+            @select="onTaskRowSelect"
+          >
+            <template #status-cell="{ row }">
+              <div class="flex items-center gap-2">
+                <StatusBadge kind="task" :status="row.original.status" size="sm" />
+                <span v-if="row.original.status === 'up_for_retry'" class="text-xs text-muted">
+                  ретрай в {{ formatTime(row.original.retry_at) }}
+                </span>
               </div>
             </template>
-            <template #modified_at-cell="{ row }">
-              {{ formatDateTime(row.original.modified_at) }}
+            <template #task-cell="{ row }">
+              <!-- маркер выбора — нейтральный (primary совпадает с
+                   success-зелёным и на failed-таске врал бы про статус) -->
+              <span class="flex items-center gap-1 font-medium text-highlighted">
+                <UIcon
+                  v-if="row.original.task === selectedTask"
+                  name="i-lucide-chevron-right"
+                  class="size-3.5 shrink-0"
+                />
+                {{ row.original.task }}
+              </span>
+            </template>
+            <template #attempt-cell="{ row }">
+              {{ row.original.attempt || '—' }}
+            </template>
+            <template #started_at-cell="{ row }">
+              <RelativeTime :time="row.original.started_at" />
+            </template>
+            <template #duration-cell="{ row }">
+              <span class="whitespace-nowrap tabular-nums">{{ taskDuration(row.original) }}</span>
+            </template>
+            <template #memory-cell="{ row }">
+              {{ formatBytes(peakByTask[row.original.task]) }}
+            </template>
+            <template #actions-cell="{ row }">
+              <div class="flex justify-end">
+                <UTooltip v-if="canRetry(row.original)" text="Ретрай таска">
+                  <UButton
+                    icon="i-lucide-rotate-ccw"
+                    size="sm"
+                    color="neutral"
+                    variant="ghost"
+                    aria-label="Ретрай таска"
+                    @click="retryTarget = row.original"
+                  />
+                </UTooltip>
+              </div>
             </template>
           </UTable>
         </section>
 
-        <section>
-          <h3 class="mb-2 font-semibold text-highlighted">Попытки</h3>
-          <UTable :data="attempts" :columns="attemptColumns" :ui="tableUi">
-          <template #status-cell="{ row }">
-            <UBadge :color="attemptStatusColor(row.original.status)" variant="subtle">
-              {{ row.original.status }}
-            </UBadge>
-          </template>
-          <template #created_at-cell="{ row }">
-            {{ formatDateTime(row.original.created_at) }}
-          </template>
-          <template #finished_at-cell="{ row }">
-            {{ formatDateTime(row.original.finished_at) }}
-          </template>
-          <template #memory-cell="{ row }">
-            {{ formatBytes(row.original.peak_memory_bytes) }}
-          </template>
-          <template #exit-cell="{ row }">
-            <span class="font-mono text-xs">
-              <template v-if="row.original.exit_code !== undefined && row.original.exit_code !== null">
-                code {{ row.original.exit_code }}
-              </template>
-              <template v-if="row.original.exit_reason">
-                · {{ row.original.exit_reason }}
-              </template>
-            </span>
-          </template>
-          <template #actions-cell="{ row }">
-            <UTooltip text="Лог попытки">
-              <UButton
-                icon="i-lucide-scroll-text"
-                size="sm"
-                color="neutral"
-                variant="ghost"
-                @click="openAttemptLog(row.original)"
-              />
-            </UTooltip>
-          </template>
-          </UTable>
-        </section>
+        <RunTaskInspector
+          v-if="selectedTi"
+          v-model:tab="inspectorTab"
+          :run-id="runId"
+          :ti="selectedTi"
+          :manifest-task="selectedManifest"
+          :attempts="selectedAttempts"
+          :values="selectedValues"
+          :bindings="selectedBindings"
+          :deps="selectedDeps"
+          :can-retry="canRetry(selectedTi)"
+          @close="selectedTask = ''"
+          @retry="retryTarget = selectedTi"
+        />
+        <p v-else class="text-sm text-muted">
+          Выберите таск в списке или на графе — здесь откроются его лог, попытки, значения и окружение.
+        </p>
       </template>
-
-      <RunLogSlideover ref="logRef" :run-id="runId" />
 
       <!-- подтверждение остановки рана -->
       <UModal :open="cancelOpen" title="Остановить ран?" @update:open="cancelOpen = false">
@@ -401,9 +507,13 @@ const tableUi = { td: 'whitespace-normal' }
         <template #body>
           <p>
             Таск <span class="font-mono font-medium">{{ retryTarget?.task }}</span> уйдёт в очередь
-            новой попыткой, его downstream-подграф будет сброшен и выполнится заново.
-            Ран снова станет выполняющимся.
+            новой попыткой. Ран снова станет выполняющимся.
           </p>
+          <p v-if="retryDownstream.length" class="mt-2">
+            Downstream-подграф будет сброшен и выполнится заново:
+            <span class="font-mono">{{ retryDownstream.join(', ') }}</span>.
+          </p>
+          <p v-else class="mt-2 text-muted">Downstream-тасков нет — перезапустится только сам таск.</p>
         </template>
         <template #footer>
           <div class="flex w-full justify-end gap-2">

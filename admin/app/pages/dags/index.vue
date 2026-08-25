@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import type { TableColumn } from '@nuxt/ui'
+import type { DropdownMenuItem, TableColumn, TableRow } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
 import { listDags, listDagRegistrations, registerDag, setDagAutoUpdate, setDagPaused, syncDag } from '~/api/dag.api'
 import type { Dag, DagRegistration } from '~/types/dag'
 
+// Список дагов: узкая таблица-обзор парка (имя+бейджи, расписание, таски,
+// обновлён) — образ/digest/SDK живут в карточке. Частые действия
+// (запуск, пауза) — inline, остальные — в «⋯»-меню. Строка кликабельна.
+
 const { isAdmin, canManageDag } = useAuth()
 
-const PAGE_SIZE = 30
+const PAGE_SIZE = 100
 
 const dags = ref<Dag[]>([])
 const totalCount = ref(0)
 const page = ref(1) // UPagination — 1-based, API — 0-based
 const loading = ref(false)
+const loadError = ref('')
 const action = useApiAction()
 
 async function load() {
@@ -27,9 +32,11 @@ async function load() {
     })
     dags.value = rep.results
     totalCount.value = Number(rep.pagination_info.total_count)
+    loadError.value = ''
   }
   catch (error) {
-    toast.add({ title: 'Ошибка загрузки дагов', description: apiErrorMessage(error), color: 'error' })
+    // ошибка загрузки — inline alert (тост исчезает, а страница остаётся пустой)
+    loadError.value = apiErrorMessage(error)
   }
   finally {
     loading.value = false
@@ -190,13 +197,46 @@ async function sync(dag: Dag) {
   }
 }
 
+// редкие действия — в «⋯»-меню строки; состав по правам (design/05:
+// недоступные действия не рендерятся)
+function menuItems(dag: Dag): DropdownMenuItem[][] {
+  const main: DropdownMenuItem[] = []
+  if (canManageDag(dag.name)) {
+    main.push({ label: 'Расписание…', icon: 'i-lucide-alarm-clock', onSelect: () => { scheduleTarget.value = dag } })
+    if (dag.schedule)
+      main.push({ label: 'Backfill за период…', icon: 'i-lucide-calendar-clock', onSelect: () => { backfillTarget.value = dag } })
+  }
+  if (isAdmin.value) {
+    main.push({
+      label: 'Обновить из registry',
+      icon: 'i-lucide-cloud-download',
+      disabled: isUpdating(dag),
+      onSelect: () => sync(dag),
+    })
+    main.push({
+      label: dag.auto_update ? 'Выключить авто-обновление' : 'Включить авто-обновление',
+      icon: 'i-lucide-refresh-ccw-dot',
+      onSelect: () => toggleAutoUpdate(dag),
+    })
+  }
+
+  const groups: DropdownMenuItem[][] = []
+  if (main.length > 0)
+    groups.push(main)
+  if (isAdmin.value)
+    groups.push([{ label: 'Удалить…', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => { deleteTarget.value = dag } }])
+  return groups
+}
+
+function openDag(_e: Event, row: TableRow<Dag>) {
+  navigateTo(`/dags/${encodeURIComponent(row.original.name)}`)
+}
+
 const columns: TableColumn<Dag>[] = [
   { accessorKey: 'name', header: 'Даг' },
   { accessorKey: 'schedule', header: 'Расписание' },
   { id: 'tasks', header: 'Тасков' },
-  { accessorKey: 'image', header: 'Образ' },
-  { accessorKey: 'sdk_version', header: 'SDK' },
-  { accessorKey: 'created_at', header: 'Создан' },
+  { id: 'modified', header: 'Обновлён' },
   { id: 'actions', header: '' },
 ]
 </script>
@@ -206,13 +246,29 @@ const columns: TableColumn<Dag>[] = [
     <template #header>
       <UDashboardNavbar title="Даги">
         <template #right>
-          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load" />
+          <UButton
+            icon="i-lucide-refresh-cw"
+            color="neutral"
+            variant="ghost"
+            :loading="loading"
+            aria-label="Обновить список"
+            @click="load"
+          />
           <UButton v-if="isAdmin" icon="i-lucide-plus" label="Зарегистрировать" @click="registerOpen = true" />
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
+      <UAlert
+        v-if="loadError"
+        color="error"
+        variant="subtle"
+        title="Ошибка загрузки дагов"
+        :description="loadError"
+        :actions="[{ label: 'Повторить', color: 'error', variant: 'soft', onClick: () => load() }]"
+      />
+
       <!-- активные и недавно провалившиеся регистрации -->
       <div v-if="activeRegistrations.length > 0 || failedRegistrations.length > 0" class="space-y-2">
         <UAlert
@@ -235,12 +291,16 @@ const columns: TableColumn<Dag>[] = [
         />
       </div>
 
-      <UTable :data="dags" :columns="columns" :loading="loading">
+      <UTable
+        :data="dags"
+        :columns="columns"
+        :loading="loading"
+        :ui="{ ...denseTableUi, tr: 'cursor-pointer' }"
+        @select="openDag"
+      >
         <template #name-cell="{ row }">
           <div class="flex items-center gap-2">
-            <NuxtLink :to="`/dags/${encodeURIComponent(row.original.name)}`" class="font-medium text-highlighted hover:text-primary hover:underline">
-              {{ row.original.name }}
-            </NuxtLink>
+            <span class="font-medium text-highlighted">{{ row.original.name }}</span>
             <UBadge v-if="row.original.paused" color="warning" variant="subtle" size="sm">
               пауза
             </UBadge>
@@ -248,6 +308,9 @@ const columns: TableColumn<Dag>[] = [
               <UIcon name="i-lucide-loader-circle" class="animate-spin" />
               обновляется
             </UBadge>
+            <UTooltip v-if="row.original.auto_update" text="Авто-обновление: digest тега отслеживается в registry">
+              <UBadge color="info" variant="subtle" size="sm">auto</UBadge>
+            </UTooltip>
           </div>
         </template>
 
@@ -257,7 +320,9 @@ const columns: TableColumn<Dag>[] = [
               <span class="font-mono">{{ row.original.schedule }}</span>
               <UBadge v-if="row.original.catchup" color="info" variant="subtle" size="sm">catchup</UBadge>
             </div>
-            <div class="text-xs text-muted">след.: {{ formatDateTime(row.original.next_run_at) }}</div>
+            <div v-if="!row.original.paused" class="text-xs text-muted">
+              след.: <RelativeTime :time="row.original.next_run_at" />
+            </div>
           </div>
           <span v-else class="text-muted">—</span>
         </template>
@@ -266,47 +331,20 @@ const columns: TableColumn<Dag>[] = [
           {{ row.original.tasks.length }}
         </template>
 
-        <template #image-cell="{ row }">
-          <div class="flex items-center gap-1.5">
-            <span class="font-mono text-xs">{{ row.original.image }}</span>
-            <UTooltip v-if="row.original.auto_update" text="Авто-обновление: digest тега отслеживается в registry">
-              <UBadge color="info" variant="subtle" size="sm">auto</UBadge>
-            </UTooltip>
-          </div>
-        </template>
-
-        <template #created_at-cell="{ row }">
-          {{ formatDateTime(row.original.created_at) }}
+        <template #modified-cell="{ row }">
+          <RelativeTime :time="row.original.modified_at ?? row.original.created_at" />
         </template>
 
         <template #actions-cell="{ row }">
           <div class="flex justify-end gap-1">
             <UTooltip v-if="canManageDag(row.original.name)" text="Запустить ран">
-              <UButton icon="i-lucide-play" size="sm" color="primary" variant="ghost" @click="triggerTarget = row.original" />
-            </UTooltip>
-            <UTooltip v-if="row.original.schedule && canManageDag(row.original.name)" text="Backfill за период">
-              <UButton icon="i-lucide-calendar-clock" size="sm" color="secondary" variant="ghost" @click="backfillTarget = row.original" />
-            </UTooltip>
-            <UTooltip v-if="canManageDag(row.original.name)" text="Расписание">
-              <UButton icon="i-lucide-alarm-clock" size="sm" color="neutral" variant="ghost" @click="scheduleTarget = row.original" />
-            </UTooltip>
-            <UTooltip v-if="isAdmin" text="Обновить из registry сейчас">
               <UButton
-                icon="i-lucide-cloud-download"
+                icon="i-lucide-play"
                 size="sm"
-                color="info"
+                color="primary"
                 variant="ghost"
-                :disabled="isUpdating(row.original)"
-                @click="sync(row.original)"
-              />
-            </UTooltip>
-            <UTooltip v-if="isAdmin" :text="row.original.auto_update ? 'Выключить авто-обновление образа' : 'Включить авто-обновление образа'">
-              <UButton
-                icon="i-lucide-refresh-ccw-dot"
-                size="sm"
-                :color="row.original.auto_update ? 'info' : 'neutral'"
-                variant="ghost"
-                @click="toggleAutoUpdate(row.original)"
+                aria-label="Запустить ран"
+                @click="triggerTarget = row.original"
               />
             </UTooltip>
             <UTooltip v-if="canManageDag(row.original.name)" :text="row.original.paused ? 'Снять с паузы' : 'Поставить на паузу'">
@@ -315,22 +353,30 @@ const columns: TableColumn<Dag>[] = [
                 size="sm"
                 color="warning"
                 variant="ghost"
+                :aria-label="row.original.paused ? 'Снять с паузы' : 'Поставить на паузу'"
                 @click="togglePaused(row.original)"
               />
             </UTooltip>
-            <UTooltip v-if="isAdmin" text="Удалить">
-              <UButton icon="i-lucide-trash-2" size="sm" color="error" variant="ghost" @click="deleteTarget = row.original" />
-            </UTooltip>
+            <RowMenu v-if="menuItems(row.original).length" :items="menuItems(row.original)" />
           </div>
+        </template>
+
+        <template #empty>
+          <!-- при ошибке загрузки пустота — не «дагов нет», причина в алерте выше -->
+          <div v-if="loadError" class="py-6" />
+          <EmptyState
+            v-else
+            icon="i-lucide-workflow"
+            title="Дагов пока нет"
+            description="Зарегистрируйте docker-образ дага — схема и таски появятся сразу после describe."
+          >
+            <UButton v-if="isAdmin" size="sm" icon="i-lucide-plus" label="Зарегистрировать" @click="registerOpen = true" />
+          </EmptyState>
         </template>
       </UTable>
 
-      <div v-if="!loading && dags.length === 0" class="p-8 text-center text-muted">
-        Дагов пока нет — зарегистрируйте docker-образ дага.
-      </div>
-
-      <div v-if="totalCount > PAGE_SIZE" class="flex justify-center border-t border-default p-3">
-        <UPagination v-model:page="page" :total="totalCount" :items-per-page="PAGE_SIZE" />
+      <div v-if="totalCount > PAGE_SIZE" class="flex justify-end border-t border-default p-2">
+        <UPagination v-model:page="page" :total="totalCount" :items-per-page="PAGE_SIZE" size="sm" />
       </div>
 
       <!-- регистрация дага -->

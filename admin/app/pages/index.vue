@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { apiErrorMessage } from '~/api/client'
 import { getDashboard } from '~/api/dashboard.api'
+import { listRuns } from '~/api/run.api'
 import type { Dashboard } from '~/types/dashboard'
+import type { Run } from '~/types/run'
 
-// Дашборд: сводка по инсталляции — активность, расписания, пулы, провалы.
+// Обзор — ответ на «что требует моего внимания» (design/05 §1):
+// 1) провалы для разбора и зависшие раны; 2) что выполняется сейчас;
+// 3) вторичное: активность, ближайшие запуски, пулы, длительности.
+// Декоративных счётчиков нет — это операционный инструмент.
 
 const data = ref<Dashboard | null>(null)
+const activeRuns = ref<Run[]>([])
 const loading = ref(false)
 const loadError = ref('')
 
@@ -13,7 +19,12 @@ async function load(background = false) {
   if (!background)
     loading.value = true
   try {
-    data.value = await getDashboard()
+    const [dashboard, running] = await Promise.all([
+      getDashboard(),
+      listRuns({ list_params: { page_size: 20, sort: ['created_at'] }, status: 'running' }),
+    ])
+    data.value = dashboard
+    activeRuns.value = running.results
     loadError.value = ''
   }
   catch (error) {
@@ -25,80 +36,126 @@ async function load(background = false) {
   }
 }
 
-let pollTimer: ReturnType<typeof setInterval> | undefined
-onMounted(async () => {
-  await load()
-  pollTimer = setInterval(() => load(true), 30_000)
-})
-onBeforeUnmount(() => clearInterval(pollTimer))
+onMounted(load)
+usePolling(() => load(true), 15_000)
 
-function windowHint(w?: { success: string, failed: string }): string {
-  if (!w)
-    return ''
-  return `${w.success} успешно · ${w.failed} провал`
+const now = useTimeTick()
+
+// «дольше обычного»: длительность running-рана превысила недельный
+// максимум своего дага (dag_durations из dashboard RPC)
+const maxByDag = computed(() => {
+  const m = new Map<string, number>()
+  for (const d of data.value?.dag_durations ?? []) {
+    if (d.max_sec > 0)
+      m.set(d.dag_name, d.max_sec)
+  }
+  return m
+})
+
+function runningSec(run: Run): number {
+  return Math.max(0, (now.value - new Date(run.created_at).getTime()) / 1000)
 }
 
-function windowTotal(w?: { success: string, failed: string }): number {
-  return w ? Number(w.success) + Number(w.failed) : 0
+function isSlow(run: Run): boolean {
+  const max = maxByDag.value.get(run.dag_name)
+  return max !== undefined && runningSec(run) > max
 }
 
-// доля успешных ранов за неделю — главный индикатор здоровья
-const successRate7d = computed(() => {
-  const total = windowTotal(data.value?.last_7d)
-  if (!total)
-    return '—'
-  return `${Math.round((Number(data.value!.last_7d.success) / total) * 100)}%`
-})
+const slowRuns = computed(() => activeRuns.value.filter(isSlow))
+
+const needsAttention = computed(() =>
+  (data.value?.recent_failures?.length ?? 0) > 0 || slowRuns.value.length > 0)
+
+// пулы: показываем только занятые и стоящие на паузе — свободные не
+// требуют внимания и сворачиваются в одну строку
+const busyPools = computed(() =>
+  (data.value?.pools ?? []).filter(p => Number(p.busy) > 0 || Number(p.slots) === 0))
 </script>
 
 <template>
   <UDashboardPanel id="dashboard">
     <template #header>
-      <UDashboardNavbar title="Дашборд">
+      <UDashboardNavbar title="Обзор">
         <template #right>
-          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load()" />
+          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" aria-label="Обновить" @click="load()" />
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <UAlert v-if="loadError" color="error" variant="subtle" :title="loadError" />
+      <UAlert
+        v-if="loadError"
+        color="error"
+        variant="subtle"
+        title="Ошибка загрузки"
+        :description="loadError"
+        :actions="[{ label: 'Повторить', color: 'error', variant: 'soft', onClick: () => load() }]"
+      />
 
       <template v-if="data">
-        <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <DashboardStatCard
-            label="Активных ранов"
-            :value="data.active_runs"
-            icon="i-lucide-activity"
-            color="info"
-            to="/runs?status=running"
-          />
-          <DashboardStatCard
-            label="Ранов за сутки"
-            :value="windowTotal(data.last_24h)"
-            :hint="windowHint(data.last_24h)"
-            icon="i-lucide-calendar-days"
-            color="primary"
-          />
-          <DashboardStatCard
-            label="Успешных за неделю"
-            :value="successRate7d"
-            :hint="windowHint(data.last_7d)"
-            icon="i-lucide-circle-check"
-            color="success"
-          />
-          <DashboardStatCard
-            label="Дагов"
-            :value="data.dag_count"
-            :hint="Number(data.paused_dag_count) > 0 ? `${data.paused_dag_count} на паузе` : 'все активны'"
-            icon="i-lucide-workflow"
-            color="neutral"
-            to="/dags"
-          />
-        </div>
-
+        <!-- ── 1. Требует внимания ── -->
         <section>
-          <h3 class="mb-2 font-semibold text-highlighted">Активность за 2 недели</h3>
+          <SectionHeader title="Требует внимания" />
+          <UCard :ui="{ body: 'p-3 sm:p-3' }">
+            <div v-if="needsAttention" class="space-y-1.5">
+              <NuxtLink
+                v-for="run in data.recent_failures ?? []"
+                :key="run.run_id"
+                :to="`/runs/${encodeURIComponent(run.run_id)}`"
+                class="flex items-baseline gap-2 rounded-md px-2 py-1 text-sm hover:bg-elevated"
+              >
+                <UIcon name="i-lucide-circle-x" class="size-4 shrink-0 self-center text-error" />
+                <span class="font-medium text-highlighted">{{ run.dag_name }}</span>
+                <span class="text-muted">провал</span>
+                <span class="truncate font-mono text-xs text-dimmed">{{ run.run_id }}</span>
+                <span class="ms-auto shrink-0 text-xs text-muted"><RelativeTime :time="run.finished_at" /></span>
+              </NuxtLink>
+              <NuxtLink
+                v-for="run in slowRuns"
+                :key="run.id"
+                :to="`/runs/${encodeURIComponent(run.id)}`"
+                class="flex items-baseline gap-2 rounded-md px-2 py-1 text-sm hover:bg-elevated"
+              >
+                <UIcon name="i-lucide-timer" class="size-4 shrink-0 self-center text-warning" />
+                <span class="font-medium text-highlighted">{{ run.dag_name }}</span>
+                <span class="text-muted">дольше обычного — идёт {{ formatDuration(run.created_at, undefined, now) }}</span>
+                <span class="truncate font-mono text-xs text-dimmed">{{ run.id }}</span>
+              </NuxtLink>
+            </div>
+            <p v-else class="flex items-center gap-2 px-2 py-1 text-sm text-muted">
+              <UIcon name="i-lucide-circle-check" class="size-4 text-success" />
+              Провалов нет, зависших ранов нет.
+            </p>
+          </UCard>
+        </section>
+
+        <!-- ── 2. Выполняется сейчас ── -->
+        <section>
+          <SectionHeader title="Выполняется сейчас" :count="activeRuns.length" />
+          <UCard :ui="{ body: 'p-3 sm:p-3' }">
+            <div v-if="activeRuns.length" class="space-y-1.5">
+              <NuxtLink
+                v-for="run in activeRuns"
+                :key="run.id"
+                :to="`/runs/${encodeURIComponent(run.id)}`"
+                class="flex items-baseline gap-2 rounded-md px-2 py-1 text-sm hover:bg-elevated"
+              >
+                <UIcon name="i-lucide-loader-circle" class="size-4 shrink-0 animate-spin self-center text-info" />
+                <span class="font-medium text-highlighted">{{ run.dag_name }}</span>
+                <span class="truncate font-mono text-xs text-dimmed">{{ run.id }}</span>
+                <UBadge v-if="isSlow(run)" color="warning" variant="subtle" size="sm">дольше обычного</UBadge>
+                <span class="ms-auto shrink-0 text-xs tabular-nums text-muted">
+                  идёт {{ formatDuration(run.created_at, undefined, now) }}
+                </span>
+              </NuxtLink>
+            </div>
+            <p v-else class="px-2 py-1 text-sm text-muted">Активных ранов нет.</p>
+          </UCard>
+        </section>
+
+        <!-- ── 3. Вторичное ── -->
+        <section>
+          <SectionHeader title="Активность за 2 недели" />
           <UCard :ui="{ body: 'p-4 sm:p-4' }">
             <DashboardActivityBars :days="data.activity ?? []" />
           </UCard>
@@ -106,7 +163,7 @@ const successRate7d = computed(() => {
 
         <div class="grid gap-4 lg:grid-cols-2">
           <section>
-            <h3 class="mb-2 font-semibold text-highlighted">Ближайшие запуски</h3>
+            <SectionHeader title="Ближайшие запуски" />
             <UCard :ui="{ body: 'p-4 sm:p-4' }">
               <div v-if="data.upcoming?.length" class="space-y-2">
                 <div v-for="item in data.upcoming" :key="item.dag_name" class="flex items-baseline justify-between gap-2 text-sm">
@@ -114,7 +171,7 @@ const successRate7d = computed(() => {
                     {{ item.dag_name }}
                   </NuxtLink>
                   <span class="shrink-0 text-xs text-muted">
-                    <span class="font-mono">{{ item.schedule }}</span> · {{ formatDateTime(item.next_run_at) }}
+                    <span class="font-mono">{{ item.schedule }}</span> · <RelativeTime :time="item.next_run_at" />
                   </span>
                 </div>
               </div>
@@ -123,44 +180,35 @@ const successRate7d = computed(() => {
           </section>
 
           <section>
-            <h3 class="mb-2 font-semibold text-highlighted">Пулы слотов</h3>
+            <SectionHeader title="Пулы слотов" />
             <UCard :ui="{ body: 'p-4 sm:p-4' }">
-              <div v-if="data.pools?.length" class="space-y-2">
-                <div v-for="pool in data.pools" :key="pool.name" class="space-y-1">
+              <div v-if="busyPools.length" class="space-y-2">
+                <div v-for="pool in busyPools" :key="pool.name" class="space-y-1">
                   <div class="flex items-baseline justify-between gap-2 text-sm">
-                    <span class="truncate">{{ pool.name }}</span>
-                    <span class="shrink-0 text-xs text-muted">{{ pool.busy }} / {{ pool.slots }}</span>
+                    <NuxtLink to="/pools" class="truncate hover:text-primary hover:underline">{{ pool.name }}</NuxtLink>
+                    <span class="shrink-0 text-xs text-muted">
+                      <UBadge v-if="Number(pool.slots) === 0" color="warning" variant="subtle" size="sm">пауза</UBadge>
+                      <template v-else>{{ pool.busy }} / {{ pool.slots }}</template>
+                    </span>
                   </div>
-                  <div class="h-1.5 w-full overflow-hidden rounded-full bg-elevated">
+                  <div v-if="Number(pool.slots) > 0" class="h-1.5 w-full overflow-hidden rounded-full bg-elevated">
                     <div
                       class="h-full rounded-full"
                       :class="Number(pool.busy) >= Number(pool.slots) ? 'bg-warning' : 'bg-primary'"
-                      :style="{ width: `${Number(pool.slots) ? Math.min(100, (Number(pool.busy) / Number(pool.slots)) * 100) : 0}%` }"
+                      :style="{ width: `${Math.min(100, (Number(pool.busy) / Number(pool.slots)) * 100)}%` }"
                     />
                   </div>
                 </div>
               </div>
-              <p v-else class="text-sm text-muted">Пулов нет.</p>
+              <p v-else class="text-sm text-muted">
+                Все пулы свободны<template v-if="data.pools?.length"> ({{ data.pools.length }})</template>.
+                <NuxtLink to="/pools" class="text-primary hover:underline">Пулы →</NuxtLink>
+              </p>
             </UCard>
           </section>
 
-          <section>
-            <h3 class="mb-2 font-semibold text-highlighted">Последние провалы</h3>
-            <UCard :ui="{ body: 'p-4 sm:p-4' }">
-              <div v-if="data.recent_failures?.length" class="space-y-2">
-                <div v-for="run in data.recent_failures" :key="run.run_id" class="flex items-baseline justify-between gap-2 text-sm">
-                  <NuxtLink :to="`/runs/${encodeURIComponent(run.run_id)}`" class="truncate font-mono text-xs hover:text-primary hover:underline">
-                    {{ run.run_id }}
-                  </NuxtLink>
-                  <span class="shrink-0 text-xs text-muted">{{ formatDateTime(run.finished_at) }}</span>
-                </div>
-              </div>
-              <p v-else class="text-sm text-muted">Провалов нет.</p>
-            </UCard>
-          </section>
-
-          <section>
-            <h3 class="mb-2 font-semibold text-highlighted">Длительность ранов (неделя)</h3>
+          <section class="lg:col-span-2">
+            <SectionHeader title="Длительность ранов (неделя)" />
             <UCard :ui="{ body: 'p-4 sm:p-4' }">
               <DashboardDurationList v-if="data.dag_durations?.length" :items="data.dag_durations" />
               <p v-else class="text-sm text-muted">Завершённых ранов за неделю нет.</p>

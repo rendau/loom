@@ -334,7 +334,7 @@ const columns: TableColumn<EnvEntry>[] = [
     <template #header>
       <UDashboardNavbar title="Переменные и секреты">
         <template #right>
-          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load" />
+          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" aria-label="Обновить список" @click="load" />
           <UDropdownMenu :items="createItems">
             <UButton icon="i-lucide-plus" label="Создать" trailing-icon="i-lucide-chevron-down" />
           </UDropdownMenu>
@@ -374,7 +374,7 @@ const columns: TableColumn<EnvEntry>[] = [
     </template>
 
     <template #body>
-      <UTable :data="filtered" :columns="columns" :loading="loading">
+      <UTable :data="filtered" :columns="columns" :loading="loading" :ui="denseTableUi">
         <template #name-cell="{ row }">
           <div class="flex items-center gap-2">
             <UIcon
@@ -409,25 +409,26 @@ const columns: TableColumn<EnvEntry>[] = [
                 {{ visibleValue(row.original) || '—' }}
               </span>
               <UTooltip text="Скопировать значение">
-                <UButton icon="i-lucide-copy" size="xs" color="neutral" variant="ghost" @click="copyValue(row.original)" />
+                <UButton icon="i-lucide-copy" size="xs" color="neutral" variant="ghost" aria-label="Скопировать значение" @click="copyValue(row.original)" />
               </UTooltip>
               <UTooltip v-if="row.original.kind === 'secret'" text="Скрыть">
-                <UButton icon="i-lucide-eye-off" size="xs" color="neutral" variant="ghost" @click="toggleValue(row.original)" />
+                <UButton icon="i-lucide-eye-off" size="xs" color="neutral" variant="ghost" aria-label="Скрыть значение" @click="toggleValue(row.original)" />
               </UTooltip>
             </template>
             <template v-else>
               <span class="font-mono text-xs text-muted">••••••</span>
               <UTooltip text="Показать значение">
-                <UButton icon="i-lucide-eye" size="xs" color="neutral" variant="ghost" @click="toggleValue(row.original)" />
+                <UButton icon="i-lucide-eye" size="xs" color="neutral" variant="ghost" aria-label="Показать значение" @click="toggleValue(row.original)" />
               </UTooltip>
             </template>
           </div>
         </template>
 
         <template #updated-cell="{ row }">
-          <UTooltip :text="`Создано: ${formatDateTime(row.original.created_at)}`">
-            <span>{{ formatDateTime(row.original.modified_at ?? row.original.created_at) }}</span>
-          </UTooltip>
+          <RelativeTime
+            :time="row.original.modified_at ?? row.original.created_at"
+            :tooltip="`Обновлено: ${formatDateTime(row.original.modified_at ?? row.original.created_at)} · Создано: ${formatDateTime(row.original.created_at)}`"
+          />
         </template>
 
         <template #actions-cell="{ row }">
@@ -441,11 +442,12 @@ const columns: TableColumn<EnvEntry>[] = [
                 size="sm"
                 color="neutral"
                 variant="ghost"
+                :aria-label="row.original.kind === 'variable' ? 'Изменить значение' : 'Заменить значение'"
                 @click="openEdit(row.original)"
               />
             </UTooltip>
             <UTooltip v-if="canManageScope(row.original.dag_name)" text="Удалить">
-              <UButton icon="i-lucide-trash-2" size="sm" color="error" variant="ghost" @click="deleteTarget = row.original" />
+              <UButton icon="i-lucide-trash-2" size="sm" color="error" variant="ghost" aria-label="Удалить" @click="deleteTarget = row.original" />
             </UTooltip>
           </div>
         </template>

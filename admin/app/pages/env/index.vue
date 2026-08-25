@@ -277,7 +277,9 @@ async function toggleValue(e: EnvEntry) {
     shownValues.value = rest
     return
   }
-  const rep = await action.run(() => getSecretValue(e.dag_name, e.name), { silent: true })
+  // ошибка (нет прав, секрет не расшифровался) — обычным тостом, иначе
+  // клик по глазу молча ничего не делает
+  const rep = await action.run(() => getSecretValue(e.dag_name, e.name))
   if (rep)
     shownValues.value = { ...shownValues.value, [key]: rep.value }
 }

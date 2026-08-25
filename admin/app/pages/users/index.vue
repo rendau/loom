@@ -7,7 +7,7 @@ import type { User, UserRole } from '~/types/user'
 
 // Пользователи админки (только для admin): роли, пароли и назначение дагов.
 
-const { me } = useAuth()
+const { me, isAdmin } = useAuth()
 
 const users = ref<User[]>([])
 const dagNames = ref<string[]>([])
@@ -16,6 +16,8 @@ const loadError = ref('')
 const action = useApiAction()
 
 async function load() {
+  if (!isAdmin.value)
+    return
   loading.value = true
   try {
     users.value = (await listUsers()).results ?? []
@@ -132,14 +134,24 @@ const columns: TableColumn<User>[] = [
   <UDashboardPanel id="users">
     <template #header>
       <UDashboardNavbar title="Пользователи">
-        <template #right>
+        <template v-if="isAdmin" #right>
           <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" aria-label="Обновить список" @click="load" />
           <UButton icon="i-lucide-user-plus" label="Создать" @click="openCreate" />
         </template>
       </UDashboardNavbar>
     </template>
 
-    <template #body>
+    <!-- страница только для admin: обычному пользователю (прямой заход по
+         URL — в наве раздела нет) не показываем ни таблицу, ни действия -->
+    <template v-if="!isAdmin" #body>
+      <EmptyState
+        icon="i-lucide-lock"
+        title="Требуются права администратора"
+        description="Управление пользователями доступно только администраторам."
+      />
+    </template>
+
+    <template v-else #body>
       <UAlert
         v-if="loadError"
         color="error"

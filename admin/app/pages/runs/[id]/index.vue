@@ -335,14 +335,14 @@ const canCancel = computed(() =>
   run.value?.status === 'running' && canManageDag(run.value?.dag_name))
 
 async function confirmCancel() {
-  const ok = await action.run(
+  await action.run(
     () => cancelRun(runId),
     { success: 'Ран остановлен' },
   )
-  if (ok !== undefined) {
-    cancelOpen.value = false
-    await load()
-  }
+  // модалку закрываем и при ошибке («ран уже завершён» — состояние ушло),
+  // а load подтянет фактический статус
+  cancelOpen.value = false
+  await load()
 }
 </script>
 
@@ -394,7 +394,11 @@ async function confirmCancel() {
           <MetaItem label="Дата данных">{{ formatDateTime(run.logical_date) }}</MetaItem>
           <MetaItem label="Запущен">{{ formatDateTime(run.created_at) }}</MetaItem>
           <MetaItem label="Длительность">
-            {{ formatDuration(run.created_at, run.finished_at, run.status === 'running' ? now : undefined) }}
+            <UTooltip text="от запуска рана до завершения последней попытки — поздний ретрай включается целиком">
+              <span class="underline decoration-dotted decoration-(--ui-border-accented) underline-offset-2">
+                {{ formatDuration(run.created_at, run.finished_at, run.status === 'running' ? now : undefined) }}
+              </span>
+            </UTooltip>
           </MetaItem>
           <MetaItem label="Ран">
             <CopyText :text="runId" mono />

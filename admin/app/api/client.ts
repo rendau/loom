@@ -54,14 +54,47 @@ export function flattenQuery(params?: QueryParams): Record<string, string | stri
   return out
 }
 
-// apiErrorMessage — человекочитаемое сообщение из ErrorRep-тела ошибки.
+// Известные коды ошибок сервера (server/internal/errs) → человекочитаемые
+// сообщения: сервер не всегда шлёт развёрнутый message (тогда в нём
+// дублируется код).
+const errorMessagesByCode: Record<string, string> = {
+  service_not_available: 'Сервис недоступен',
+  not_authorized: 'Требуется вход',
+  invalid_credentials: 'Неверный логин или пароль',
+  permission_denied: 'Недостаточно прав',
+  object_not_found: 'Объект не найден',
+  invalid_request: 'Некорректный запрос',
+  id_required: 'Не указан идентификатор',
+  dag_not_found: 'Даг не найден',
+  registration_not_found: 'Запись регистрации не найдена',
+  run_not_found: 'Ран не найден',
+  run_not_finished: 'Ран ещё выполняется',
+  run_not_running: 'Ран уже завершён',
+  task_not_found: 'Таск не найден',
+  task_not_retryable: 'Таск нельзя отправить на ретрай',
+  invalid_manifest: 'Невалидный манифест дага',
+  image_required: 'Не указан образ',
+  attempt_not_found: 'Попытка не найдена',
+  pool_not_found: 'Пул не найден',
+  secret_not_found: 'Секрет не найден',
+  variable_not_found: 'Переменная не найдена',
+  user_not_found: 'Пользователь не найден',
+  user_exists: 'Такой пользователь уже существует',
+  value_not_found: 'Значение не найдено',
+  artifact_not_found: 'Артефакт не найден',
+  artifact_aborted: 'Запись артефакта была прервана',
+}
+
+// apiErrorMessage — человекочитаемое сообщение из ErrorRep-тела ошибки:
+// приоритет у message сервера (там русское описание), голый код
+// переводится словарём.
 export function apiErrorMessage(error: unknown): string {
   if (error instanceof FetchError) {
     const rep = error.data as ErrorRep | undefined
-    if (rep?.message)
+    if (rep?.message && rep.message !== rep.code)
       return rep.message
     if (rep?.code)
-      return rep.code
+      return errorMessagesByCode[rep.code] ?? rep.code
     return error.message
   }
   return String(error)

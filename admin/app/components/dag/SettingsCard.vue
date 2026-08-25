@@ -107,9 +107,9 @@ async function save(name: string) {
             />
             <UButton
               size="sm"
-              color="neutral"
-              variant="soft"
               label="Сохранить"
+              :color="isDirty(def.name) && isValid(def.name) ? 'primary' : 'neutral'"
+              :variant="isDirty(def.name) && isValid(def.name) ? 'solid' : 'subtle'"
               :disabled="!isDirty(def.name) || !isValid(def.name)"
               :loading="action.loading.value"
               @click="save(def.name)"

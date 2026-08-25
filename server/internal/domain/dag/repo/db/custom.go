@@ -32,6 +32,36 @@ func (r *Repo) getConditions(pars *model.ListReq) (map[string]any, map[string][]
 	return conditions, conditionExps
 }
 
+// ListLastRuns — последние perDag ранов каждого из дагов (новые первыми):
+// статус-стрип списка дагов в админке.
+func (r *Repo) ListLastRuns(ctx context.Context, dagNames []string, perDag int) (map[string][]model.LastRun, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
+		SELECT dag_name, id, status FROM (
+			SELECT dag_name, id, status, created_at,
+				row_number() OVER (PARTITION BY dag_name ORDER BY created_at DESC) AS rn
+			FROM run WHERE dag_name = ANY($1)
+		) t WHERE rn <= $2
+		ORDER BY dag_name, created_at DESC`, dagNames, perDag)
+	if err != nil {
+		return nil, fmt.Errorf("ListLastRuns: %w", err)
+	}
+	defer rows.Close()
+
+	result := map[string][]model.LastRun{}
+	for rows.Next() {
+		var dagName string
+		var lr model.LastRun
+		if err = rows.Scan(&dagName, &lr.RunId, &lr.Status); err != nil {
+			return nil, fmt.Errorf("ListLastRuns scan: %w", err)
+		}
+		result[dagName] = append(result[dagName], lr)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListLastRuns rows: %w", err)
+	}
+	return result, nil
+}
+
 // SetNextRun выставляет next_run_at дага; nil сбрасывает в null (даг без
 // расписания).
 func (r *Repo) SetNextRun(ctx context.Context, name string, t *time.Time) error {

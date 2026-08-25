@@ -23,6 +23,16 @@ func New(repoDb RepoDbI) *Service {
 	return &Service{repoDb: repoDb}
 }
 
+// DagStats — агрегаты по таскам дага за последние lastRuns завершённых
+// ранов («жирные таски» админки).
+func (s *Service) DagStats(ctx context.Context, dagName string, lastRuns int64) (int64, []model.TaskStat, error) {
+	runs, stats, err := s.repoDb.DagTaskStats(ctx, dagName, lastRuns)
+	if err != nil {
+		return 0, nil, fmt.Errorf("repoDb.DagTaskStats: %w", err)
+	}
+	return runs, stats, nil
+}
+
 func (s *Service) Dashboard(ctx context.Context) (*model.Dashboard, error) {
 	result := &model.Dashboard{}
 	now := time.Now()

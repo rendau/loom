@@ -16,6 +16,7 @@ import (
 	pb "github.com/rendau/loom/api/artifact_v1"
 	"github.com/rendau/loom/artifact/internal/config"
 	domainArtifact "github.com/rendau/loom/artifact/internal/domain/artifact"
+	domainStorage "github.com/rendau/loom/artifact/internal/domain/storage"
 	domainTasklog "github.com/rendau/loom/artifact/internal/domain/tasklog"
 	grpcHandler "github.com/rendau/loom/artifact/internal/handler/grpc"
 )
@@ -40,9 +41,11 @@ func (a *App) Init() {
 	errCheck(err, "tasklog service init")
 	slog.Info("task log dir: " + config.Conf.LogDir)
 
+	storageSvc := domainStorage.New(config.Conf.DataDir, config.Conf.LogDir)
+
 	// grpc server
 	{
-		artifactHandler := grpcHandler.NewArtifact(artifactSvc)
+		artifactHandler := grpcHandler.NewArtifact(artifactSvc, storageSvc)
 		tasklogHandler := grpcHandler.NewTaskLog(tasklogSvc)
 
 		a.grpcServer = NewGrpcServer("main", func(server *grpc.Server) {

@@ -49,6 +49,8 @@ func (h *Dashboard) GetDashboard(ctx context.Context, _ *emptypb.Empty) (*pb.Das
 				RunId:      v.RunId,
 				DagName:    v.DagName,
 				FinishedAt: timestamppb.New(v.FinishedAt),
+				Task:       v.Task,
+				ExitReason: v.ExitReason,
 			}
 		}),
 		Activity: lo.Map(d.Activity, func(v statsModel.Day, _ int) *pb.DashboardDay {

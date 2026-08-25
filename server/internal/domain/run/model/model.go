@@ -164,6 +164,24 @@ type TaskValue struct {
 	ModifiedAt time.Time
 }
 
+// Виды записей env-снапшота рана.
+const (
+	RunEnvKindVariable = "variable"
+	RunEnvKindSecret   = "secret"
+)
+
+// RunEnv — запись env-снапшота рана: фактический резолв привязки манифеста
+// (env-имя → переменная/секрет) на момент launch попытки. Значения
+// секретов не сохраняются — только имя и скоуп-источник.
+type RunEnv struct {
+	Env        string
+	Kind       string // RunEnvKindVariable | RunEnvKindSecret
+	Name       string
+	Scope      string // '' — глобальный скоуп, иначе имя дага
+	Value      string // только у variable
+	ResolvedAt time.Time
+}
+
 // ClaimedTask — таск, забранный из очереди на запуск.
 type ClaimedTask struct {
 	RunId   string

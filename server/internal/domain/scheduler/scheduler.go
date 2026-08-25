@@ -592,6 +592,7 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 	// секреты и переменные манифеста → env контейнера (локальный скоуп дага
 	// перекрывает глобальный); отсутствующее имя валит запуск (launch_failed),
 	// после добавления попытку вернёт RetryTask
+	var envSnapshot []runModel.RunEnv
 	if len(task.Secrets) > 0 {
 		names := lo.Uniq(lo.Map(task.Secrets, func(s dagModel.SecretRef, _ int) string { return s.Secret }))
 		values, err := s.secrets.ResolveValues(ctx, run.DagName, names)
@@ -599,7 +600,11 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 			return fmt.Errorf("resolve secrets: %w", err)
 		}
 		for _, sec := range task.Secrets {
-			spec.Env[sec.Env] = string(values[sec.Secret])
+			spec.Env[sec.Env] = string(values[sec.Secret].Value)
+			envSnapshot = append(envSnapshot, runModel.RunEnv{
+				Env: sec.Env, Kind: runModel.RunEnvKindSecret,
+				Name: sec.Secret, Scope: values[sec.Secret].Scope,
+			})
 		}
 	}
 	if len(task.Variables) > 0 {
@@ -609,8 +614,19 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 			return fmt.Errorf("resolve variables: %w", err)
 		}
 		for _, v := range task.Variables {
-			spec.Env[v.Env] = values[v.Variable]
+			spec.Env[v.Env] = values[v.Variable].Value
+			envSnapshot = append(envSnapshot, runModel.RunEnv{
+				Env: v.Env, Kind: runModel.RunEnvKindVariable,
+				Name: v.Variable, Scope: values[v.Variable].Scope,
+				Value: values[v.Variable].Value,
+			})
 		}
+	}
+
+	// снапшот фактической инъекции (run_env) — best effort: диагностика не
+	// должна ронять запуск
+	if err = s.runSvc.SaveRunEnv(ctx, c.RunId, envSnapshot); err != nil {
+		slog.Warn("save run env snapshot", "run_id", c.RunId, "task", c.Task, "error", err)
 	}
 
 	if err = s.executor.Launch(ctx, spec); err != nil {

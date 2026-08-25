@@ -3,11 +3,14 @@ import type { TableColumn } from '@nuxt/ui'
 import type { RunEnvBinding } from '~/utils/runenv'
 
 // Окружение рана/таска: env-имя → тип → источник (имя + скоуп) → значение.
-// Значение переменной — текущее (снапшота на момент launch в API нет),
-// поэтому под таблицей обязательная пометка. Секрет — только имя, «••••»
-// и переход в /env (там показ значения под RBAC).
+// snapshot=true — данные из run_env (фактическая инъекция при launch);
+// false — fallback для старых ранов: текущие значения с обязательной
+// пометкой. Секрет — только имя, «••••» и переход в /env (показ под RBAC).
 
-const props = defineProps<{ bindings: RunEnvBinding[] }>()
+const props = defineProps<{
+  bindings: RunEnvBinding[]
+  snapshot?: boolean
+}>()
 
 const columns: TableColumn<RunEnvBinding>[] = [
   { accessorKey: 'env', header: 'Env' },
@@ -74,7 +77,12 @@ function envLink(b: RunEnvBinding): string {
 
     <p v-if="hasVariables" class="mt-1.5 flex items-center gap-1 text-xs text-muted">
       <UIcon name="i-lucide-info" class="size-3.5 shrink-0" />
-      Показаны текущие значения переменных — они могли измениться после запуска рана.
+      <template v-if="snapshot">
+        Снапшот на момент запуска — то, что реально ушло в поды тасков.
+      </template>
+      <template v-else>
+        Показаны текущие значения переменных — они могли измениться после запуска рана.
+      </template>
     </p>
   </div>
 </template>

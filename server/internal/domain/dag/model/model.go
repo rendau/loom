@@ -28,6 +28,16 @@ type Main struct {
 	NextRunAt  time.Time // zero — без расписания / не инициализировано
 	CreatedAt  time.Time
 	ModifiedAt time.Time // zero — не изменялся
+	// Последние раны (новые первыми, до 5) — не колонка: дособирается
+	// usecase'ом для списка/карточки дага.
+	LastRuns []LastRun
+}
+
+// LastRun — статус одного из последних ранов дага (статус-стрип админки);
+// заполняется usecase'ом, в таблице dag не хранится.
+type LastRun struct {
+	RunId  string
+	Status string
 }
 
 type Task struct {

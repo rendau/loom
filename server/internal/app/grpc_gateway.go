@@ -17,7 +17,10 @@ import (
 	"github.com/rendau/loom/server/internal/errs"
 )
 
-func GrpcGatewayCreateHandler(muxHook func(*runtime.ServeMux) error) (http.Handler, error) {
+// GrpcGatewayCreateHandler собирает HTTP-хендлер gateway; wrap — опциональная
+// обёртка над mux (кастомные стримовые эндпоинты, например скачивание
+// артефактов) — оборачивается ДО CORS/recover, чтобы те применялись и к ней.
+func GrpcGatewayCreateHandler(muxHook func(*runtime.ServeMux) error, wrap func(http.Handler) http.Handler) (http.Handler, error) {
 	mux := runtime.NewServeMux(
 		runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.JSONPb{
 			MarshalOptions: protojson.MarshalOptions{
@@ -38,6 +41,9 @@ func GrpcGatewayCreateHandler(muxHook func(*runtime.ServeMux) error) (http.Handl
 	}
 
 	handler := http.Handler(mux)
+	if wrap != nil {
+		handler = wrap(handler)
+	}
 
 	// cors middleware
 	if config.Conf.HttpCors {

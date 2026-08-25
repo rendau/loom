@@ -41,6 +41,8 @@ const (
 	ValueNotFound        = Err("value_not_found")
 	LogAlreadyPushed     = Err("log_already_pushed")
 	AttemptLogAborted    = Err("attempt_log_aborted")
+	ArtifactNotFound     = Err("artifact_not_found")
+	ArtifactAborted      = Err("artifact_aborted")
 )
 
 type ErrFull struct {

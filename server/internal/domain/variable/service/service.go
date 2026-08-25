@@ -66,7 +66,7 @@ func (s *Service) Delete(ctx context.Context, dagName, name string) error {
 // ResolveValues возвращает значения переменных для инъекции в env попытки
 // дага (локальный скоуп перекрывает глобальный); любая отсутствующая
 // переменная — ошибка (попытка не должна стартовать с пустой переменной).
-func (s *Service) ResolveValues(ctx context.Context, dagName string, names []string) (map[string]string, error) {
+func (s *Service) ResolveValues(ctx context.Context, dagName string, names []string) (map[string]model.Resolved, error) {
 	values, err := s.repoDb.GetValues(ctx, dagName, names)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.GetValues: %w", err)

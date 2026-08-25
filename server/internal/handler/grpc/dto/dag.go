@@ -34,6 +34,9 @@ func EncodeDagMain(v *domainModel.Main, _ int) *pb.DagMain {
 	if !v.NextRunAt.IsZero() {
 		result.NextRunAt = timestamppb.New(v.NextRunAt)
 	}
+	result.LastRuns = lo.Map(v.LastRuns, func(lr domainModel.LastRun, _ int) *pb.DagLastRun {
+		return &pb.DagLastRun{RunId: lr.RunId, Status: lr.Status}
+	})
 	return result
 }
 

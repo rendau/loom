@@ -30,12 +30,31 @@ export interface Run {
   params?: Record<string, unknown>
 }
 
+// Запись env-снапшота рана: фактический резолв привязки при launch.
+// Значение секрета не сохраняется — всегда пусто.
+export interface RunEnv {
+  env: string
+  kind: 'variable' | 'secret'
+  name: string
+  scope: string // '' — глобальный скоуп, иначе имя дага
+  value: string
+  resolved_at: string
+}
+
 // Мелкое значение таска (аналог XCom).
 export interface TaskValue {
   task: string
   key: string
   value: unknown
   modified_at: string
+}
+
+// Счётчики ранов по статусам (int64 → строки).
+export interface RunCount {
+  running: string
+  success: string
+  failed: string
+  canceled: string
 }
 
 export interface TaskInstance {

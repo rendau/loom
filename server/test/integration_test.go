@@ -235,7 +235,7 @@ func newEnv(t *testing.T) *env {
 	t.Cleanup(pool.Close)
 
 	_, err = pool.Exec(context.Background(),
-		`TRUNCATE attempt, run_value, task_instance, run, dag, dag_registration, pool, secret,
+		`TRUNCATE attempt, run_value, run_env, task_instance, run, dag, dag_registration, pool, secret,
 			variable, app_user, session, user_dag`)
 	require.NoError(t, err)
 
@@ -433,7 +433,7 @@ func TestSchedulerHappyPathWithStreamedEdge(t *testing.T) {
 	}
 
 	// в деталях рана — попытки с exit-информацией
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 3)
 	for _, a := range attempts {
@@ -474,7 +474,7 @@ func TestSchedulerFailureCascade(t *testing.T) {
 		"c": runModel.TaskStatusUpstreamFailed,
 	}, statuses)
 
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	require.NotNil(t, attempts[0].ExitCode)
@@ -503,7 +503,7 @@ func TestSchedulerLaunchFailure(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
 
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, runModel.AttemptStatusFailed, attempts[0].Status)
@@ -531,7 +531,7 @@ func TestSchedulerDuplicateEventsIdempotent(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, runModel.AttemptStatusSuccess, attempts[0].Status)
@@ -583,7 +583,7 @@ func TestSchedulerRetrySucceeds(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 2)
 }
@@ -609,7 +609,7 @@ func TestSchedulerRetriesExhausted(t *testing.T) {
 	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
 	assert.Equal(t, runModel.TaskStatusFailed, e.taskStatuses(t, runId)["a"])
 
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 2)
 }
@@ -710,7 +710,7 @@ func TestRetryTaskSuccessSubgraph(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 4, "старые попытки остаются историей")
 }
@@ -751,7 +751,7 @@ func TestCancelRun(t *testing.T) {
 	assert.Empty(t, alive, "попытка убита в executor'е")
 
 	// попытка финализирована: failed с reason=canceled, ретрай не назначен
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, runModel.AttemptStatusFailed, attempts[0].Status)
@@ -844,7 +844,7 @@ func TestSchedulerTaskTimeout(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
 
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, runModel.AttemptStatusFailed, attempts[0].Status)
@@ -879,7 +879,7 @@ func TestSchedulerZombieLostBeforeStart(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 2)
 
@@ -909,7 +909,7 @@ func TestSchedulerZombieRunningPodLost(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
 
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, "pod_lost", attempts[0].ExitReason)
@@ -1288,6 +1288,16 @@ func TestSecrets(t *testing.T) {
 	e.executor.finished(a.Ref, true, 0, "")
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
+	// снапшот run_env: секрет — имя и скоуп-источник, значения НЕТ
+	env, err := e.runSvc.ListRunEnv(context.Background(), runId)
+	require.NoError(t, err)
+	require.Len(t, env, 1)
+	assert.Equal(t, "DB_PASSWORD", env[0].Env)
+	assert.Equal(t, runModel.RunEnvKindSecret, env[0].Kind)
+	assert.Equal(t, "db-password", env[0].Name)
+	assert.Equal(t, "", env[0].Scope, "источник — глобальный скоуп")
+	assert.Empty(t, env[0].Value, "значение секрета в снапшот не пишется")
+
 	// локальный секрет дага перекрывает глобальный с тем же именем
 	require.NoError(t, e.secretSvc.Set(context.Background(), dagName, "db-password", []byte("local-value")))
 	runId2, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
@@ -1300,6 +1310,12 @@ func TestSecrets(t *testing.T) {
 	e.executor.started(a2.Ref)
 	e.executor.finished(a2.Ref, true, 0, "")
 	e.waitRunStatus(t, runId2, runModel.RunStatusSuccess)
+
+	// снапшот второго рана зафиксировал локальный источник
+	env2, err := e.runSvc.ListRunEnv(context.Background(), runId2)
+	require.NoError(t, err)
+	require.Len(t, env2, 1)
+	assert.Equal(t, dagName, env2[0].Scope)
 
 	// список секретов — только метаданные, оба скоупа
 	metas, err := e.secretSvc.List(context.Background(), nil)
@@ -1326,7 +1342,7 @@ func TestSecrets(t *testing.T) {
 	require.NoError(t, err)
 
 	e.waitRunStatus(t, ghostRun, runModel.RunStatusFailed)
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), ghostRun)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), ghostRun)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, "launch_failed", attempts[0].ExitReason)
@@ -1358,6 +1374,14 @@ func TestVariables(t *testing.T) {
 	e.executor.finished(a.Ref, true, 0, "")
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
+	// снапшот run_env: переменная — с фактическим значением и скоупом
+	env, err := e.runSvc.ListRunEnv(context.Background(), runId)
+	require.NoError(t, err)
+	require.Len(t, env, 1)
+	assert.Equal(t, runModel.RunEnvKindVariable, env[0].Kind)
+	assert.Equal(t, "https://global.example", env[0].Value)
+	assert.Equal(t, "", env[0].Scope)
+
 	// локальная переменная дага перекрывает глобальную
 	require.NoError(t, e.variableSvc.Set(context.Background(), dagName, "api-url", "https://local.example"))
 	runId2, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
@@ -1386,7 +1410,7 @@ func TestVariables(t *testing.T) {
 	require.NoError(t, err)
 
 	e.waitRunStatus(t, ghostRun, runModel.RunStatusFailed)
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), ghostRun)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), ghostRun)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, "launch_failed", attempts[0].ExitReason)
@@ -1426,7 +1450,7 @@ func TestAttemptPeakMemory(t *testing.T) {
 	e.executor.finished(a.Ref, true, 0, "")
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
-	_, _, _, attempts, err := e.runSvc.GetDetails(context.Background(), runId)
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	require.NotNil(t, attempts[0].PeakMemoryBytes)

@@ -6,7 +6,9 @@ import (
 
 	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
+	secretModel "github.com/rendau/loom/server/internal/domain/secret/model"
 	tasklogModel "github.com/rendau/loom/server/internal/domain/tasklog/model"
+	variableModel "github.com/rendau/loom/server/internal/domain/variable/model"
 )
 
 type RunServiceI interface {
@@ -24,6 +26,8 @@ type RunServiceI interface {
 	Trigger(ctx context.Context, dag *dagModel.Main, spec runModel.TriggerSpec) (string, error)
 	CountActiveTaskInstances(ctx context.Context) (map[string]int64, error)
 	ListPoolUsage(ctx context.Context) ([]runModel.PoolUsage, error)
+	// SaveRunEnv — снапшот фактического env-резолва при launch попытки.
+	SaveRunEnv(ctx context.Context, runId string, entries []runModel.RunEnv) error
 }
 
 // DagServiceI — cron-расписания: выборка дагов с наступившим next_run_at и
@@ -51,16 +55,17 @@ type ArtifactI interface {
 }
 
 // SecretResolverI — расшифровка значений секретов для env попытки (скоуп
-// дага: локальный перекрывает глобальный); отсутствующий секрет — ошибка
-// (Launch не должен стартовать попытку с пустой переменной).
+// дага: локальный перекрывает глобальный, скоуп-источник уходит в снапшот
+// run_env); отсутствующий секрет — ошибка (Launch не должен стартовать
+// попытку с пустой переменной).
 type SecretResolverI interface {
-	ResolveValues(ctx context.Context, dagName string, names []string) (map[string][]byte, error)
+	ResolveValues(ctx context.Context, dagName string, names []string) (map[string]secretModel.Resolved, error)
 }
 
 // VariableResolverI — значения переменных для env попытки; семантика скоупа
 // и отсутствия — как у секретов.
 type VariableResolverI interface {
-	ResolveValues(ctx context.Context, dagName string, names []string) (map[string]string, error)
+	ResolveValues(ctx context.Context, dagName string, names []string) (map[string]variableModel.Resolved, error)
 }
 
 // TaskLogI — финализация лог-стрима попытки (на artifact-сервере) с

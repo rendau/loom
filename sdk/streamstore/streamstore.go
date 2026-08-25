@@ -20,9 +20,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	json "github.com/goccy/go-json"
 	"github.com/samber/lo"
@@ -454,6 +456,101 @@ func (s *Store) ListWriting() ([]Ref, error) {
 	}
 
 	return result, nil
+}
+
+// ArtifactInfo — метаданные артефакта для листинга (админка).
+type ArtifactInfo struct {
+	Ref      Ref
+	State    State
+	Size     int64
+	Modified time.Time // mtime data-файла — момент последней записи
+}
+
+// ListRun возвращает метаданные всех артефактов рана (по всем таскам и
+// попыткам), отсортированные по task/attempt/name. Отсутствие каталога
+// рана — пустой список, не ошибка. Stale-writing лечится как в Stat.
+func (s *Store) ListRun(runID string) ([]ArtifactInfo, error) {
+	if !refPartRe.MatchString(runID) {
+		return nil, fmt.Errorf("%w: run_id %q", ErrInvalidRef, runID)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	const metaSuffix = ".meta.json"
+	var result []ArtifactInfo
+
+	runDir := filepath.Join(s.dir, runID)
+	tasks, err := os.ReadDir(runDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read run dir: %w", err)
+	}
+	for _, task := range tasks {
+		if !task.IsDir() {
+			continue
+		}
+		attempts, err := os.ReadDir(filepath.Join(runDir, task.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("read task dir: %w", err)
+		}
+		for _, attempt := range attempts {
+			n, atoiErr := strconv.Atoi(attempt.Name())
+			if !attempt.IsDir() || atoiErr != nil {
+				continue
+			}
+			files, err := os.ReadDir(filepath.Join(runDir, task.Name(), attempt.Name()))
+			if err != nil {
+				return nil, fmt.Errorf("read attempt dir: %w", err)
+			}
+			for _, f := range files {
+				name, ok := strings.CutSuffix(f.Name(), metaSuffix)
+				if !ok {
+					continue
+				}
+				ref := Ref{RunID: runID, Task: task.Name(), Attempt: int32(n), Name: name}
+
+				m, metaErr := s.metaLocked(ref)
+				if metaErr != nil {
+					continue // битая/исчезнувшая мета — не валим весь листинг
+				}
+
+				info := ArtifactInfo{Ref: ref, State: m.State, Size: m.Size}
+				if st := s.active[ref]; st != nil {
+					st.mu.Lock()
+					info.State, info.Size = st.state, st.size
+					st.mu.Unlock()
+				}
+				if stat, statErr := os.Stat(s.dataPath(ref)); statErr == nil {
+					info.Modified = stat.ModTime()
+					if info.State == StateWriting && s.active[ref] == nil {
+						info.Size = stat.Size()
+					}
+				}
+				result = append(result, info)
+			}
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		a, b := result[i].Ref, result[j].Ref
+		if a.Task != b.Task {
+			return a.Task < b.Task
+		}
+		if a.Attempt != b.Attempt {
+			return a.Attempt < b.Attempt
+		}
+		return a.Name < b.Name
+	})
+
+	return result, nil
+}
+
+// Dir — корневой каталог стора (статистика хранилища artifact-сервера).
+func (s *Store) Dir() string {
+	return s.dir
 }
 
 func (w *Writer) Write(p []byte) (int, error) {

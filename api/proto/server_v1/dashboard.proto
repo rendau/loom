@@ -54,6 +54,10 @@ message DashboardFailure {
   string run_id = 1;
   string dag_name = 2;
   google.protobuf.Timestamp finished_at = 3;
+  // Первый упавший таск рана и исход его последней попытки — чтобы с
+  // дашборда было видно «что именно сломалось» без открытия рана.
+  string task = 4;
+  string exit_reason = 5;
 }
 
 message DashboardDay {

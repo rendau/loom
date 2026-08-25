@@ -13,3 +13,10 @@ type Meta struct {
 	CreatedAt  time.Time
 	ModifiedAt time.Time // zero — не изменялся
 }
+
+// Resolved — результат резолва для launch: значение и скоуп-источник.
+// В снапшот run_env уходит только скоуп — значения секретов не хранятся.
+type Resolved struct {
+	Value []byte
+	Scope string // '' — глобальный, иначе имя дага
+}

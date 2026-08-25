@@ -115,3 +115,14 @@ func DecodeRunListReq(v *pb.RunListReq) *domainModel.ListReq {
 		Status:     v.Status,
 	}
 }
+
+func EncodeRunEnvMain(v domainModel.RunEnv, _ int) *pb.RunEnvMain {
+	return &pb.RunEnvMain{
+		Env:        v.Env,
+		Kind:       v.Kind,
+		Name:       v.Name,
+		Scope:      v.Scope,
+		Value:      v.Value,
+		ResolvedAt: timestamppb.New(v.ResolvedAt),
+	}
+}

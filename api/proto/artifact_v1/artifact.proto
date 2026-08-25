@@ -40,6 +40,14 @@ service ArtifactService {
 
   // DeleteRunArtifacts удаляет все артефакты рана (retention).
   rpc DeleteRunArtifacts(DeleteRunArtifactsRequest) returns (DeleteRunArtifactsResponse);
+
+  // ListRunArtifacts возвращает метаданные всех артефактов рана (по всем
+  // таскам и попыткам) — для админки (control plane проксирует с auth).
+  rpc ListRunArtifacts(ListRunArtifactsRequest) returns (ListRunArtifactsResponse);
+
+  // GetStorageStats — занятость каталогов данных и логов artifact-сервера
+  // (использовано артефактами/логами + свободное место volume).
+  rpc GetStorageStats(StorageStatsRequest) returns (StorageStatsResponse);
 }
 
 // ── Messages ────────────────────────────────────────────
@@ -133,3 +141,38 @@ message DeleteRunArtifactsRequest {
 }
 
 message DeleteRunArtifactsResponse {}
+
+// ListRunArtifacts
+
+message ListRunArtifactsRequest {
+  string run_id = 1;
+}
+
+message ArtifactInfo {
+  ArtifactRef ref = 1;
+  ArtifactState state = 2;
+  int64 size = 3;
+  // mtime data-файла (unix ms) — момент последней записи.
+  int64 modified_unix_ms = 4;
+}
+
+message ListRunArtifactsResponse {
+  repeated ArtifactInfo artifacts = 1;
+}
+
+// StorageStats
+
+message StorageStatsRequest {}
+
+// DirStats — статистика одного каталога: used — сумма размеров файлов,
+// total/free — ёмкость файловой системы, на которой каталог живёт.
+message DirStats {
+  int64 used_bytes = 1;
+  int64 total_bytes = 2;
+  int64 free_bytes = 3;
+}
+
+message StorageStatsResponse {
+  DirStats data = 1; // DATA_DIR — артефакты
+  DirStats logs = 2; // LOG_DIR — логи тасков
+}

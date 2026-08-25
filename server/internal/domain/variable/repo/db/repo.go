@@ -71,13 +71,14 @@ func (r *Repo) List(ctx context.Context, dagName *string) ([]*model.Main, error)
 	return result, nil
 }
 
-// GetValues возвращает значения переменных по именам для дага: локальный
-// скоуп перекрывает глобальный; отсутствующие имена в результат не попадают.
-func (r *Repo) GetValues(ctx context.Context, dagName string, names []string) (map[string]string, error) {
+// GetValues возвращает значения переменных (со скоупом-источником) по
+// именам для дага: локальный скоуп перекрывает глобальный; отсутствующие
+// имена в результат не попадают.
+func (r *Repo) GetValues(ctx context.Context, dagName string, names []string) (map[string]model.Resolved, error) {
 	// сортировка по dag_name кладёт глобальные ('') первыми — локальные
 	// перезапишут их в map
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT name, value FROM variable
+		SELECT name, value, dag_name FROM variable
 		WHERE name = ANY($2) AND dag_name IN ('', $1)
 		ORDER BY dag_name`, dagName, names)
 	if err != nil {
@@ -85,13 +86,14 @@ func (r *Repo) GetValues(ctx context.Context, dagName string, names []string) (m
 	}
 	defer rows.Close()
 
-	result := map[string]string{}
+	result := map[string]model.Resolved{}
 	for rows.Next() {
-		var name, value string
-		if err = rows.Scan(&name, &value); err != nil {
+		var name string
+		var resolved model.Resolved
+		if err = rows.Scan(&name, &resolved.Value, &resolved.Scope); err != nil {
 			return nil, fmt.Errorf("GetValues scan: %w", err)
 		}
-		result[name] = value
+		result[name] = resolved
 	}
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("GetValues rows: %w", err)

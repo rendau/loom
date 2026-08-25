@@ -98,10 +98,24 @@ func (r *Repo) Pools(ctx context.Context) ([]model.PoolUsage, error) {
 }
 
 func (r *Repo) RecentFailures(ctx context.Context) ([]model.Failure, error) {
+	// lateral: первый упавший таск рана и exit_reason его последней попытки —
+	// «что именно сломалось» видно прямо на обзоре
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT id, dag_name, finished_at FROM run
-		WHERE status = 'failed' AND finished_at IS NOT NULL
-		ORDER BY finished_at DESC LIMIT $1`, failuresLimit)
+		SELECT r.id, r.dag_name, r.finished_at,
+			coalesce(ft.task, ''), coalesce(ft.exit_reason, '')
+		FROM run r
+		LEFT JOIN LATERAL (
+			SELECT ti.task,
+				(SELECT a.exit_reason FROM attempt a
+				 WHERE a.run_id = ti.run_id AND a.task = ti.task
+				 ORDER BY a.attempt DESC LIMIT 1) AS exit_reason
+			FROM task_instance ti
+			WHERE ti.run_id = r.id AND ti.status = 'failed'
+			ORDER BY ti.finished_at NULLS LAST
+			LIMIT 1
+		) ft ON true
+		WHERE r.status = 'failed' AND r.finished_at IS NOT NULL
+		ORDER BY r.finished_at DESC LIMIT $1`, failuresLimit)
 	if err != nil {
 		return nil, fmt.Errorf("RecentFailures: %w", err)
 	}
@@ -110,12 +124,67 @@ func (r *Repo) RecentFailures(ctx context.Context) ([]model.Failure, error) {
 	var result []model.Failure
 	for rows.Next() {
 		var f model.Failure
-		if err = rows.Scan(&f.RunId, &f.DagName, &f.FinishedAt); err != nil {
+		if err = rows.Scan(&f.RunId, &f.DagName, &f.FinishedAt, &f.Task, &f.ExitReason); err != nil {
 			return nil, fmt.Errorf("RecentFailures scan: %w", err)
 		}
 		result = append(result, f)
 	}
 	return result, rows.Err()
+}
+
+// DagTaskStats — агрегаты по таскам дага за последние lastRuns завершённых
+// ранов: сколько ранов реально попало в окно + по таскам длительность
+// текущих попыток и пик памяти.
+func (r *Repo) DagTaskStats(ctx context.Context, dagName string, lastRuns int64) (int64, []model.TaskStat, error) {
+	con := r.TxM.GetConnection(ctx)
+
+	var runs int64
+	err := con.QueryRow(ctx, `
+		SELECT count(*) FROM (
+			SELECT 1 FROM run
+			WHERE dag_name = $1 AND status <> 'running' AND finished_at IS NOT NULL
+			ORDER BY finished_at DESC LIMIT $2
+		) t`, dagName, lastRuns).Scan(&runs)
+	if err != nil {
+		return 0, nil, fmt.Errorf("DagTaskStats count: %w", err)
+	}
+	if runs == 0 {
+		return 0, nil, nil
+	}
+
+	rows, err := con.Query(ctx, `
+		WITH last_runs AS (
+			SELECT id FROM run
+			WHERE dag_name = $1 AND status <> 'running' AND finished_at IS NOT NULL
+			ORDER BY finished_at DESC LIMIT $2
+		)
+		SELECT ti.task,
+			count(*),
+			coalesce(avg(extract(epoch FROM ti.finished_at - ti.started_at)), 0),
+			coalesce(max(extract(epoch FROM ti.finished_at - ti.started_at)), 0),
+			avg(a.peak_memory_bytes)::bigint,
+			max(a.peak_memory_bytes)
+		FROM task_instance ti
+		JOIN last_runs lr ON lr.id = ti.run_id
+		LEFT JOIN attempt a ON a.run_id = ti.run_id AND a.task = ti.task AND a.attempt = ti.attempt
+		WHERE ti.started_at IS NOT NULL AND ti.finished_at IS NOT NULL
+		GROUP BY ti.task
+		ORDER BY ti.task`, dagName, lastRuns)
+	if err != nil {
+		return 0, nil, fmt.Errorf("DagTaskStats: %w", err)
+	}
+	defer rows.Close()
+
+	var result []model.TaskStat
+	for rows.Next() {
+		var s model.TaskStat
+		if err = rows.Scan(&s.Task, &s.Runs, &s.AvgDurationSec, &s.MaxDurationSec,
+			&s.AvgPeakMemoryBytes, &s.MaxPeakMemoryBytes); err != nil {
+			return 0, nil, fmt.Errorf("DagTaskStats scan: %w", err)
+		}
+		result = append(result, s)
+	}
+	return runs, result, rows.Err()
 }
 
 // Activity — раны по дням за последние days суток (UTC), включая пустые дни.

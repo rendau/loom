@@ -562,3 +562,60 @@ func TestNotFound(t *testing.T) {
 	_, _, err = s.Stat(testRef())
 	assert.ErrorIs(t, err, ErrNotFound)
 }
+
+func TestListRun(t *testing.T) {
+	s, err := New(t.TempDir())
+	require.NoError(t, err)
+
+	write := func(ref Ref, data string, commit bool) {
+		w, err := s.BeginWrite(ref)
+		require.NoError(t, err)
+		_, err = w.Write([]byte(data))
+		require.NoError(t, err)
+		if commit {
+			_, err = w.Commit()
+			require.NoError(t, err)
+		} else {
+			w.Release() // остаётся writing
+		}
+	}
+
+	write(Ref{RunID: "run1", Task: "b", Attempt: 1, Name: "out"}, "hello", true)
+	write(Ref{RunID: "run1", Task: "a", Attempt: 1, Name: "raw"}, "data!", false)
+	write(Ref{RunID: "run1", Task: "a", Attempt: 2, Name: "raw"}, "42", true)
+	write(Ref{RunID: "run2", Task: "x", Attempt: 1, Name: "other"}, "nope", true)
+
+	aborted := Ref{RunID: "run1", Task: "c", Attempt: 1, Name: "bad"}
+	w, err := s.BeginWrite(aborted)
+	require.NoError(t, err)
+	require.NoError(t, w.Abort())
+
+	infos, err := s.ListRun("run1")
+	require.NoError(t, err)
+	require.Len(t, infos, 4, "артефакты чужого рана не попадают")
+
+	// сортировка task/attempt/name
+	assert.Equal(t, Ref{RunID: "run1", Task: "a", Attempt: 1, Name: "raw"}, infos[0].Ref)
+	assert.Equal(t, StateWriting, infos[0].State)
+	assert.Equal(t, int64(5), infos[0].Size, "writing без стрима — размер по файлу")
+	assert.False(t, infos[0].Modified.IsZero())
+
+	assert.Equal(t, Ref{RunID: "run1", Task: "a", Attempt: 2, Name: "raw"}, infos[1].Ref)
+	assert.Equal(t, StateCommitted, infos[1].State)
+	assert.Equal(t, int64(2), infos[1].Size)
+
+	assert.Equal(t, "b", infos[2].Ref.Task)
+	assert.Equal(t, StateCommitted, infos[2].State)
+
+	assert.Equal(t, "c", infos[3].Ref.Task)
+	assert.Equal(t, StateAborted, infos[3].State)
+
+	// несуществующий ран — пустой список, не ошибка
+	none, err := s.ListRun("ghost")
+	require.NoError(t, err)
+	assert.Empty(t, none)
+
+	// битый run_id — ошибка валидации
+	_, err = s.ListRun("../etc")
+	assert.ErrorIs(t, err, ErrInvalidRef)
+}

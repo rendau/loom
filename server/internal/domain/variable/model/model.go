@@ -14,3 +14,10 @@ type Main struct {
 	CreatedAt  time.Time
 	ModifiedAt time.Time // zero — не изменялась
 }
+
+// Resolved — результат резолва для launch: значение и скоуп-источник
+// (локальный перекрыл глобальный или нет) — скоуп уходит в снапшот run_env.
+type Resolved struct {
+	Value string
+	Scope string // '' — глобальный, иначе имя дага
+}

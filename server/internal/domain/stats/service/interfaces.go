@@ -15,4 +15,5 @@ type RepoDbI interface {
 	RecentFailures(ctx context.Context) ([]model.Failure, error)
 	Activity(ctx context.Context, days int) ([]model.Day, error)
 	DagDurations(ctx context.Context, since time.Time) ([]model.DagDuration, error)
+	DagTaskStats(ctx context.Context, dagName string, lastRuns int64) (int64, []model.TaskStat, error)
 }

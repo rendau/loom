@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import type { TableColumn, TableRow } from '@nuxt/ui'
+import { listRunArtifacts } from '~/api/artifact.api'
 import { apiErrorMessage } from '~/api/client'
 import { cancelRun, getRun, listRunValues, retryTask } from '~/api/run.api'
 import { listSecrets } from '~/api/secret.api'
 import { listVariables } from '~/api/variable.api'
+import type { ArtifactMain } from '~/types/artifact'
 import type { DagTask } from '~/types/dag'
-import type { Attempt, Run, TaskInstance, TaskValue } from '~/types/run'
+import type { Attempt, Run, RunEnv, TaskInstance, TaskValue } from '~/types/run'
+import type { RunEnvBinding } from '~/utils/runenv'
 import type { SecretMeta } from '~/types/secret'
 import type { Variable } from '~/types/variable'
 
@@ -23,6 +26,8 @@ const tasks = ref<TaskInstance[]>([])
 const attempts = ref<Attempt[]>([])
 const manifestTasks = ref<DagTask[]>([])
 const values = ref<TaskValue[]>([])
+const runEnv = ref<RunEnv[]>([])
+const artifacts = ref<ArtifactMain[]>([])
 const loading = ref(false)
 const loadError = ref('')
 
@@ -37,10 +42,19 @@ async function load(background = false) {
     tasks.value = rep.tasks
     attempts.value = rep.attempts
     manifestTasks.value = rep.manifest_tasks ?? []
+    runEnv.value = rep.env ?? []
     loadError.value = ''
 
     const valuesRep = await listRunValues(runId)
     values.value = valuesRep.values ?? []
+
+    // артефакты — best effort: недоступный artifact-сервер не валит страницу
+    try {
+      artifacts.value = (await listRunArtifacts(runId)).results ?? []
+    }
+    catch {
+      artifacts.value = []
+    }
 
     autoSelectFailed()
   }
@@ -117,10 +131,41 @@ const selectedAttempts = computed(() =>
 
 const selectedValues = computed(() => values.value.filter(v => v.task === selectedTask.value))
 
+const selectedArtifacts = computed(() => artifacts.value.filter(a => a.task === selectedTask.value))
+
+// снапшот run_env есть (ран запускался после его введения) — env-табы
+// показывают фактическую инъекцию; иначе fallback: текущие значения с
+// пометкой
+const hasEnvSnapshot = computed(() => runEnv.value.length > 0)
+
+function snapshotBindings(keysFilter?: Set<string>): RunEnvBinding[] {
+  return runEnv.value
+    .filter(e => !keysFilter || keysFilter.has(`${e.kind}:${e.env}`))
+    .map(e => ({
+      env: e.env,
+      kind: e.kind,
+      name: e.name,
+      scope: e.scope,
+      value: e.kind === 'variable' ? e.value : undefined,
+    }))
+}
+
+// ключи привязок манифеста таска — для среза снапшота по таску
+function taskBindingKeys(mt: DagTask): Set<string> {
+  const keys = new Set<string>()
+  for (const v of mt.variables ?? [])
+    keys.add(`variable:${v.env}`)
+  for (const sec of mt.secrets ?? [])
+    keys.add(`secret:${sec.env}`)
+  return keys
+}
+
 const selectedBindings = computed(() => {
   const mt = selectedManifest.value
   if (!mt || !run.value)
     return []
+  if (hasEnvSnapshot.value)
+    return snapshotBindings(taskBindingKeys(mt))
   return resolveEnvBindings([mt], run.value.dag_name, variables.value, secrets.value)
 })
 
@@ -131,8 +176,10 @@ const selectedDeps = computed(() =>
     status: tiByName.value.get(d.task)?.status,
   })))
 
-// окружение всего рана — объединение привязок всех тасков
+// окружение всего рана — снапшот целиком, либо объединение привязок
 const runBindings = computed(() => {
+  if (hasEnvSnapshot.value)
+    return snapshotBindings()
   if (!run.value || manifestTasks.value.length === 0)
     return []
   return resolveEnvBindings(manifestTasks.value, run.value.dag_name, variables.value, secrets.value)
@@ -382,7 +429,7 @@ async function confirmCancel() {
                 :ui="{ trailingIcon: 'transition-transform duration-200 group-data-[state=open]:rotate-180' }"
               />
               <template #content>
-                <RunEnvTable :bindings="runBindings" class="mt-1" />
+                <RunEnvTable :bindings="runBindings" :snapshot="hasEnvSnapshot" class="mt-1" />
               </template>
             </UCollapsible>
           </div>
@@ -475,6 +522,8 @@ async function confirmCancel() {
           :attempts="selectedAttempts"
           :values="selectedValues"
           :bindings="selectedBindings"
+          :env-snapshot="hasEnvSnapshot"
+          :artifacts="selectedArtifacts"
           :deps="selectedDeps"
           :can-retry="canRetry(selectedTi)"
           @close="selectedTask = ''"

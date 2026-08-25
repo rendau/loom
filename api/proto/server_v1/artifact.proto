@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package server_v1;
+
+option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// ArtifactService — доступ админки к артефактам ранов: control plane
+// проксирует artifact-сервер (data plane без auth наружу не выставляется).
+// Скачивание/превью содержимого — отдельный HTTP-эндпоинт gateway
+// (GET /run/{run_id}/artifact/{task}/{attempt}/{name}/download,
+// query: limit_bytes — превью первых N байт, token — сессия для скачивания
+// по прямой ссылке), стримингом, без буферизации в память.
+service ArtifactService {
+  rpc ListRunArtifact(ArtifactListReq) returns (ArtifactListRep) {
+    option (google.api.http) = {
+      get: "/run/{run_id}/artifact"
+    };
+  }
+
+  // GetStorageStats — занятость хранилища artifact-сервера (артефакты и
+  // логи тасков): для блока «Хранилище» на обзоре админки.
+  rpc GetStorageStats(google.protobuf.Empty) returns (StorageStatsRep) {
+    option (google.api.http) = {
+      get: "/storage-stats"
+    };
+  }
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message ArtifactMain {
+  string task = 1;
+  int32 attempt = 2;
+  string name = 3;
+  string state = 4; // writing | committed | aborted
+  int64 size = 5;
+  // Момент последней записи в артефакт.
+  optional google.protobuf.Timestamp modified_at = 6;
+}
+
+message ArtifactListReq {
+  string run_id = 1;
+}
+
+message ArtifactListRep {
+  repeated ArtifactMain results = 1;
+}
+
+// StorageStats
+
+// StorageDirStats — статистика каталога: used — занято файлами каталога,
+// total/free — ёмкость файловой системы, на которой он живёт.
+message StorageDirStats {
+  int64 used_bytes = 1;
+  int64 total_bytes = 2;
+  int64 free_bytes = 3;
+}
+
+message StorageStatsRep {
+  StorageDirStats data = 1; // артефакты (DATA_DIR)
+  StorageDirStats logs = 2; // логи тасков (LOG_DIR)
+}

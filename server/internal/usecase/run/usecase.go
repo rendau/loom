@@ -33,15 +33,25 @@ func (u *Usecase) List(ctx context.Context, pars *model.ListReq) ([]*model.Main,
 	return items, tCount, nil
 }
 
-func (u *Usecase) Get(ctx context.Context, id string) (*model.Main, []dagModel.Task, []*model.TaskInstance, []*model.Attempt, error) {
+func (u *Usecase) Get(ctx context.Context, id string) (*model.Main, []dagModel.Task, []*model.TaskInstance, []*model.Attempt, []model.RunEnv, error) {
 	if id == "" {
-		return nil, nil, nil, nil, errs.IdRequired
+		return nil, nil, nil, nil, nil, errs.IdRequired
 	}
-	run, manifestTasks, tasks, attempts, err := u.svc.GetDetails(ctx, id)
+	run, manifestTasks, tasks, attempts, env, err := u.svc.GetDetails(ctx, id)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("svc.GetDetails: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("svc.GetDetails: %w", err)
 	}
-	return run, manifestTasks, tasks, attempts, nil
+	return run, manifestTasks, tasks, attempts, env, nil
+}
+
+// Count — счётчики ранов по статусам (фильтры-чипы админки); читать может
+// любой аутентифицированный, как и список ранов.
+func (u *Usecase) Count(ctx context.Context, dagName *string) (map[string]int64, error) {
+	counts, err := u.svc.CountByStatus(ctx, dagName)
+	if err != nil {
+		return nil, fmt.Errorf("svc.CountByStatus: %w", err)
+	}
+	return counts, nil
 }
 
 // Trigger — ручной запуск рана дага; params — опциональный JSON-объект

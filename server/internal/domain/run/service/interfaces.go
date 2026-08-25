@@ -9,6 +9,7 @@ import (
 
 type RepoDbI interface {
 	ListRuns(ctx context.Context, pars *model.ListReq) ([]*model.Main, int64, error)
+	CountRunsByStatus(ctx context.Context, dagName *string) (map[string]int64, error)
 	GetRun(ctx context.Context, id string) (*model.Main, bool, error)
 	CreateRun(ctx context.Context, obj *model.Main) error
 	UpdateRun(ctx context.Context, id string, obj *model.Edit) error
@@ -29,6 +30,9 @@ type RepoDbI interface {
 	UpsertTaskValue(ctx context.Context, v *model.TaskValue) error
 	GetTaskValue(ctx context.Context, runId, task, key string) (*model.TaskValue, bool, error)
 	ListTaskValues(ctx context.Context, runId string) ([]*model.TaskValue, error)
+
+	UpsertRunEnv(ctx context.Context, runId string, entries []model.RunEnv) error
+	ListRunEnv(ctx context.Context, runId string) ([]model.RunEnv, error)
 
 	CreateAttempt(ctx context.Context, ref model.AttemptRef) error
 	GetAttempt(ctx context.Context, ref model.AttemptRef) (*model.Attempt, bool, error)

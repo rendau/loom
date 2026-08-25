@@ -54,6 +54,7 @@ import (
 	runUsc "github.com/rendau/loom/server/internal/usecase/run"
 	secretUsc "github.com/rendau/loom/server/internal/usecase/secret"
 	statsUsc "github.com/rendau/loom/server/internal/usecase/stats"
+	artifactUsc "github.com/rendau/loom/server/internal/usecase/artifact"
 	tasklogUsc "github.com/rendau/loom/server/internal/usecase/tasklog"
 	userUsc "github.com/rendau/loom/server/internal/usecase/user"
 	variableUsc "github.com/rendau/loom/server/internal/usecase/variable"
@@ -182,7 +183,7 @@ func (a *App) Init() {
 		config.Conf.DagRegTick, config.Conf.DagRegStale, config.Conf.DagRegTTL)
 
 	// usecases
-	dagUsecase := dagUsc.New(dagSvc, imageInspector, poolSvc, manifestSink, a.dagReg, authzChecker)
+	dagUsecase := dagUsc.New(dagSvc, imageInspector, poolSvc, manifestSink, a.dagReg, statsSvc, authzChecker)
 	a.dagUsecase = dagUsecase
 
 	// авто-обновление дагов: digest-чек registry + постановка
@@ -192,6 +193,7 @@ func (a *App) Init() {
 
 	runUsecase := runUsc.New(runSvc, dagSvc, schedulerNudger, authzChecker)
 	tasklogUsecase := tasklogUsc.New(a.artifactCli, runSvc)
+	artifactUsecase := artifactUsc.New(a.artifactCli, runSvc)
 	poolUsecase := poolUsc.New(poolSvc)
 	secretUsecase := secretUsc.New(secretSvc, authzChecker)
 	variableUsecase := variableUsc.New(variableSvc, authzChecker)
@@ -210,6 +212,7 @@ func (a *App) Init() {
 		authHandler := grpcHandler.NewAuth(userUsecase, BearerToken)
 		userHandler := grpcHandler.NewUser(userUsecase)
 		dashboardHandler := grpcHandler.NewDashboard(statsUsecase)
+		artifactHandler := grpcHandler.NewArtifact(artifactUsecase)
 
 		a.grpcServer = NewGrpcServer("main", a.userSvc, func(server *grpc.Server) {
 			pb.RegisterDagServiceServer(server, dagHandler)
@@ -222,6 +225,7 @@ func (a *App) Init() {
 			pb.RegisterAuthServiceServer(server, authHandler)
 			pb.RegisterUserServiceServer(server, userHandler)
 			pb.RegisterDashboardServiceServer(server, dashboardHandler)
+			pb.RegisterArtifactServiceServer(server, artifactHandler)
 		})
 	}
 
@@ -248,6 +252,7 @@ func (a *App) Init() {
 				pb.RegisterAuthServiceHandler,
 				pb.RegisterUserServiceHandler,
 				pb.RegisterDashboardServiceHandler,
+				pb.RegisterArtifactServiceHandler,
 			}
 			for _, h := range handlers {
 				if hErr := h(context.Background(), mux, conn); hErr != nil {
@@ -255,6 +260,10 @@ func (a *App) Init() {
 				}
 			}
 			return nil
+		}, func(next http.Handler) http.Handler {
+			// стримовое скачивание/превью артефактов — мимо gateway (он
+			// буферизует unary-ответы)
+			return ArtifactDownloadHandler(a.userSvc, artifactUsecase, next)
 		})
 		errCheck(err, "grpcGatewayCreateHandler")
 

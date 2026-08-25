@@ -53,6 +53,14 @@ service DagService {
     };
   }
 
+  // GetDagStats — агрегаты по таскам дага за последние N завершённых
+  // ранов: длительности и пики памяти («жирные таски» в админке).
+  rpc GetDagStats(DagStatsReq) returns (DagStatsRep) {
+    option (google.api.http) = {
+      get: "/dag/{name}/stats"
+    };
+  }
+
   // SetDagSchedule задаёт cron-расписание и catchup дага. Расписание живёт
   // только на control plane (манифест дага его не содержит); пустая строка
   // снимает расписание.
@@ -132,6 +140,13 @@ message DagMain {
   int32 max_active_runs = 12;
   // Авто-обновление: poll-синк digest'а тега образа.
   bool auto_update = 13;
+  // Последние раны (новые первыми, до 5) — статус-стрип в списке дагов.
+  repeated DagLastRun last_runs = 14;
+}
+
+message DagLastRun {
+  string run_id = 1;
+  string status = 2; // running | success | failed | canceled
 }
 
 message DagTaskMain {
@@ -241,6 +256,31 @@ message DagListRep {
 
 message DagGetReq {
   string name = 1;
+}
+
+// Stats
+
+message DagStatsReq {
+  string name = 1;
+  // Сколько последних завершённых ранов агрегировать; 0 — дефолт (20).
+  int32 last_runs = 2;
+}
+
+// DagTaskStat — агрегат по таску: длительность текущих попыток и пик
+// памяти (память приблизительна и может отсутствовать у коротких попыток).
+message DagTaskStat {
+  string task = 1;
+  int64 runs = 2; // в скольких ранах таск исполнялся
+  double avg_duration_sec = 3;
+  double max_duration_sec = 4;
+  optional int64 avg_peak_memory_bytes = 5;
+  optional int64 max_peak_memory_bytes = 6;
+}
+
+message DagStatsRep {
+  // Сколько завершённых ранов реально попало в агрегат.
+  int64 runs = 1;
+  repeated DagTaskStat tasks = 2;
 }
 
 // SetSchedule

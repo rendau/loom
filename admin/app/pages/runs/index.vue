@@ -2,8 +2,8 @@
 import type { TableColumn, TableRow, TabsItem } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
 import { listDags } from '~/api/dag.api'
-import { cancelRun, listRuns } from '~/api/run.api'
-import type { Run } from '~/types/run'
+import { cancelRun, countRuns, listRuns } from '~/api/run.api'
+import type { Run, RunCount } from '~/types/run'
 
 // Живой список ранов: авто-поллинг, фильтры (даг — селект, статус — чипы)
 // в URL — срез можно переслать ссылкой. Колонки — только для решения
@@ -33,13 +33,29 @@ const statusFilter = ref<string>(
   typeof route.query.status === 'string' && route.query.status ? route.query.status : ALL_STATUSES,
 )
 
-const statusItems: TabsItem[] = [
-  { label: 'Все', value: ALL_STATUSES },
-  { label: 'Выполняются', value: 'running' },
-  { label: 'Провалы', value: 'failed' },
-  { label: 'Успех', value: 'success' },
-  { label: 'Остановлены', value: 'canceled' },
-]
+// счётчики в чипах — в рамках выбранного дага
+const counts = ref<RunCount | null>(null)
+
+async function loadCounts() {
+  try {
+    counts.value = await countRuns(dagFilter.value === ALL_DAGS ? undefined : dagFilter.value)
+  }
+  catch {
+    counts.value = null // чипы просто останутся без счётчиков
+  }
+}
+
+const statusItems = computed<TabsItem[]>(() => {
+  const badge = (n?: string) => (counts.value && Number(n) > 0 ? Number(n) : undefined)
+  const c = counts.value
+  return [
+    { label: 'Все', value: ALL_STATUSES },
+    { label: 'Выполняются', value: 'running', badge: badge(c?.running) },
+    { label: 'Провалы', value: 'failed', badge: badge(c?.failed) },
+    { label: 'Успех', value: 'success', badge: badge(c?.success) },
+    { label: 'Остановлены', value: 'canceled', badge: badge(c?.canceled) },
+  ]
+})
 
 const dagNames = ref<string[]>([])
 const dagItems = computed(() => [
@@ -85,13 +101,14 @@ async function load(background = false) {
 }
 
 onMounted(async () => {
-  await Promise.all([load(), loadDagNames()])
+  await Promise.all([load(), loadDagNames(), loadCounts()])
 })
 watch(page, () => load())
 watch([dagFilter, statusFilter], () => {
   page.value = 1
   load()
 })
+watch(dagFilter, loadCounts)
 
 // фильтры живут в URL — ссылку на срез («провалы дага X») можно передать
 watch([dagFilter, statusFilter], () => {
@@ -104,7 +121,10 @@ watch([dagFilter, statusFilter], () => {
 })
 
 // список — живой: фоновый рефреш без спиннера
-usePolling(() => load(true), 10_000)
+usePolling(() => {
+  load(true)
+  loadCounts()
+}, 10_000)
 
 // тикающая длительность running-ранов
 const now = useTimeTick()

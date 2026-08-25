@@ -74,14 +74,14 @@ func (r *Repo) ListMeta(ctx context.Context, dagName *string) ([]*model.Meta, er
 	return result, nil
 }
 
-// GetValues возвращает сырые (возможно зашифрованные) значения секретов по
-// именам для дага: локальный скоуп перекрывает глобальный; отсутствующие
-// имена в результат не попадают.
-func (r *Repo) GetValues(ctx context.Context, dagName string, names []string) (map[string][]byte, error) {
+// GetValues возвращает сырые (возможно зашифрованные) значения секретов
+// (со скоупом-источником) по именам для дага: локальный скоуп перекрывает
+// глобальный; отсутствующие имена в результат не попадают.
+func (r *Repo) GetValues(ctx context.Context, dagName string, names []string) (map[string]model.Resolved, error) {
 	// сортировка по dag_name кладёт глобальные ('') первыми — локальные
 	// перезапишут их в map
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT name, value FROM secret
+		SELECT name, value, dag_name FROM secret
 		WHERE name = ANY($2) AND dag_name IN ('', $1)
 		ORDER BY dag_name`, dagName, names)
 	if err != nil {
@@ -89,14 +89,14 @@ func (r *Repo) GetValues(ctx context.Context, dagName string, names []string) (m
 	}
 	defer rows.Close()
 
-	result := map[string][]byte{}
+	result := map[string]model.Resolved{}
 	for rows.Next() {
 		var name string
-		var value []byte
-		if err = rows.Scan(&name, &value); err != nil {
+		var resolved model.Resolved
+		if err = rows.Scan(&name, &resolved.Value, &resolved.Scope); err != nil {
 			return nil, fmt.Errorf("GetValues scan: %w", err)
 		}
-		result[name] = value
+		result[name] = resolved
 	}
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("GetValues rows: %w", err)

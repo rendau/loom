@@ -25,6 +25,8 @@ const (
 	ArtifactService_AbortArtifact_FullMethodName      = "/artifact_v1.ArtifactService/AbortArtifact"
 	ArtifactService_FinishAttempt_FullMethodName      = "/artifact_v1.ArtifactService/FinishAttempt"
 	ArtifactService_DeleteRunArtifacts_FullMethodName = "/artifact_v1.ArtifactService/DeleteRunArtifacts"
+	ArtifactService_ListRunArtifacts_FullMethodName   = "/artifact_v1.ArtifactService/ListRunArtifacts"
+	ArtifactService_GetStorageStats_FullMethodName    = "/artifact_v1.ArtifactService/GetStorageStats"
 )
 
 // ArtifactServiceClient is the client API for ArtifactService service.
@@ -62,6 +64,12 @@ type ArtifactServiceClient interface {
 	FinishAttempt(ctx context.Context, in *FinishAttemptRequest, opts ...grpc.CallOption) (*FinishAttemptResponse, error)
 	// DeleteRunArtifacts удаляет все артефакты рана (retention).
 	DeleteRunArtifacts(ctx context.Context, in *DeleteRunArtifactsRequest, opts ...grpc.CallOption) (*DeleteRunArtifactsResponse, error)
+	// ListRunArtifacts возвращает метаданные всех артефактов рана (по всем
+	// таскам и попыткам) — для админки (control plane проксирует с auth).
+	ListRunArtifacts(ctx context.Context, in *ListRunArtifactsRequest, opts ...grpc.CallOption) (*ListRunArtifactsResponse, error)
+	// GetStorageStats — занятость каталогов данных и логов artifact-сервера
+	// (использовано артефактами/логами + свободное место volume).
+	GetStorageStats(ctx context.Context, in *StorageStatsRequest, opts ...grpc.CallOption) (*StorageStatsResponse, error)
 }
 
 type artifactServiceClient struct {
@@ -144,6 +152,26 @@ func (c *artifactServiceClient) DeleteRunArtifacts(ctx context.Context, in *Dele
 	return out, nil
 }
 
+func (c *artifactServiceClient) ListRunArtifacts(ctx context.Context, in *ListRunArtifactsRequest, opts ...grpc.CallOption) (*ListRunArtifactsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRunArtifactsResponse)
+	err := c.cc.Invoke(ctx, ArtifactService_ListRunArtifacts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *artifactServiceClient) GetStorageStats(ctx context.Context, in *StorageStatsRequest, opts ...grpc.CallOption) (*StorageStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StorageStatsResponse)
+	err := c.cc.Invoke(ctx, ArtifactService_GetStorageStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ArtifactServiceServer is the server API for ArtifactService service.
 // All implementations must embed UnimplementedArtifactServiceServer
 // for forward compatibility.
@@ -179,6 +207,12 @@ type ArtifactServiceServer interface {
 	FinishAttempt(context.Context, *FinishAttemptRequest) (*FinishAttemptResponse, error)
 	// DeleteRunArtifacts удаляет все артефакты рана (retention).
 	DeleteRunArtifacts(context.Context, *DeleteRunArtifactsRequest) (*DeleteRunArtifactsResponse, error)
+	// ListRunArtifacts возвращает метаданные всех артефактов рана (по всем
+	// таскам и попыткам) — для админки (control plane проксирует с auth).
+	ListRunArtifacts(context.Context, *ListRunArtifactsRequest) (*ListRunArtifactsResponse, error)
+	// GetStorageStats — занятость каталогов данных и логов artifact-сервера
+	// (использовано артефактами/логами + свободное место volume).
+	GetStorageStats(context.Context, *StorageStatsRequest) (*StorageStatsResponse, error)
 	mustEmbedUnimplementedArtifactServiceServer()
 }
 
@@ -206,6 +240,12 @@ func (UnimplementedArtifactServiceServer) FinishAttempt(context.Context, *Finish
 }
 func (UnimplementedArtifactServiceServer) DeleteRunArtifacts(context.Context, *DeleteRunArtifactsRequest) (*DeleteRunArtifactsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteRunArtifacts not implemented")
+}
+func (UnimplementedArtifactServiceServer) ListRunArtifacts(context.Context, *ListRunArtifactsRequest) (*ListRunArtifactsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRunArtifacts not implemented")
+}
+func (UnimplementedArtifactServiceServer) GetStorageStats(context.Context, *StorageStatsRequest) (*StorageStatsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetStorageStats not implemented")
 }
 func (UnimplementedArtifactServiceServer) mustEmbedUnimplementedArtifactServiceServer() {}
 func (UnimplementedArtifactServiceServer) testEmbeddedByValue()                         {}
@@ -318,6 +358,42 @@ func _ArtifactService_DeleteRunArtifacts_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ArtifactService_ListRunArtifacts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRunArtifactsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ArtifactServiceServer).ListRunArtifacts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ArtifactService_ListRunArtifacts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ArtifactServiceServer).ListRunArtifacts(ctx, req.(*ListRunArtifactsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ArtifactService_GetStorageStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StorageStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ArtifactServiceServer).GetStorageStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ArtifactService_GetStorageStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ArtifactServiceServer).GetStorageStats(ctx, req.(*StorageStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ArtifactService_ServiceDesc is the grpc.ServiceDesc for ArtifactService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -340,6 +416,14 @@ var ArtifactService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteRunArtifacts",
 			Handler:    _ArtifactService_DeleteRunArtifacts_Handler,
+		},
+		{
+			MethodName: "ListRunArtifacts",
+			Handler:    _ArtifactService_ListRunArtifacts_Handler,
+		},
+		{
+			MethodName: "GetStorageStats",
+			Handler:    _ArtifactService_GetStorageStats_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

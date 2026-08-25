@@ -5,12 +5,14 @@ import (
 
 	"github.com/rendau/loom/server/internal/domain/dag/model"
 	dagregModel "github.com/rendau/loom/server/internal/domain/dagreg/model"
+	statsModel "github.com/rendau/loom/server/internal/domain/stats/model"
 )
 
 type ServiceI interface {
 	List(ctx context.Context, pars *model.ListReq) ([]*model.Main, int64, error)
 	Get(ctx context.Context, name string, errNE bool) (*model.Main, bool, error)
 	Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest, autoUpdate *bool) (*model.Main, error)
+	ListLastRuns(ctx context.Context, dagNames []string, perDag int) (map[string][]model.LastRun, error)
 	SetSchedule(ctx context.Context, name, schedule string, catchup bool) error
 	SetPaused(ctx context.Context, name string, paused bool) error
 	SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error
@@ -36,6 +38,11 @@ type ManifestSinkI interface {
 // таск с неизвестным пулом навсегда завис бы в очереди.
 type PoolCheckerI interface {
 	CheckExist(ctx context.Context, names []string) error
+}
+
+// StatsI — агрегаты по таскам дага (domain/stats): «жирные таски» админки.
+type StatsI interface {
+	DagStats(ctx context.Context, dagName string, lastRuns int64) (int64, []statsModel.TaskStat, error)
 }
 
 // AuthzI — проверка прав вызывающего на даг (расписание, пауза).

@@ -36,11 +36,26 @@ type PoolUsage struct {
 	Busy  int64
 }
 
-// Failure — недавно провалившийся ран.
+// Failure — недавно провалившийся ран; Task/ExitReason — первый упавший
+// таск и исход его последней попытки («что именно сломалось» на обзоре).
 type Failure struct {
 	RunId      string
 	DagName    string
 	FinishedAt time.Time
+	Task       string
+	ExitReason string
+}
+
+// TaskStat — агрегат по таску за последние N завершённых ранов дага
+// («жирные таски»): длительности текущих попыток и пики памяти. Память
+// приблизительна и может отсутствовать (nil) у коротких попыток.
+type TaskStat struct {
+	Task               string
+	Runs               int64
+	AvgDurationSec     float64
+	MaxDurationSec     float64
+	AvgPeakMemoryBytes *int64
+	MaxPeakMemoryBytes *int64
 }
 
 // Day — раны за календарный день (UTC).

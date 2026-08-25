@@ -67,6 +67,13 @@ service RunService {
       body: "*"
     };
   }
+
+  // CountRun — счётчики ранов по статусам (для фильтров-чипов админки).
+  rpc CountRun(RunCountReq) returns (RunCountRep) {
+    option (google.api.http) = {
+      get: "/run-count"
+    };
+  }
 }
 
 // ── Messages ────────────────────────────────────────────
@@ -180,4 +187,33 @@ message RunGetRep {
   // Таски из снапшота манифеста рана (структура графа: depends_on).
   // Именно снапшот, а не текущий даг — тот мог перерегистрироваться.
   repeated DagTaskMain manifest_tasks = 4;
+  // Снапшот env-резолва рана: что реально ушло (или уйдёт) в поды тасков.
+  repeated RunEnvMain env = 5;
+}
+
+// RunEnvMain — запись env-снапшота рана: резолв привязки манифеста
+// (env-имя → переменная/секрет) на момент launch попытки. Пишется при
+// каждом launch (upsert по run_id+kind+env) — отражает фактическую
+// инъекцию, а не текущее значение в /env. Значения секретов не
+// сохраняются никогда — только имя и скоуп-источник.
+message RunEnvMain {
+  string env = 1;   // имя env-переменной в контейнере
+  string kind = 2;  // variable | secret
+  string name = 3;  // имя переменной/секрета control plane
+  string scope = 4; // '' — глобальный скоуп, иначе имя дага
+  string value = 5; // значение переменной; у секретов всегда пусто
+  google.protobuf.Timestamp resolved_at = 6;
+}
+
+// Count
+
+message RunCountReq {
+  optional string dag_name = 1;
+}
+
+message RunCountRep {
+  int64 running = 1;
+  int64 success = 2;
+  int64 failed = 3;
+  int64 canceled = 4;
 }

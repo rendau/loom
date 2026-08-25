@@ -113,7 +113,7 @@ func (s *Service) GetValue(ctx context.Context, dagName, name string) ([]byte, e
 // env попытки дага (локальный скоуп перекрывает глобальный); любой
 // отсутствующий секрет — ошибка (попытка не должна стартовать с пустой
 // переменной).
-func (s *Service) ResolveValues(ctx context.Context, dagName string, names []string) (map[string][]byte, error) {
+func (s *Service) ResolveValues(ctx context.Context, dagName string, names []string) (map[string]model.Resolved, error) {
 	stored, err := s.repoDb.GetValues(ctx, dagName, names)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.GetValues: %w", err)
@@ -124,13 +124,13 @@ func (s *Service) ResolveValues(ctx context.Context, dagName string, names []str
 		return nil, errs.ErrFull{Err: errs.SecretNotFound, Desc: fmt.Sprintf("секреты не найдены: %v", missing)}
 	}
 
-	result := make(map[string][]byte, len(stored))
+	result := make(map[string]model.Resolved, len(stored))
 	for name, blob := range stored {
-		value, err := s.decrypt(blob)
+		value, err := s.decrypt(blob.Value)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt secret %q: %w", name, err)
 		}
-		result[name] = value
+		result[name] = model.Resolved{Value: value, Scope: blob.Scope}
 	}
 	return result, nil
 }

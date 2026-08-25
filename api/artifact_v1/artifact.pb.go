@@ -828,6 +828,313 @@ func (*DeleteRunArtifactsResponse) Descriptor() ([]byte, []int) {
 	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{13}
 }
 
+type ListRunArtifactsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRunArtifactsRequest) Reset() {
+	*x = ListRunArtifactsRequest{}
+	mi := &file_artifact_v1_artifact_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRunArtifactsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRunArtifactsRequest) ProtoMessage() {}
+
+func (x *ListRunArtifactsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_artifact_v1_artifact_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRunArtifactsRequest.ProtoReflect.Descriptor instead.
+func (*ListRunArtifactsRequest) Descriptor() ([]byte, []int) {
+	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ListRunArtifactsRequest) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+type ArtifactInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Ref   *ArtifactRef           `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
+	State ArtifactState          `protobuf:"varint,2,opt,name=state,proto3,enum=artifact_v1.ArtifactState" json:"state,omitempty"`
+	Size  int64                  `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
+	// mtime data-файла (unix ms) — момент последней записи.
+	ModifiedUnixMs int64 `protobuf:"varint,4,opt,name=modified_unix_ms,json=modifiedUnixMs,proto3" json:"modified_unix_ms,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ArtifactInfo) Reset() {
+	*x = ArtifactInfo{}
+	mi := &file_artifact_v1_artifact_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactInfo) ProtoMessage() {}
+
+func (x *ArtifactInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_artifact_v1_artifact_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactInfo.ProtoReflect.Descriptor instead.
+func (*ArtifactInfo) Descriptor() ([]byte, []int) {
+	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ArtifactInfo) GetRef() *ArtifactRef {
+	if x != nil {
+		return x.Ref
+	}
+	return nil
+}
+
+func (x *ArtifactInfo) GetState() ArtifactState {
+	if x != nil {
+		return x.State
+	}
+	return ArtifactState_ARTIFACT_STATE_UNSPECIFIED
+}
+
+func (x *ArtifactInfo) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *ArtifactInfo) GetModifiedUnixMs() int64 {
+	if x != nil {
+		return x.ModifiedUnixMs
+	}
+	return 0
+}
+
+type ListRunArtifactsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Artifacts     []*ArtifactInfo        `protobuf:"bytes,1,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRunArtifactsResponse) Reset() {
+	*x = ListRunArtifactsResponse{}
+	mi := &file_artifact_v1_artifact_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRunArtifactsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRunArtifactsResponse) ProtoMessage() {}
+
+func (x *ListRunArtifactsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_artifact_v1_artifact_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRunArtifactsResponse.ProtoReflect.Descriptor instead.
+func (*ListRunArtifactsResponse) Descriptor() ([]byte, []int) {
+	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ListRunArtifactsResponse) GetArtifacts() []*ArtifactInfo {
+	if x != nil {
+		return x.Artifacts
+	}
+	return nil
+}
+
+type StorageStatsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StorageStatsRequest) Reset() {
+	*x = StorageStatsRequest{}
+	mi := &file_artifact_v1_artifact_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StorageStatsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StorageStatsRequest) ProtoMessage() {}
+
+func (x *StorageStatsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_artifact_v1_artifact_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StorageStatsRequest.ProtoReflect.Descriptor instead.
+func (*StorageStatsRequest) Descriptor() ([]byte, []int) {
+	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{17}
+}
+
+// DirStats — статистика одного каталога: used — сумма размеров файлов,
+// total/free — ёмкость файловой системы, на которой каталог живёт.
+type DirStats struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UsedBytes     int64                  `protobuf:"varint,1,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
+	TotalBytes    int64                  `protobuf:"varint,2,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	FreeBytes     int64                  `protobuf:"varint,3,opt,name=free_bytes,json=freeBytes,proto3" json:"free_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DirStats) Reset() {
+	*x = DirStats{}
+	mi := &file_artifact_v1_artifact_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DirStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DirStats) ProtoMessage() {}
+
+func (x *DirStats) ProtoReflect() protoreflect.Message {
+	mi := &file_artifact_v1_artifact_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DirStats.ProtoReflect.Descriptor instead.
+func (*DirStats) Descriptor() ([]byte, []int) {
+	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *DirStats) GetUsedBytes() int64 {
+	if x != nil {
+		return x.UsedBytes
+	}
+	return 0
+}
+
+func (x *DirStats) GetTotalBytes() int64 {
+	if x != nil {
+		return x.TotalBytes
+	}
+	return 0
+}
+
+func (x *DirStats) GetFreeBytes() int64 {
+	if x != nil {
+		return x.FreeBytes
+	}
+	return 0
+}
+
+type StorageStatsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Data          *DirStats              `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"` // DATA_DIR — артефакты
+	Logs          *DirStats              `protobuf:"bytes,2,opt,name=logs,proto3" json:"logs,omitempty"` // LOG_DIR — логи тасков
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StorageStatsResponse) Reset() {
+	*x = StorageStatsResponse{}
+	mi := &file_artifact_v1_artifact_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StorageStatsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StorageStatsResponse) ProtoMessage() {}
+
+func (x *StorageStatsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_artifact_v1_artifact_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StorageStatsResponse.ProtoReflect.Descriptor instead.
+func (*StorageStatsResponse) Descriptor() ([]byte, []int) {
+	return file_artifact_v1_artifact_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *StorageStatsResponse) GetData() *DirStats {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *StorageStatsResponse) GetLogs() *DirStats {
+	if x != nil {
+		return x.Logs
+	}
+	return nil
+}
+
 var File_artifact_v1_artifact_proto protoreflect.FileDescriptor
 
 const file_artifact_v1_artifact_proto_rawDesc = "" +
@@ -872,19 +1179,41 @@ const file_artifact_v1_artifact_proto_rawDesc = "" +
 	"\x15FinishAttemptResponse\"2\n" +
 	"\x19DeleteRunArtifactsRequest\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\x1c\n" +
-	"\x1aDeleteRunArtifactsResponse*\x85\x01\n" +
+	"\x1aDeleteRunArtifactsResponse\"0\n" +
+	"\x17ListRunArtifactsRequest\x12\x15\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\xaa\x01\n" +
+	"\fArtifactInfo\x12*\n" +
+	"\x03ref\x18\x01 \x01(\v2\x18.artifact_v1.ArtifactRefR\x03ref\x120\n" +
+	"\x05state\x18\x02 \x01(\x0e2\x1a.artifact_v1.ArtifactStateR\x05state\x12\x12\n" +
+	"\x04size\x18\x03 \x01(\x03R\x04size\x12(\n" +
+	"\x10modified_unix_ms\x18\x04 \x01(\x03R\x0emodifiedUnixMs\"S\n" +
+	"\x18ListRunArtifactsResponse\x127\n" +
+	"\tartifacts\x18\x01 \x03(\v2\x19.artifact_v1.ArtifactInfoR\tartifacts\"\x15\n" +
+	"\x13StorageStatsRequest\"i\n" +
+	"\bDirStats\x12\x1d\n" +
+	"\n" +
+	"used_bytes\x18\x01 \x01(\x03R\tusedBytes\x12\x1f\n" +
+	"\vtotal_bytes\x18\x02 \x01(\x03R\n" +
+	"totalBytes\x12\x1d\n" +
+	"\n" +
+	"free_bytes\x18\x03 \x01(\x03R\tfreeBytes\"l\n" +
+	"\x14StorageStatsResponse\x12)\n" +
+	"\x04data\x18\x01 \x01(\v2\x15.artifact_v1.DirStatsR\x04data\x12)\n" +
+	"\x04logs\x18\x02 \x01(\v2\x15.artifact_v1.DirStatsR\x04logs*\x85\x01\n" +
 	"\rArtifactState\x12\x1e\n" +
 	"\x1aARTIFACT_STATE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16ARTIFACT_STATE_WRITING\x10\x01\x12\x1c\n" +
 	"\x18ARTIFACT_STATE_COMMITTED\x10\x02\x12\x1a\n" +
-	"\x16ARTIFACT_STATE_ABORTED\x10\x032\xab\x04\n" +
+	"\x16ARTIFACT_STATE_ABORTED\x10\x032\xe4\x05\n" +
 	"\x0fArtifactService\x12U\n" +
 	"\rWriteArtifact\x12!.artifact_v1.WriteArtifactRequest\x1a\x1d.artifact_v1.WriteArtifactAck(\x010\x01\x12U\n" +
 	"\fReadArtifact\x12 .artifact_v1.ReadArtifactRequest\x1a!.artifact_v1.ReadArtifactResponse0\x01\x12S\n" +
 	"\fStatArtifact\x12 .artifact_v1.StatArtifactRequest\x1a!.artifact_v1.StatArtifactResponse\x12V\n" +
 	"\rAbortArtifact\x12!.artifact_v1.AbortArtifactRequest\x1a\".artifact_v1.AbortArtifactResponse\x12V\n" +
 	"\rFinishAttempt\x12!.artifact_v1.FinishAttemptRequest\x1a\".artifact_v1.FinishAttemptResponse\x12e\n" +
-	"\x12DeleteRunArtifacts\x12&.artifact_v1.DeleteRunArtifactsRequest\x1a'.artifact_v1.DeleteRunArtifactsResponseB4Z2github.com/rendau/loom/api/artifact_v1;artifact_v1b\x06proto3"
+	"\x12DeleteRunArtifacts\x12&.artifact_v1.DeleteRunArtifactsRequest\x1a'.artifact_v1.DeleteRunArtifactsResponse\x12_\n" +
+	"\x10ListRunArtifacts\x12$.artifact_v1.ListRunArtifactsRequest\x1a%.artifact_v1.ListRunArtifactsResponse\x12V\n" +
+	"\x0fGetStorageStats\x12 .artifact_v1.StorageStatsRequest\x1a!.artifact_v1.StorageStatsResponseB4Z2github.com/rendau/loom/api/artifact_v1;artifact_v1b\x06proto3"
 
 var (
 	file_artifact_v1_artifact_proto_rawDescOnce sync.Once
@@ -899,7 +1228,7 @@ func file_artifact_v1_artifact_proto_rawDescGZIP() []byte {
 }
 
 var file_artifact_v1_artifact_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_artifact_v1_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_artifact_v1_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_artifact_v1_artifact_proto_goTypes = []any{
 	(ArtifactState)(0),                 // 0: artifact_v1.ArtifactState
 	(*ArtifactRef)(nil),                // 1: artifact_v1.ArtifactRef
@@ -916,6 +1245,12 @@ var file_artifact_v1_artifact_proto_goTypes = []any{
 	(*FinishAttemptResponse)(nil),      // 12: artifact_v1.FinishAttemptResponse
 	(*DeleteRunArtifactsRequest)(nil),  // 13: artifact_v1.DeleteRunArtifactsRequest
 	(*DeleteRunArtifactsResponse)(nil), // 14: artifact_v1.DeleteRunArtifactsResponse
+	(*ListRunArtifactsRequest)(nil),    // 15: artifact_v1.ListRunArtifactsRequest
+	(*ArtifactInfo)(nil),               // 16: artifact_v1.ArtifactInfo
+	(*ListRunArtifactsResponse)(nil),   // 17: artifact_v1.ListRunArtifactsResponse
+	(*StorageStatsRequest)(nil),        // 18: artifact_v1.StorageStatsRequest
+	(*DirStats)(nil),                   // 19: artifact_v1.DirStats
+	(*StorageStatsResponse)(nil),       // 20: artifact_v1.StorageStatsResponse
 }
 var file_artifact_v1_artifact_proto_depIdxs = []int32{
 	3,  // 0: artifact_v1.WriteArtifactRequest.header:type_name -> artifact_v1.WriteArtifactHeader
@@ -924,23 +1259,32 @@ var file_artifact_v1_artifact_proto_depIdxs = []int32{
 	1,  // 3: artifact_v1.StatArtifactRequest.ref:type_name -> artifact_v1.ArtifactRef
 	0,  // 4: artifact_v1.StatArtifactResponse.state:type_name -> artifact_v1.ArtifactState
 	1,  // 5: artifact_v1.AbortArtifactRequest.ref:type_name -> artifact_v1.ArtifactRef
-	2,  // 6: artifact_v1.ArtifactService.WriteArtifact:input_type -> artifact_v1.WriteArtifactRequest
-	5,  // 7: artifact_v1.ArtifactService.ReadArtifact:input_type -> artifact_v1.ReadArtifactRequest
-	7,  // 8: artifact_v1.ArtifactService.StatArtifact:input_type -> artifact_v1.StatArtifactRequest
-	9,  // 9: artifact_v1.ArtifactService.AbortArtifact:input_type -> artifact_v1.AbortArtifactRequest
-	11, // 10: artifact_v1.ArtifactService.FinishAttempt:input_type -> artifact_v1.FinishAttemptRequest
-	13, // 11: artifact_v1.ArtifactService.DeleteRunArtifacts:input_type -> artifact_v1.DeleteRunArtifactsRequest
-	4,  // 12: artifact_v1.ArtifactService.WriteArtifact:output_type -> artifact_v1.WriteArtifactAck
-	6,  // 13: artifact_v1.ArtifactService.ReadArtifact:output_type -> artifact_v1.ReadArtifactResponse
-	8,  // 14: artifact_v1.ArtifactService.StatArtifact:output_type -> artifact_v1.StatArtifactResponse
-	10, // 15: artifact_v1.ArtifactService.AbortArtifact:output_type -> artifact_v1.AbortArtifactResponse
-	12, // 16: artifact_v1.ArtifactService.FinishAttempt:output_type -> artifact_v1.FinishAttemptResponse
-	14, // 17: artifact_v1.ArtifactService.DeleteRunArtifacts:output_type -> artifact_v1.DeleteRunArtifactsResponse
-	12, // [12:18] is the sub-list for method output_type
-	6,  // [6:12] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	1,  // 6: artifact_v1.ArtifactInfo.ref:type_name -> artifact_v1.ArtifactRef
+	0,  // 7: artifact_v1.ArtifactInfo.state:type_name -> artifact_v1.ArtifactState
+	16, // 8: artifact_v1.ListRunArtifactsResponse.artifacts:type_name -> artifact_v1.ArtifactInfo
+	19, // 9: artifact_v1.StorageStatsResponse.data:type_name -> artifact_v1.DirStats
+	19, // 10: artifact_v1.StorageStatsResponse.logs:type_name -> artifact_v1.DirStats
+	2,  // 11: artifact_v1.ArtifactService.WriteArtifact:input_type -> artifact_v1.WriteArtifactRequest
+	5,  // 12: artifact_v1.ArtifactService.ReadArtifact:input_type -> artifact_v1.ReadArtifactRequest
+	7,  // 13: artifact_v1.ArtifactService.StatArtifact:input_type -> artifact_v1.StatArtifactRequest
+	9,  // 14: artifact_v1.ArtifactService.AbortArtifact:input_type -> artifact_v1.AbortArtifactRequest
+	11, // 15: artifact_v1.ArtifactService.FinishAttempt:input_type -> artifact_v1.FinishAttemptRequest
+	13, // 16: artifact_v1.ArtifactService.DeleteRunArtifacts:input_type -> artifact_v1.DeleteRunArtifactsRequest
+	15, // 17: artifact_v1.ArtifactService.ListRunArtifacts:input_type -> artifact_v1.ListRunArtifactsRequest
+	18, // 18: artifact_v1.ArtifactService.GetStorageStats:input_type -> artifact_v1.StorageStatsRequest
+	4,  // 19: artifact_v1.ArtifactService.WriteArtifact:output_type -> artifact_v1.WriteArtifactAck
+	6,  // 20: artifact_v1.ArtifactService.ReadArtifact:output_type -> artifact_v1.ReadArtifactResponse
+	8,  // 21: artifact_v1.ArtifactService.StatArtifact:output_type -> artifact_v1.StatArtifactResponse
+	10, // 22: artifact_v1.ArtifactService.AbortArtifact:output_type -> artifact_v1.AbortArtifactResponse
+	12, // 23: artifact_v1.ArtifactService.FinishAttempt:output_type -> artifact_v1.FinishAttemptResponse
+	14, // 24: artifact_v1.ArtifactService.DeleteRunArtifacts:output_type -> artifact_v1.DeleteRunArtifactsResponse
+	17, // 25: artifact_v1.ArtifactService.ListRunArtifacts:output_type -> artifact_v1.ListRunArtifactsResponse
+	20, // 26: artifact_v1.ArtifactService.GetStorageStats:output_type -> artifact_v1.StorageStatsResponse
+	19, // [19:27] is the sub-list for method output_type
+	11, // [11:19] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_artifact_v1_artifact_proto_init() }
@@ -960,7 +1304,7 @@ func file_artifact_v1_artifact_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_artifact_v1_artifact_proto_rawDesc), len(file_artifact_v1_artifact_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   14,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

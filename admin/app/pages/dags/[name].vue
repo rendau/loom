@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { DropdownMenuItem, TableColumn, TableRow, TabsItem } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
-import { getDag, listDagRegistrations, setDagAutoUpdate, setDagPaused, syncDag } from '~/api/dag.api'
-import { getRun, listRuns } from '~/api/run.api'
-import type { Dag, DagRegistration, DagTask } from '~/types/dag'
+import { getDag, getDagStats, listDagRegistrations, setDagAutoUpdate, setDagPaused, syncDag } from '~/api/dag.api'
+import { listRuns } from '~/api/run.api'
+import type { Dag, DagRegistration, DagTask, DagTaskStat } from '~/types/dag'
 import type { Run } from '~/types/run'
 
 // Карточка дага — два лица (design/02): таба «Обзор» — как даг себя ведёт
@@ -80,53 +80,37 @@ async function loadRuns() {
   }
 }
 
-// «жирные таски»: длительность и пик памяти по последнему завершённому
-// рану (агрегата за историю в API пока нет — design/07 №4; пометка в UI)
-interface TaskStat {
-  task: string
-  durationSec: number
-  memory?: number
-  memoryLimit?: string
-}
+// «жирные таски»: агрегат по последним завершённым ранам (GetDagStats)
+const taskStats = ref<DagTaskStat[]>([])
+const statsRuns = ref(0)
 
-const lastFinished = computed(() => runs.value.find(r => r.status !== 'running'))
-const taskStats = ref<TaskStat[]>([])
-let statsForRun = ''
-
-watch(lastFinished, async (r) => {
-  if (!r || r.id === statsForRun)
-    return
-  statsForRun = r.id
+async function loadStats() {
   try {
-    const rep = await getRun(r.id)
-    const limits = new Map((rep.manifest_tasks ?? []).map(t => [t.name, t.resources?.memory_limit]))
-    taskStats.value = rep.tasks
-      .filter(t => t.started_at)
-      .map((t) => {
-        const attempt = rep.attempts.find(a => a.task === t.task && a.attempt === t.attempt)
-        return {
-          task: t.task,
-          durationSec: t.finished_at && t.started_at
-            ? (new Date(t.finished_at).getTime() - new Date(t.started_at).getTime()) / 1000
-            : 0,
-          memory: attempt?.peak_memory_bytes !== undefined ? Number(attempt.peak_memory_bytes) : undefined,
-          memoryLimit: limits.get(t.task) || undefined,
-        }
-      })
-      .sort((a, b) => (b.memory ?? -1) - (a.memory ?? -1) || b.durationSec - a.durationSec)
+    const rep = await getDagStats(dagName)
+    statsRuns.value = Number(rep.runs)
+    taskStats.value = [...(rep.tasks ?? [])].sort((a, b) =>
+      Number(b.max_peak_memory_bytes ?? -1) - Number(a.max_peak_memory_bytes ?? -1)
+      || b.avg_duration_sec - a.avg_duration_sec)
   }
   catch {
     // секция просто останется пустой — не критично
   }
-})
+}
+
+// лимиты памяти — из манифеста
+const memoryLimitByTask = computed(() =>
+  new Map((dag.value?.tasks ?? []).map(t => [t.name, t.resources?.memory_limit || undefined])))
 
 // пока идёт регистрация/обновление — частый поллинг карточки; раны
 // обновляются фоновым тиком на табе «Обзор»
 onMounted(async () => {
-  await Promise.all([load(), loadRuns()])
+  await Promise.all([load(), loadRuns(), loadStats()])
 })
 usePolling(() => load(true), 3000, () => isUpdating.value)
-usePolling(loadRuns, 10_000, () => tab.value === 'overview')
+usePolling(() => {
+  loadRuns()
+  loadStats()
+}, 10_000, () => tab.value === 'overview')
 
 const runColumns: TableColumn<Run>[] = [
   { accessorKey: 'status', header: 'Статус' },
@@ -141,10 +125,10 @@ function openRun(_e: Event, row: TableRow<Run>) {
 
 const nowTick = useTimeTick()
 
-const statColumns: TableColumn<TaskStat>[] = [
+const statColumns: TableColumn<DagTaskStat>[] = [
   { accessorKey: 'task', header: 'Таск' },
-  { id: 'duration', header: 'Длительность' },
-  { id: 'memory', header: 'Пик памяти' },
+  { id: 'duration', header: 'Длительность (ср/макс)' },
+  { id: 'memory', header: 'Пик памяти (ср/макс)' },
   { id: 'limit', header: 'Лимит памяти' },
 ]
 
@@ -430,18 +414,26 @@ const regColumns: TableColumn<DagRegistration>[] = [
                 <span class="font-medium">{{ row.original.task }}</span>
               </template>
               <template #duration-cell="{ row }">
-                <span class="tabular-nums">{{ formatSeconds(Math.round(row.original.durationSec)) }}</span>
+                <span class="tabular-nums">
+                  {{ formatSeconds(Math.round(row.original.avg_duration_sec)) }}
+                  <span class="text-muted">/ {{ formatSeconds(Math.round(row.original.max_duration_sec)) }}</span>
+                </span>
               </template>
               <template #memory-cell="{ row }">
-                {{ formatBytes(row.original.memory) }}
+                <template v-if="row.original.max_peak_memory_bytes !== undefined">
+                  {{ formatBytes(row.original.avg_peak_memory_bytes) }}
+                  <span class="text-muted">/ {{ formatBytes(row.original.max_peak_memory_bytes) }}</span>
+                </template>
+                <span v-else class="text-muted">—</span>
               </template>
               <template #limit-cell="{ row }">
-                <span class="font-mono text-xs">{{ row.original.memoryLimit ?? '—' }}</span>
+                <span class="font-mono text-xs">{{ memoryLimitByTask.get(row.original.task) ?? '—' }}</span>
               </template>
             </UTable>
             <p class="mt-1.5 flex items-center gap-1 text-xs text-muted">
               <UIcon name="i-lucide-info" class="size-3.5 shrink-0" />
-              По последнему завершённому рану ({{ lastFinished?.id }}) — агрегата за историю пока нет.
+              Агрегат за последние {{ statsRuns }} завершённых ранов; память приблизительна
+              (семплы executor'а) и может отсутствовать у коротких попыток.
             </p>
           </section>
         </template>

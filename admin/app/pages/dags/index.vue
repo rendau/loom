@@ -232,8 +232,19 @@ function openDag(_e: Event, row: TableRow<Dag>) {
   navigateTo(`/dags/${encodeURIComponent(row.original.name)}`)
 }
 
+// статус-стрип: цвет квадратика последнего рана
+function lastRunClass(status: string): string {
+  switch (status) {
+    case 'success': return 'bg-success'
+    case 'failed': return 'bg-error'
+    case 'running': return 'bg-info animate-pulse'
+    default: return 'bg-accented'
+  }
+}
+
 const columns: TableColumn<Dag>[] = [
   { accessorKey: 'name', header: 'Даг' },
+  { id: 'last_runs', header: 'Последние раны' },
   { accessorKey: 'schedule', header: 'Расписание' },
   { id: 'tasks', header: 'Тасков' },
   { id: 'modified', header: 'Обновлён' },
@@ -312,6 +323,25 @@ const columns: TableColumn<Dag>[] = [
               <UBadge color="info" variant="subtle" size="sm">auto</UBadge>
             </UTooltip>
           </div>
+        </template>
+
+        <template #last_runs-cell="{ row }">
+          <!-- старые слева, свежий справа; клик — в ран -->
+          <div v-if="row.original.last_runs?.length" class="flex items-center gap-1">
+            <UTooltip
+              v-for="lr in [...row.original.last_runs].reverse()"
+              :key="lr.run_id"
+              :text="`${runStatusLabel(lr.status as never)} · ${lr.run_id}`"
+            >
+              <NuxtLink
+                :to="`/runs/${encodeURIComponent(lr.run_id)}`"
+                class="block size-2.5 rounded-[3px]"
+                :class="lastRunClass(lr.status)"
+                :aria-label="`Ран ${lr.run_id}`"
+              />
+            </UTooltip>
+          </div>
+          <span v-else class="text-muted">—</span>
         </template>
 
         <template #schedule-cell="{ row }">

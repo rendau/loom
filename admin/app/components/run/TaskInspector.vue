@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn, TabsItem } from '@nuxt/ui'
+import { artifactDownloadUrl, previewArtifact } from '~/api/artifact.api'
+import type { ArtifactMain } from '~/types/artifact'
 import type { DagTask } from '~/types/dag'
 import type { Attempt, TaskInstance, TaskStatus, TaskValue } from '~/types/run'
 import type { RunEnvBinding } from '~/utils/runenv'
@@ -15,6 +17,8 @@ const props = defineProps<{
   attempts: Attempt[] // попытки этого таска (по возрастанию attempt)
   values: TaskValue[] // значения этого таска
   bindings: RunEnvBinding[] // резолвнутые env-привязки этого таска
+  envSnapshot: boolean // bindings — снапшот run_env (не текущие значения)
+  artifacts: ArtifactMain[] // артефакты этого таска (все попытки)
   // статусы зависимостей (для пустого состояния pending/queued)
   deps: Array<{ task: string, streamed: boolean, status?: TaskStatus }>
   canRetry: boolean
@@ -30,6 +34,8 @@ const tabItems = computed<TabsItem[]>(() => {
   const items: TabsItem[] = [{ label: 'Лог', value: 'log', icon: 'i-lucide-scroll-text' }]
   if (props.attempts.length > 1)
     items.push({ label: 'Попытки', value: 'attempts', icon: 'i-lucide-rotate-ccw', badge: props.attempts.length })
+  if (props.artifacts.length > 0)
+    items.push({ label: 'Артефакты', value: 'artifacts', icon: 'i-lucide-file-box', badge: props.artifacts.length })
   if (props.values.length > 0)
     items.push({ label: 'Значения', value: 'values', icon: 'i-lucide-braces', badge: props.values.length })
   if (props.bindings.length > 0)
@@ -37,11 +43,12 @@ const tabItems = computed<TabsItem[]>(() => {
   return items
 })
 
-// если выбранная таба исчезла (сменился таск) — назад на лог
-watch(tabItems, (items) => {
-  if (!items.some(i => i.value === tab.value))
-    tab.value = 'log'
-})
+// Выбранная таба может быть временно недоступна (артефакты ещё грузятся,
+// у другого таска нет значений) — вместо сброса состояния показываем лог,
+// а tab не трогаем: данные доехали → таба «вернулась» (важно для диплинков
+// ?tab=artifacts).
+const activeTab = computed(() =>
+  tabItems.value.some(i => i.value === tab.value) ? tab.value : 'log')
 
 // ── лог: просмотр любой попытки, по умолчанию — текущая ─────
 
@@ -77,6 +84,75 @@ const attemptColumns: TableColumn<Attempt>[] = [
 function openAttemptLog(a: Attempt) {
   logAttempt.value = a.attempt
   tab.value = 'log'
+}
+
+// ── артефакты ───────────────────────────────────────────
+
+const PREVIEW_BYTES = 64 * 1024
+
+const artifactColumns: TableColumn<ArtifactMain>[] = [
+  { accessorKey: 'name', header: 'Имя' },
+  { accessorKey: 'attempt', header: 'Попытка' },
+  { accessorKey: 'state', header: 'Стрим' },
+  { accessorKey: 'size', header: 'Размер' },
+  { id: 'modified', header: 'Изменён' },
+  { id: 'actions', header: '' },
+]
+
+function artifactStateColor(state: ArtifactMain['state']) {
+  switch (state) {
+    case 'committed': return 'success' as const
+    case 'writing': return 'info' as const
+    case 'aborted': return 'error' as const
+    default: return 'neutral' as const
+  }
+}
+
+function artifactStateLabel(state: ArtifactMain['state']): string {
+  switch (state) {
+    case 'committed': return 'закоммичен'
+    case 'writing': return 'пишется'
+    case 'aborted': return 'прерван'
+    default: return state
+  }
+}
+
+// превью первых байт как текст — модалка
+const previewTarget = ref<ArtifactMain | null>(null)
+const previewText = ref('')
+const previewError = ref('')
+const previewLoading = ref(false)
+let previewCtrl: AbortController | undefined
+
+async function openPreview(a: ArtifactMain) {
+  previewCtrl?.abort()
+  const ctrl = new AbortController()
+  previewCtrl = ctrl
+
+  previewTarget.value = a
+  previewText.value = ''
+  previewError.value = ''
+  previewLoading.value = true
+  try {
+    previewText.value = await previewArtifact(props.runId, a, PREVIEW_BYTES, ctrl.signal)
+  }
+  catch (error) {
+    if (!ctrl.signal.aborted)
+      previewError.value = error instanceof Error ? error.message : String(error)
+  }
+  finally {
+    if (previewCtrl === ctrl)
+      previewLoading.value = false
+  }
+}
+
+const previewTruncated = computed(() =>
+  previewTarget.value !== null && Number(previewTarget.value.size) > PREVIEW_BYTES)
+
+function downloadArtifact(a: ArtifactMain) {
+  // прямая ссылка: браузер стримит файл сам (большие артефакты не
+  // буферизуются в JS)
+  window.open(artifactDownloadUrl(props.runId, a), '_blank')
 }
 
 // ── значения ────────────────────────────────────────────
@@ -215,14 +291,15 @@ const exitInfo = computed(() => {
     <template v-else>
       <div class="flex flex-wrap items-center gap-2 border-b border-default px-3 py-1.5">
         <UTabs
-          v-model="tab"
+          :model-value="activeTab"
           :items="tabItems"
           :content="false"
           color="neutral"
           variant="pill"
           size="sm"
+          @update:model-value="tab = String($event)"
         />
-        <span v-if="tab === 'log'" class="ms-auto flex items-center gap-2">
+        <span v-if="activeTab === 'log'" class="ms-auto flex items-center gap-2">
           <USelect
             v-if="attempts.length > 1"
             v-model="logAttempt"
@@ -244,7 +321,7 @@ const exitInfo = computed(() => {
 
       <!-- лог: ремоунт на смену таска/попытки, иначе вьювер продолжит стрим -->
       <RunLogViewer
-        v-if="tab === 'log'"
+        v-if="activeTab === 'log'"
         :key="`${runId}/${ti.task}/${logAttempt}`"
         :run-id="runId"
         :task="ti.task"
@@ -254,7 +331,7 @@ const exitInfo = computed(() => {
       />
 
       <div v-else class="min-h-0 overflow-auto p-3" :style="{ maxHeight: `${bodyHeight}px` }">
-        <UTable v-if="tab === 'attempts'" :data="attempts" :columns="attemptColumns" :ui="denseTableUi">
+        <UTable v-if="activeTab === 'attempts'" :data="attempts" :columns="attemptColumns" :ui="denseTableUi">
           <template #status-cell="{ row }">
             <StatusBadge kind="attempt" :status="row.original.status" size="sm" />
           </template>
@@ -293,7 +370,48 @@ const exitInfo = computed(() => {
           </template>
         </UTable>
 
-        <UTable v-else-if="tab === 'values'" :data="values" :columns="valueColumns" :ui="denseTableUi">
+        <UTable v-else-if="activeTab === 'artifacts'" :data="artifacts" :columns="artifactColumns" :ui="denseTableUi">
+          <template #name-cell="{ row }">
+            <span class="font-mono text-xs font-medium text-highlighted">{{ row.original.name }}</span>
+          </template>
+          <template #state-cell="{ row }">
+            <UBadge :color="artifactStateColor(row.original.state)" variant="subtle" size="sm">
+              {{ artifactStateLabel(row.original.state) }}
+            </UBadge>
+          </template>
+          <template #size-cell="{ row }">
+            <span class="tabular-nums">{{ formatBytes(row.original.size) }}</span>
+          </template>
+          <template #modified-cell="{ row }">
+            <RelativeTime :time="row.original.modified_at" />
+          </template>
+          <template #actions-cell="{ row }">
+            <div class="flex justify-end gap-1">
+              <UTooltip v-if="row.original.state !== 'aborted'" text="Превью (первые 64 КБ)">
+                <UButton
+                  icon="i-lucide-eye"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  aria-label="Превью артефакта"
+                  @click="openPreview(row.original)"
+                />
+              </UTooltip>
+              <UTooltip v-if="row.original.state !== 'aborted'" text="Скачать">
+                <UButton
+                  icon="i-lucide-download"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  aria-label="Скачать артефакт"
+                  @click="downloadArtifact(row.original)"
+                />
+              </UTooltip>
+            </div>
+          </template>
+        </UTable>
+
+        <UTable v-else-if="activeTab === 'values'" :data="values" :columns="valueColumns" :ui="denseTableUi">
           <template #key-cell="{ row }">
             <span class="font-mono text-xs font-medium">{{ row.original.key }}</span>
           </template>
@@ -307,8 +425,35 @@ const exitInfo = computed(() => {
           </template>
         </UTable>
 
-        <RunEnvTable v-else-if="tab === 'env'" :bindings="bindings" />
+        <RunEnvTable v-else-if="activeTab === 'env'" :bindings="bindings" :snapshot="envSnapshot" />
       </div>
+
+      <!-- превью артефакта -->
+      <UModal
+        :open="previewTarget !== null"
+        :title="previewTarget ? `${previewTarget.name} · попытка ${previewTarget.attempt}` : ''"
+        :description="previewTruncated ? `Первые ${formatBytes(PREVIEW_BYTES)} из ${formatBytes(previewTarget?.size)} — целиком по кнопке «Скачать»` : undefined"
+        :ui="{ content: 'max-w-3xl' }"
+        @update:open="previewTarget = null"
+      >
+        <template #body>
+          <UAlert v-if="previewError" color="error" variant="subtle" :title="previewError" />
+          <p v-else-if="previewLoading" class="text-sm text-muted">Загрузка…</p>
+          <pre v-else class="max-h-[60vh] overflow-auto rounded-md border border-default bg-muted/30 p-2 font-mono text-xs whitespace-pre-wrap break-words">{{ previewText || '(пусто)' }}</pre>
+        </template>
+        <template #footer>
+          <div class="flex w-full justify-end gap-2">
+            <UButton
+              icon="i-lucide-download"
+              label="Скачать целиком"
+              color="neutral"
+              variant="soft"
+              @click="previewTarget && downloadArtifact(previewTarget)"
+            />
+            <UButton color="neutral" variant="ghost" label="Закрыть" @click="previewTarget = null" />
+          </div>
+        </template>
+      </UModal>
     </template>
   </section>
 </template>

@@ -22,11 +22,12 @@ var (
 )
 
 type (
-	State      = streamstore.State
-	Ref        = streamstore.Ref
-	AttemptKey = streamstore.AttemptKey
-	Writer     = streamstore.Writer
-	Reader     = streamstore.Reader
+	State        = streamstore.State
+	Ref          = streamstore.Ref
+	AttemptKey   = streamstore.AttemptKey
+	Writer       = streamstore.Writer
+	Reader       = streamstore.Reader
+	ArtifactInfo = streamstore.ArtifactInfo
 )
 
 const (
@@ -77,4 +78,9 @@ func (s *Service) FinishAttempt(key AttemptKey) error {
 
 func (s *Service) DeleteRun(runID string) error {
 	return s.store.DeleteRun(runID)
+}
+
+// ListRun — метаданные всех артефактов рана (для админки через control plane).
+func (s *Service) ListRun(runID string) ([]ArtifactInfo, error) {
+	return s.store.ListRun(runID)
 }

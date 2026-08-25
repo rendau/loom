@@ -10,6 +10,7 @@ import (
 	"github.com/rendau/loom/server/internal/domain/dag/manifest"
 	"github.com/rendau/loom/server/internal/domain/dag/model"
 	dagregModel "github.com/rendau/loom/server/internal/domain/dagreg/model"
+	statsModel "github.com/rendau/loom/server/internal/domain/stats/model"
 	"github.com/rendau/loom/server/internal/errs"
 	"github.com/rendau/loom/server/internal/util"
 )
@@ -23,17 +24,20 @@ type Usecase struct {
 	pools         PoolCheckerI
 	sink          ManifestSinkI // nil — регистрация не через describe-Job (EXECUTOR != k8s)
 	registrations RegistrationsI
+	stats         StatsI
 	authz         AuthzI
 }
 
 func New(svc ServiceI, inspector ImageInspectorI, pools PoolCheckerI, sink ManifestSinkI,
-	registrations RegistrationsI, authz AuthzI,
+	registrations RegistrationsI, stats StatsI, authz AuthzI,
 ) *Usecase {
 	return &Usecase{
 		svc: svc, inspector: inspector, pools: pools, sink: sink,
-		registrations: registrations, authz: authz,
+		registrations: registrations, stats: stats, authz: authz,
 	}
 }
+
+const lastRunsPerDag = 5
 
 func (u *Usecase) List(ctx context.Context, pars *model.ListReq) ([]*model.Main, int64, error) {
 	if err := util.RequirePageSize(pars.ListParams, 0); err != nil {
@@ -43,6 +47,17 @@ func (u *Usecase) List(ctx context.Context, pars *model.ListReq) ([]*model.Main,
 	if err != nil {
 		return nil, 0, fmt.Errorf("svc.List: %w", err)
 	}
+
+	// статус-стрип: последние раны дособираются одним запросом на страницу
+	lastRuns, err := u.svc.ListLastRuns(ctx,
+		lo.Map(items, func(d *model.Main, _ int) string { return d.Name }), lastRunsPerDag)
+	if err != nil {
+		return nil, 0, fmt.Errorf("svc.ListLastRuns: %w", err)
+	}
+	for _, d := range items {
+		d.LastRuns = lastRuns[d.Name]
+	}
+
 	return items, tCount, nil
 }
 
@@ -51,7 +66,39 @@ func (u *Usecase) Get(ctx context.Context, name string) (*model.Main, error) {
 	if err != nil {
 		return nil, fmt.Errorf("svc.Get: %w", err)
 	}
+
+	lastRuns, err := u.svc.ListLastRuns(ctx, []string{name}, lastRunsPerDag)
+	if err != nil {
+		return nil, fmt.Errorf("svc.ListLastRuns: %w", err)
+	}
+	result.LastRuns = lastRuns[name]
+
 	return result, nil
+}
+
+// GetStats — агрегаты по таскам дага за последние lastRuns завершённых
+// ранов («жирные таски»); lastRuns 0 — дефолт, потолок — защита от тяжёлых
+// запросов.
+func (u *Usecase) GetStats(ctx context.Context, name string, lastRuns int64) (int64, []statsModel.TaskStat, error) {
+	if name == "" {
+		return 0, nil, errs.IdRequired
+	}
+	if _, _, err := u.svc.Get(ctx, name, true); err != nil {
+		return 0, nil, fmt.Errorf("svc.Get: %w", err)
+	}
+
+	switch {
+	case lastRuns <= 0:
+		lastRuns = 20
+	case lastRuns > 100:
+		lastRuns = 100
+	}
+
+	runs, stats, err := u.stats.DagStats(ctx, name, lastRuns)
+	if err != nil {
+		return 0, nil, fmt.Errorf("stats.DagStats: %w", err)
+	}
+	return runs, stats, nil
 }
 
 // Register ставит регистрацию дага в очередь и сразу возвращает запись

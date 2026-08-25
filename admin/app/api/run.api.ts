@@ -1,7 +1,7 @@
 import { apiFetch } from '~/api/client'
 import type { ListParams, PaginationInfo } from '~/types/common'
 import type { DagTask } from '~/types/dag'
-import type { Attempt, Run, TaskInstance, TaskValue } from '~/types/run'
+import type { Attempt, Run, RunCount, RunEnv, TaskInstance, TaskValue } from '~/types/run'
 
 export type RunListQuery = {
   list_params: ListParams
@@ -16,7 +16,14 @@ export function listRuns(query: RunListQuery) {
 export function getRun(id: string) {
   // manifest_tasks — таски из снапшота манифеста рана (рёбра графа);
   // gateway опускает пустые repeated-поля, поэтому optional.
-  return apiFetch<{ run: Run, tasks: TaskInstance[], attempts: Attempt[], manifest_tasks?: DagTask[] }>(`/run/${encodeURIComponent(id)}`)
+  return apiFetch<{
+    run: Run
+    tasks: TaskInstance[]
+    attempts: Attempt[]
+    manifest_tasks?: DagTask[]
+    // снапшот env-резолва рана (пуст у ранов до введения run_env)
+    env?: RunEnv[]
+  }>(`/run/${encodeURIComponent(id)}`)
 }
 
 export function triggerRun(dagName: string, params?: Record<string, unknown>) {
@@ -37,6 +44,11 @@ export function backfillRuns(dagName: string, from: string, to: string, params?:
 
 export function listRunValues(runId: string) {
   return apiFetch<{ values: TaskValue[] }>(`/run/${encodeURIComponent(runId)}/value`)
+}
+
+// Счётчики ранов по статусам — для фильтров-чипов списка.
+export function countRuns(dagName?: string) {
+  return apiFetch<RunCount>('/run-count', { query: { dag_name: dagName } })
 }
 
 // Принудительная остановка выполняющегося рана: живые попытки убиваются,

@@ -8,6 +8,7 @@ import (
 
 	commonPb "github.com/rendau/loom/api/common"
 	pb "github.com/rendau/loom/api/server_v1"
+	statsModel "github.com/rendau/loom/server/internal/domain/stats/model"
 	"github.com/rendau/loom/server/internal/handler/grpc/dto"
 	dagUsc "github.com/rendau/loom/server/internal/usecase/dag"
 )
@@ -72,6 +73,27 @@ func (h *Dag) GetDag(ctx context.Context, req *pb.DagGetReq) (*pb.DagMain, error
 		return nil, encodeErr(err)
 	}
 	return dto.EncodeDagMain(item, 0), nil
+}
+
+func (h *Dag) GetDagStats(ctx context.Context, req *pb.DagStatsReq) (*pb.DagStatsRep, error) {
+	runs, stats, err := h.usecase.GetStats(ctx, req.GetName(), int64(req.GetLastRuns()))
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+
+	return &pb.DagStatsRep{
+		Runs: runs,
+		Tasks: lo.Map(stats, func(s statsModel.TaskStat, _ int) *pb.DagTaskStat {
+			return &pb.DagTaskStat{
+				Task:               s.Task,
+				Runs:               s.Runs,
+				AvgDurationSec:     s.AvgDurationSec,
+				MaxDurationSec:     s.MaxDurationSec,
+				AvgPeakMemoryBytes: s.AvgPeakMemoryBytes,
+				MaxPeakMemoryBytes: s.MaxPeakMemoryBytes,
+			}
+		}),
+	}, nil
 }
 
 func (h *Dag) SetDagSchedule(ctx context.Context, req *pb.DagSetScheduleReq) (*emptypb.Empty, error) {

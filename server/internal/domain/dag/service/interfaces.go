@@ -15,6 +15,7 @@ type RepoDbI interface {
 	Delete(ctx context.Context, name string) error
 
 	SetNextRun(ctx context.Context, name string, t *time.Time) error
+	ListLastRuns(ctx context.Context, dagNames []string, perDag int) (map[string][]model.LastRun, error)
 	ListDueNames(ctx context.Context) ([]string, error)
 	AdvanceNextRun(ctx context.Context, name string, from time.Time, to time.Time) (bool, error)
 }

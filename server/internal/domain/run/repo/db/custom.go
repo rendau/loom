@@ -415,6 +415,80 @@ func (r *Repo) CancelRun(ctx context.Context, runId string) (bool, []model.Attem
 	return true, live, nil
 }
 
+// CountRunsByStatus — счётчики ранов по статусам (фильтры-чипы админки);
+// dagName != nil — только раны этого дага.
+func (r *Repo) CountRunsByStatus(ctx context.Context, dagName *string) (map[string]int64, error) {
+	query := `SELECT status, count(*) FROM run`
+	var args []any
+	if dagName != nil {
+		query += ` WHERE dag_name = $1`
+		args = append(args, *dagName)
+	}
+	query += ` GROUP BY status`
+
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("CountRunsByStatus: %w", err)
+	}
+	defer rows.Close()
+
+	result := map[string]int64{}
+	for rows.Next() {
+		var status string
+		var count int64
+		if err = rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("CountRunsByStatus scan: %w", err)
+		}
+		result[status] = count
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("CountRunsByStatus rows: %w", err)
+	}
+	return result, nil
+}
+
+// UpsertRunEnv сохраняет снапшот env-резолва рана (batch upsert): повторный
+// launch (ретрай) обновляет записи фактической инъекцией.
+func (r *Repo) UpsertRunEnv(ctx context.Context, runId string, entries []model.RunEnv) error {
+	b := &pgx.Batch{}
+	for _, e := range entries {
+		b.Queue(`
+			INSERT INTO run_env (run_id, env, kind, name, scope, value)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (run_id, kind, env)
+			DO UPDATE SET name = excluded.name, scope = excluded.scope,
+				value = excluded.value, resolved_at = now()`,
+			runId, e.Env, e.Kind, e.Name, e.Scope, e.Value)
+	}
+	if err := r.TxM.GetConnection(ctx).SendBatch(ctx, b).Close(); err != nil {
+		return fmt.Errorf("UpsertRunEnv: %w", err)
+	}
+	return nil
+}
+
+func (r *Repo) ListRunEnv(ctx context.Context, runId string) ([]model.RunEnv, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
+		SELECT env, kind, name, scope, value, resolved_at FROM run_env
+		WHERE run_id = $1 ORDER BY env, kind`, runId)
+	if err != nil {
+		return nil, fmt.Errorf("ListRunEnv: %w", err)
+	}
+	defer rows.Close()
+
+	var result []model.RunEnv
+	for rows.Next() {
+		var e model.RunEnv
+		if err = rows.Scan(&e.Env, &e.Kind, &e.Name, &e.Scope, &e.Value, &e.ResolvedAt); err != nil {
+			return nil, fmt.Errorf("ListRunEnv scan: %w", err)
+		}
+		result = append(result, e)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListRunEnv rows: %w", err)
+	}
+	return result, nil
+}
+
 // UpsertTaskValue сохраняет значение таска; повторный пуш по тому же ключу
 // перезаписывает (ретрай публикует значения заново).
 func (r *Repo) UpsertTaskValue(ctx context.Context, v *model.TaskValue) error {

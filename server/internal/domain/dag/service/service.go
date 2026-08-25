@@ -62,6 +62,18 @@ func (s *Service) Get(ctx context.Context, name string, errNE bool) (*model.Main
 // ими управляет админка (SetSchedule/SetPaused); autoUpdate обновляется
 // только при явном значении — nil сохраняет текущее (в частности,
 // авто-перерегистрация dagsync флаг не трогает).
+// ListLastRuns — последние perDag ранов каждого дага (статус-стрип админки).
+func (s *Service) ListLastRuns(ctx context.Context, dagNames []string, perDag int) (map[string][]model.LastRun, error) {
+	if len(dagNames) == 0 {
+		return map[string][]model.LastRun{}, nil
+	}
+	result, err := s.repoDb.ListLastRuns(ctx, dagNames, perDag)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.ListLastRuns: %w", err)
+	}
+	return result, nil
+}
+
 func (s *Service) Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest, autoUpdate *bool) (*model.Main, error) {
 	if err := ValidateManifest(m); err != nil {
 		return nil, err

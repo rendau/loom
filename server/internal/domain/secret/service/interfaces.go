@@ -12,6 +12,6 @@ type RepoDbI interface {
 	ListMeta(ctx context.Context, dagName *string) ([]*model.Meta, error)
 	// GetValues — значения по именам для дага (локальный скоуп перекрывает
 	// глобальный); GetValue — значение точного скоупа.
-	GetValues(ctx context.Context, dagName string, names []string) (map[string][]byte, error)
+	GetValues(ctx context.Context, dagName string, names []string) (map[string]model.Resolved, error)
 	GetValue(ctx context.Context, dagName, name string) ([]byte, bool, error)
 }

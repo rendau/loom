@@ -22,6 +22,7 @@ import (
 
 	artifactpb "github.com/rendau/loom/api/artifact_v1"
 	domain "github.com/rendau/loom/artifact/internal/domain/artifact"
+	storageDomain "github.com/rendau/loom/artifact/internal/domain/storage"
 	tasklogDomain "github.com/rendau/loom/artifact/internal/domain/tasklog"
 	handler "github.com/rendau/loom/artifact/internal/handler/grpc"
 	loom "github.com/rendau/loom/sdk"
@@ -48,14 +49,16 @@ func startGrpcServer(t *testing.T, register func(*grpc.Server)) string {
 func startArtifactServer(t *testing.T) string {
 	t.Helper()
 
-	svc, err := domain.New(t.TempDir())
+	dataDir, logDir := t.TempDir(), t.TempDir()
+
+	svc, err := domain.New(dataDir)
 	require.NoError(t, err)
 
-	tasklogSvc, err := tasklogDomain.New(t.TempDir())
+	tasklogSvc, err := tasklogDomain.New(logDir)
 	require.NoError(t, err)
 
 	return startGrpcServer(t, func(srv *grpc.Server) {
-		artifactpb.RegisterArtifactServiceServer(srv, handler.NewArtifact(svc))
+		artifactpb.RegisterArtifactServiceServer(srv, handler.NewArtifact(svc, storageDomain.New(dataDir, logDir)))
 		artifactpb.RegisterTaskLogServiceServer(srv, handler.NewTaskLog(tasklogSvc))
 	})
 }
@@ -309,7 +312,7 @@ func (rs *restartableServer) serve(lis net.Listener) {
 	require.NoError(rs.t, err)
 
 	srv := grpc.NewServer()
-	artifactpb.RegisterArtifactServiceServer(srv, handler.NewArtifact(svc))
+	artifactpb.RegisterArtifactServiceServer(srv, handler.NewArtifact(svc, storageDomain.New(rs.dataDir, rs.logDir)))
 	artifactpb.RegisterTaskLogServiceServer(srv, handler.NewTaskLog(tasklogSvc))
 
 	go func() { _ = srv.Serve(lis) }()

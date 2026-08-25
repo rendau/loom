@@ -22,6 +22,9 @@ export interface DashboardFailure {
   run_id: string
   dag_name: string
   finished_at: string
+  // первый упавший таск и исход его последней попытки
+  task: string
+  exit_reason: string
 }
 
 export interface DashboardDay {

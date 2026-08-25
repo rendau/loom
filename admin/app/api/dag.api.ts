@@ -1,6 +1,6 @@
 import { apiFetch } from '~/api/client'
 import type { ListParams, PaginationInfo } from '~/types/common'
-import type { Dag, DagRegistration } from '~/types/dag'
+import type { Dag, DagRegistration, DagStats } from '~/types/dag'
 
 export type DagListQuery = {
   list_params: ListParams
@@ -34,6 +34,14 @@ export function registerDag(body: DagRegisterBody) {
 
 export function listDagRegistrations(query: { dag_name?: string, active?: boolean, limit?: number } = {}) {
   return apiFetch<{ results: DagRegistration[] }>('/dag-registration', { query: { ...query } })
+}
+
+// Агрегаты по таскам дага за последние lastRuns завершённых ранов
+// («жирные таски»); lastRuns 0 — дефолт сервера (20).
+export function getDagStats(name: string, lastRuns?: number) {
+  return apiFetch<DagStats>(`/dag/${encodeURIComponent(name)}/stats`, {
+    query: { last_runs: lastRuns },
+  })
 }
 
 export function getDagRegistration(id: string) {

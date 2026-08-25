@@ -8,8 +8,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/samber/lo"
+
 	pb "github.com/rendau/loom/api/artifact_v1"
 	domain "github.com/rendau/loom/artifact/internal/domain/artifact"
+	"github.com/rendau/loom/artifact/internal/domain/storage"
 )
 
 const readChunkSize = 256 * 1024
@@ -17,11 +20,12 @@ const readChunkSize = 256 * 1024
 type Artifact struct {
 	pb.UnsafeArtifactServiceServer
 
-	svc *domain.Service
+	svc     *domain.Service
+	storage *storage.Service
 }
 
-func NewArtifact(svc *domain.Service) *Artifact {
-	return &Artifact{svc: svc}
+func NewArtifact(svc *domain.Service, storageSvc *storage.Service) *Artifact {
+	return &Artifact{svc: svc, storage: storageSvc}
 }
 
 // WriteArtifact — bidi-стрим записи: header (begin или resume) → ack с
@@ -167,6 +171,45 @@ func (h *Artifact) DeleteRunArtifacts(ctx context.Context, req *pb.DeleteRunArti
 	}
 
 	return &pb.DeleteRunArtifactsResponse{}, nil
+}
+
+func (h *Artifact) ListRunArtifacts(ctx context.Context, req *pb.ListRunArtifactsRequest) (*pb.ListRunArtifactsResponse, error) {
+	infos, err := h.svc.ListRun(req.GetRunId())
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+
+	return &pb.ListRunArtifactsResponse{
+		Artifacts: lo.Map(infos, func(v domain.ArtifactInfo, _ int) *pb.ArtifactInfo {
+			info := &pb.ArtifactInfo{
+				Ref: &pb.ArtifactRef{
+					RunId:   v.Ref.RunID,
+					Task:    v.Ref.Task,
+					Attempt: v.Ref.Attempt,
+					Name:    v.Ref.Name,
+				},
+				State: encodeState(v.State),
+				Size:  v.Size,
+			}
+			if !v.Modified.IsZero() {
+				info.ModifiedUnixMs = v.Modified.UnixMilli()
+			}
+			return info
+		}),
+	}, nil
+}
+
+func (h *Artifact) GetStorageStats(ctx context.Context, _ *pb.StorageStatsRequest) (*pb.StorageStatsResponse, error) {
+	stats, err := h.storage.GetStats()
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+
+	encode := func(v storage.DirStats) *pb.DirStats {
+		return &pb.DirStats{UsedBytes: v.UsedBytes, TotalBytes: v.TotalBytes, FreeBytes: v.FreeBytes}
+	}
+
+	return &pb.StorageStatsResponse{Data: encode(stats.Data), Logs: encode(stats.Logs)}, nil
 }
 
 func decodeRef(v *pb.ArtifactRef) domain.Ref {

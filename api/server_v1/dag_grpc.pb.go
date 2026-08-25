@@ -25,6 +25,7 @@ const (
 	DagService_GetDagRegistration_FullMethodName  = "/server_v1.DagService/GetDagRegistration"
 	DagService_ListDag_FullMethodName             = "/server_v1.DagService/ListDag"
 	DagService_GetDag_FullMethodName              = "/server_v1.DagService/GetDag"
+	DagService_GetDagStats_FullMethodName         = "/server_v1.DagService/GetDagStats"
 	DagService_SetDagSchedule_FullMethodName      = "/server_v1.DagService/SetDagSchedule"
 	DagService_SetDagPaused_FullMethodName        = "/server_v1.DagService/SetDagPaused"
 	DagService_SyncDag_FullMethodName             = "/server_v1.DagService/SyncDag"
@@ -55,6 +56,9 @@ type DagServiceClient interface {
 	GetDagRegistration(ctx context.Context, in *DagRegistrationGetReq, opts ...grpc.CallOption) (*DagRegistrationMain, error)
 	ListDag(ctx context.Context, in *DagListReq, opts ...grpc.CallOption) (*DagListRep, error)
 	GetDag(ctx context.Context, in *DagGetReq, opts ...grpc.CallOption) (*DagMain, error)
+	// GetDagStats — агрегаты по таскам дага за последние N завершённых
+	// ранов: длительности и пики памяти («жирные таски» в админке).
+	GetDagStats(ctx context.Context, in *DagStatsReq, opts ...grpc.CallOption) (*DagStatsRep, error)
 	// SetDagSchedule задаёт cron-расписание и catchup дага. Расписание живёт
 	// только на control plane (манифест дага его не содержит); пустая строка
 	// снимает расписание.
@@ -132,6 +136,16 @@ func (c *dagServiceClient) GetDag(ctx context.Context, in *DagGetReq, opts ...gr
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DagMain)
 	err := c.cc.Invoke(ctx, DagService_GetDag_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dagServiceClient) GetDagStats(ctx context.Context, in *DagStatsReq, opts ...grpc.CallOption) (*DagStatsRep, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DagStatsRep)
+	err := c.cc.Invoke(ctx, DagService_GetDagStats_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -220,6 +234,9 @@ type DagServiceServer interface {
 	GetDagRegistration(context.Context, *DagRegistrationGetReq) (*DagRegistrationMain, error)
 	ListDag(context.Context, *DagListReq) (*DagListRep, error)
 	GetDag(context.Context, *DagGetReq) (*DagMain, error)
+	// GetDagStats — агрегаты по таскам дага за последние N завершённых
+	// ранов: длительности и пики памяти («жирные таски» в админке).
+	GetDagStats(context.Context, *DagStatsReq) (*DagStatsRep, error)
 	// SetDagSchedule задаёт cron-расписание и catchup дага. Расписание живёт
 	// только на control plane (манифест дага его не содержит); пустая строка
 	// снимает расписание.
@@ -267,6 +284,9 @@ func (UnimplementedDagServiceServer) ListDag(context.Context, *DagListReq) (*Dag
 }
 func (UnimplementedDagServiceServer) GetDag(context.Context, *DagGetReq) (*DagMain, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetDag not implemented")
+}
+func (UnimplementedDagServiceServer) GetDagStats(context.Context, *DagStatsReq) (*DagStatsRep, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDagStats not implemented")
 }
 func (UnimplementedDagServiceServer) SetDagSchedule(context.Context, *DagSetScheduleReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetDagSchedule not implemented")
@@ -393,6 +413,24 @@ func _DagService_GetDag_Handler(srv interface{}, ctx context.Context, dec func(i
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DagServiceServer).GetDag(ctx, req.(*DagGetReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DagService_GetDagStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DagStatsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DagServiceServer).GetDagStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DagService_GetDagStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DagServiceServer).GetDagStats(ctx, req.(*DagStatsReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -531,6 +569,10 @@ var DagService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetDag",
 			Handler:    _DagService_GetDag_Handler,
+		},
+		{
+			MethodName: "GetDagStats",
+			Handler:    _DagService_GetDagStats_Handler,
 		},
 		{
 			MethodName: "SetDagSchedule",

@@ -35,6 +35,15 @@ func (s *Service) List(ctx context.Context, pars *model.ListReq) ([]*model.Main,
 	return items, tCount, nil
 }
 
+// CountByStatus — счётчики ранов по статусам (опционально одного дага).
+func (s *Service) CountByStatus(ctx context.Context, dagName *string) (map[string]int64, error) {
+	counts, err := s.repoDb.CountRunsByStatus(ctx, dagName)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.CountRunsByStatus: %w", err)
+	}
+	return counts, nil
+}
+
 func (s *Service) Get(ctx context.Context, id string, errNE bool) (*model.Main, bool, error) {
 	result, found, err := s.repoDb.GetRun(ctx, id)
 	if err != nil {
@@ -51,28 +60,33 @@ func (s *Service) Get(ctx context.Context, id string, errNE bool) (*model.Main, 
 
 // GetDetails возвращает ран вместе с task instance'ами, попытками и тасками
 // из снапшота манифеста (структура графа на момент триггера).
-func (s *Service) GetDetails(ctx context.Context, id string) (*model.Main, []dagModel.Task, []*model.TaskInstance, []*model.Attempt, error) {
+func (s *Service) GetDetails(ctx context.Context, id string) (*model.Main, []dagModel.Task, []*model.TaskInstance, []*model.Attempt, []model.RunEnv, error) {
 	run, _, err := s.Get(ctx, id, true)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	m, err := manifest.Parse(run.Manifest)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("manifest.Parse: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("manifest.Parse: %w", err)
 	}
 
 	tasks, err := s.repoDb.ListTaskInstances(ctx, id)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("repoDb.ListTaskInstances: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("repoDb.ListTaskInstances: %w", err)
 	}
 
 	attempts, err := s.repoDb.ListAttempts(ctx, id)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("repoDb.ListAttempts: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("repoDb.ListAttempts: %w", err)
 	}
 
-	return run, m.Tasks, tasks, attempts, nil
+	env, err := s.repoDb.ListRunEnv(ctx, id)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("repoDb.ListRunEnv: %w", err)
+	}
+
+	return run, m.Tasks, tasks, attempts, env, nil
 }
 
 // Trigger создаёт ран дага: снапшот манифеста и пиннинг к digest на момент
@@ -302,6 +316,26 @@ func (s *Service) ListValues(ctx context.Context, runId string) ([]*model.TaskVa
 	items, err := s.repoDb.ListTaskValues(ctx, runId)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.ListTaskValues: %w", err)
+	}
+	return items, nil
+}
+
+// SaveRunEnv сохраняет снапшот env-резолва рана (upsert) — вызывается
+// планировщиком при launch попытки.
+func (s *Service) SaveRunEnv(ctx context.Context, runId string, entries []model.RunEnv) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	if err := s.repoDb.UpsertRunEnv(ctx, runId, entries); err != nil {
+		return fmt.Errorf("repoDb.UpsertRunEnv: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) ListRunEnv(ctx context.Context, runId string) ([]model.RunEnv, error) {
+	items, err := s.repoDb.ListRunEnv(ctx, runId)
+	if err != nil {
+		return nil, fmt.Errorf("repoDb.ListRunEnv: %w", err)
 	}
 	return items, nil
 }

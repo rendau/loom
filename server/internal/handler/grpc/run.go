@@ -93,7 +93,7 @@ func (h *Run) CancelRun(ctx context.Context, req *pb.RunCancelReq) (*emptypb.Emp
 }
 
 func (h *Run) GetRun(ctx context.Context, req *pb.RunGetReq) (*pb.RunGetRep, error) {
-	run, manifestTasks, tasks, attempts, err := h.usecase.Get(ctx, req.GetId())
+	run, manifestTasks, tasks, attempts, env, err := h.usecase.Get(ctx, req.GetId())
 	if err != nil {
 		return nil, encodeErr(err)
 	}
@@ -103,5 +103,20 @@ func (h *Run) GetRun(ctx context.Context, req *pb.RunGetReq) (*pb.RunGetRep, err
 		Tasks:         lo.Map(tasks, dto.EncodeTaskInstanceMain),
 		Attempts:      lo.Map(attempts, dto.EncodeAttemptMain),
 		ManifestTasks: lo.Map(manifestTasks, dto.EncodeDagTaskMain),
+		Env:           lo.Map(env, dto.EncodeRunEnvMain),
+	}, nil
+}
+
+func (h *Run) CountRun(ctx context.Context, req *pb.RunCountReq) (*pb.RunCountRep, error) {
+	counts, err := h.usecase.Count(ctx, req.DagName)
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+
+	return &pb.RunCountRep{
+		Running:  counts["running"],
+		Success:  counts["success"],
+		Failed:   counts["failed"],
+		Canceled: counts["canceled"],
 	}, nil
 }

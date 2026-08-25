@@ -26,6 +26,7 @@ const (
 	RunService_RetryTask_FullMethodName   = "/server_v1.RunService/RetryTask"
 	RunService_CancelRun_FullMethodName   = "/server_v1.RunService/CancelRun"
 	RunService_BackfillRun_FullMethodName = "/server_v1.RunService/BackfillRun"
+	RunService_CountRun_FullMethodName    = "/server_v1.RunService/CountRun"
 )
 
 // RunServiceClient is the client API for RunService service.
@@ -55,6 +56,8 @@ type RunServiceClient interface {
 	// cron-расписания дага в [from, to), trigger=backfill, logical_date=тик.
 	// Требует расписания у дага; число тиков за вызов ограничено.
 	BackfillRun(ctx context.Context, in *RunBackfillReq, opts ...grpc.CallOption) (*RunBackfillRep, error)
+	// CountRun — счётчики ранов по статусам (для фильтров-чипов админки).
+	CountRun(ctx context.Context, in *RunCountReq, opts ...grpc.CallOption) (*RunCountRep, error)
 }
 
 type runServiceClient struct {
@@ -125,6 +128,16 @@ func (c *runServiceClient) BackfillRun(ctx context.Context, in *RunBackfillReq, 
 	return out, nil
 }
 
+func (c *runServiceClient) CountRun(ctx context.Context, in *RunCountReq, opts ...grpc.CallOption) (*RunCountRep, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunCountRep)
+	err := c.cc.Invoke(ctx, RunService_CountRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RunServiceServer is the server API for RunService service.
 // All implementations must embed UnimplementedRunServiceServer
 // for forward compatibility.
@@ -152,6 +165,8 @@ type RunServiceServer interface {
 	// cron-расписания дага в [from, to), trigger=backfill, logical_date=тик.
 	// Требует расписания у дага; число тиков за вызов ограничено.
 	BackfillRun(context.Context, *RunBackfillReq) (*RunBackfillRep, error)
+	// CountRun — счётчики ранов по статусам (для фильтров-чипов админки).
+	CountRun(context.Context, *RunCountReq) (*RunCountRep, error)
 	mustEmbedUnimplementedRunServiceServer()
 }
 
@@ -179,6 +194,9 @@ func (UnimplementedRunServiceServer) CancelRun(context.Context, *RunCancelReq) (
 }
 func (UnimplementedRunServiceServer) BackfillRun(context.Context, *RunBackfillReq) (*RunBackfillRep, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BackfillRun not implemented")
+}
+func (UnimplementedRunServiceServer) CountRun(context.Context, *RunCountReq) (*RunCountRep, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CountRun not implemented")
 }
 func (UnimplementedRunServiceServer) mustEmbedUnimplementedRunServiceServer() {}
 func (UnimplementedRunServiceServer) testEmbeddedByValue()                    {}
@@ -309,6 +327,24 @@ func _RunService_BackfillRun_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RunService_CountRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunCountReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RunServiceServer).CountRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RunService_CountRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RunServiceServer).CountRun(ctx, req.(*RunCountReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RunService_ServiceDesc is the grpc.ServiceDesc for RunService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -339,6 +375,10 @@ var RunService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BackfillRun",
 			Handler:    _RunService_BackfillRun_Handler,
+		},
+		{
+			MethodName: "CountRun",
+			Handler:    _RunService_CountRun_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

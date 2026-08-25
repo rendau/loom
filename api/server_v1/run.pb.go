@@ -821,6 +821,8 @@ type RunGetRep struct {
 	// Таски из снапшота манифеста рана (структура графа: depends_on).
 	// Именно снапшот, а не текущий даг — тот мог перерегистрироваться.
 	ManifestTasks []*DagTaskMain `protobuf:"bytes,4,rep,name=manifest_tasks,json=manifestTasks,proto3" json:"manifest_tasks,omitempty"`
+	// Снапшот env-резолва рана: что реально ушло (или уйдёт) в поды тасков.
+	Env           []*RunEnvMain `protobuf:"bytes,5,rep,name=env,proto3" json:"env,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -881,6 +883,214 @@ func (x *RunGetRep) GetManifestTasks() []*DagTaskMain {
 		return x.ManifestTasks
 	}
 	return nil
+}
+
+func (x *RunGetRep) GetEnv() []*RunEnvMain {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+// RunEnvMain — запись env-снапшота рана: резолв привязки манифеста
+// (env-имя → переменная/секрет) на момент launch попытки. Пишется при
+// каждом launch (upsert по run_id+kind+env) — отражает фактическую
+// инъекцию, а не текущее значение в /env. Значения секретов не
+// сохраняются никогда — только имя и скоуп-источник.
+type RunEnvMain struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Env           string                 `protobuf:"bytes,1,opt,name=env,proto3" json:"env,omitempty"`     // имя env-переменной в контейнере
+	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`   // variable | secret
+	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`   // имя переменной/секрета control plane
+	Scope         string                 `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"` // '' — глобальный скоуп, иначе имя дага
+	Value         string                 `protobuf:"bytes,5,opt,name=value,proto3" json:"value,omitempty"` // значение переменной; у секретов всегда пусто
+	ResolvedAt    *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=resolved_at,json=resolvedAt,proto3" json:"resolved_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunEnvMain) Reset() {
+	*x = RunEnvMain{}
+	mi := &file_server_v1_run_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunEnvMain) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunEnvMain) ProtoMessage() {}
+
+func (x *RunEnvMain) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_run_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunEnvMain.ProtoReflect.Descriptor instead.
+func (*RunEnvMain) Descriptor() ([]byte, []int) {
+	return file_server_v1_run_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *RunEnvMain) GetEnv() string {
+	if x != nil {
+		return x.Env
+	}
+	return ""
+}
+
+func (x *RunEnvMain) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *RunEnvMain) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *RunEnvMain) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *RunEnvMain) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+func (x *RunEnvMain) GetResolvedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ResolvedAt
+	}
+	return nil
+}
+
+type RunCountReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DagName       *string                `protobuf:"bytes,1,opt,name=dag_name,json=dagName,proto3,oneof" json:"dag_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunCountReq) Reset() {
+	*x = RunCountReq{}
+	mi := &file_server_v1_run_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunCountReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunCountReq) ProtoMessage() {}
+
+func (x *RunCountReq) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_run_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunCountReq.ProtoReflect.Descriptor instead.
+func (*RunCountReq) Descriptor() ([]byte, []int) {
+	return file_server_v1_run_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RunCountReq) GetDagName() string {
+	if x != nil && x.DagName != nil {
+		return *x.DagName
+	}
+	return ""
+}
+
+type RunCountRep struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Running       int64                  `protobuf:"varint,1,opt,name=running,proto3" json:"running,omitempty"`
+	Success       int64                  `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	Failed        int64                  `protobuf:"varint,3,opt,name=failed,proto3" json:"failed,omitempty"`
+	Canceled      int64                  `protobuf:"varint,4,opt,name=canceled,proto3" json:"canceled,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunCountRep) Reset() {
+	*x = RunCountRep{}
+	mi := &file_server_v1_run_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunCountRep) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunCountRep) ProtoMessage() {}
+
+func (x *RunCountRep) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_run_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunCountRep.ProtoReflect.Descriptor instead.
+func (*RunCountRep) Descriptor() ([]byte, []int) {
+	return file_server_v1_run_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RunCountRep) GetRunning() int64 {
+	if x != nil {
+		return x.Running
+	}
+	return 0
+}
+
+func (x *RunCountRep) GetSuccess() int64 {
+	if x != nil {
+		return x.Success
+	}
+	return 0
+}
+
+func (x *RunCountRep) GetFailed() int64 {
+	if x != nil {
+		return x.Failed
+	}
+	return 0
+}
+
+func (x *RunCountRep) GetCanceled() int64 {
+	if x != nil {
+		return x.Canceled
+	}
+	return 0
 }
 
 var File_server_v1_run_proto protoreflect.FileDescriptor
@@ -967,12 +1177,30 @@ const file_server_v1_run_proto_rawDesc = "" +
 	"\x02to\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02to\x12/\n" +
 	"\x06params\x18\x04 \x01(\v2\x17.google.protobuf.StructR\x06params\")\n" +
 	"\x0eRunBackfillRep\x12\x17\n" +
-	"\arun_ids\x18\x01 \x03(\tR\x06runIds\"\xd7\x01\n" +
+	"\arun_ids\x18\x01 \x03(\tR\x06runIds\"\x80\x02\n" +
 	"\tRunGetRep\x12$\n" +
 	"\x03run\x18\x01 \x01(\v2\x12.server_v1.RunMainR\x03run\x121\n" +
 	"\x05tasks\x18\x02 \x03(\v2\x1b.server_v1.TaskInstanceMainR\x05tasks\x122\n" +
 	"\battempts\x18\x03 \x03(\v2\x16.server_v1.AttemptMainR\battempts\x12=\n" +
-	"\x0emanifest_tasks\x18\x04 \x03(\v2\x16.server_v1.DagTaskMainR\rmanifestTasks2\x96\x04\n" +
+	"\x0emanifest_tasks\x18\x04 \x03(\v2\x16.server_v1.DagTaskMainR\rmanifestTasks\x12'\n" +
+	"\x03env\x18\x05 \x03(\v2\x15.server_v1.RunEnvMainR\x03env\"\xaf\x01\n" +
+	"\n" +
+	"RunEnvMain\x12\x10\n" +
+	"\x03env\x18\x01 \x01(\tR\x03env\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
+	"\x05scope\x18\x04 \x01(\tR\x05scope\x12\x14\n" +
+	"\x05value\x18\x05 \x01(\tR\x05value\x12;\n" +
+	"\vresolved_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"resolvedAt\":\n" +
+	"\vRunCountReq\x12\x1e\n" +
+	"\bdag_name\x18\x01 \x01(\tH\x00R\adagName\x88\x01\x01B\v\n" +
+	"\t_dag_name\"u\n" +
+	"\vRunCountRep\x12\x18\n" +
+	"\arunning\x18\x01 \x01(\x03R\arunning\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\x03R\asuccess\x12\x16\n" +
+	"\x06failed\x18\x03 \x01(\x03R\x06failed\x12\x1a\n" +
+	"\bcanceled\x18\x04 \x01(\x03R\bcanceled2\xe6\x04\n" +
 	"\n" +
 	"RunService\x12Q\n" +
 	"\n" +
@@ -981,7 +1209,9 @@ const file_server_v1_run_proto_rawDesc = "" +
 	"\x06GetRun\x12\x14.server_v1.RunGetReq\x1a\x14.server_v1.RunGetRep\"\x11\x82\xd3\xe4\x93\x02\v\x12\t/run/{id}\x12k\n" +
 	"\tRetryTask\x12\x1a.server_v1.RunRetryTaskReq\x1a\x16.google.protobuf.Empty\"*\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/run/{run_id}/task/{task}/retry\x12Y\n" +
 	"\tCancelRun\x12\x17.server_v1.RunCancelReq\x1a\x16.google.protobuf.Empty\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/run/{id}/cancel\x12]\n" +
-	"\vBackfillRun\x12\x19.server_v1.RunBackfillReq\x1a\x19.server_v1.RunBackfillRep\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/run/backfillB0Z.github.com/rendau/loom/api/server_v1;server_v1b\x06proto3"
+	"\vBackfillRun\x12\x19.server_v1.RunBackfillReq\x1a\x19.server_v1.RunBackfillRep\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/run/backfill\x12N\n" +
+	"\bCountRun\x12\x16.server_v1.RunCountReq\x1a\x16.server_v1.RunCountRep\"\x12\x82\xd3\xe4\x93\x02\f\x12\n" +
+	"/run-countB0Z.github.com/rendau/loom/api/server_v1;server_v1b\x06proto3"
 
 var (
 	file_server_v1_run_proto_rawDescOnce sync.Once
@@ -995,7 +1225,7 @@ func file_server_v1_run_proto_rawDescGZIP() []byte {
 	return file_server_v1_run_proto_rawDescData
 }
 
-var file_server_v1_run_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_server_v1_run_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_server_v1_run_proto_goTypes = []any{
 	(*RunMain)(nil),                 // 0: server_v1.RunMain
 	(*TaskInstanceMain)(nil),        // 1: server_v1.TaskInstanceMain
@@ -1010,53 +1240,60 @@ var file_server_v1_run_proto_goTypes = []any{
 	(*RunBackfillReq)(nil),          // 10: server_v1.RunBackfillReq
 	(*RunBackfillRep)(nil),          // 11: server_v1.RunBackfillRep
 	(*RunGetRep)(nil),               // 12: server_v1.RunGetRep
-	(*timestamppb.Timestamp)(nil),   // 13: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),         // 14: google.protobuf.Struct
-	(*common.ListParamsSt)(nil),     // 15: common.ListParamsSt
-	(*common.PaginationInfoSt)(nil), // 16: common.PaginationInfoSt
-	(*DagTaskMain)(nil),             // 17: server_v1.DagTaskMain
-	(*emptypb.Empty)(nil),           // 18: google.protobuf.Empty
+	(*RunEnvMain)(nil),              // 13: server_v1.RunEnvMain
+	(*RunCountReq)(nil),             // 14: server_v1.RunCountReq
+	(*RunCountRep)(nil),             // 15: server_v1.RunCountRep
+	(*timestamppb.Timestamp)(nil),   // 16: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),         // 17: google.protobuf.Struct
+	(*common.ListParamsSt)(nil),     // 18: common.ListParamsSt
+	(*common.PaginationInfoSt)(nil), // 19: common.PaginationInfoSt
+	(*DagTaskMain)(nil),             // 20: server_v1.DagTaskMain
+	(*emptypb.Empty)(nil),           // 21: google.protobuf.Empty
 }
 var file_server_v1_run_proto_depIdxs = []int32{
-	13, // 0: server_v1.RunMain.created_at:type_name -> google.protobuf.Timestamp
-	13, // 1: server_v1.RunMain.finished_at:type_name -> google.protobuf.Timestamp
-	13, // 2: server_v1.RunMain.logical_date:type_name -> google.protobuf.Timestamp
-	14, // 3: server_v1.RunMain.params:type_name -> google.protobuf.Struct
-	13, // 4: server_v1.TaskInstanceMain.queued_at:type_name -> google.protobuf.Timestamp
-	13, // 5: server_v1.TaskInstanceMain.started_at:type_name -> google.protobuf.Timestamp
-	13, // 6: server_v1.TaskInstanceMain.finished_at:type_name -> google.protobuf.Timestamp
-	13, // 7: server_v1.TaskInstanceMain.retry_at:type_name -> google.protobuf.Timestamp
-	13, // 8: server_v1.AttemptMain.created_at:type_name -> google.protobuf.Timestamp
-	13, // 9: server_v1.AttemptMain.started_at:type_name -> google.protobuf.Timestamp
-	13, // 10: server_v1.AttemptMain.finished_at:type_name -> google.protobuf.Timestamp
-	14, // 11: server_v1.RunTriggerReq.params:type_name -> google.protobuf.Struct
-	15, // 12: server_v1.RunListReq.list_params:type_name -> common.ListParamsSt
-	16, // 13: server_v1.RunListRep.pagination_info:type_name -> common.PaginationInfoSt
+	16, // 0: server_v1.RunMain.created_at:type_name -> google.protobuf.Timestamp
+	16, // 1: server_v1.RunMain.finished_at:type_name -> google.protobuf.Timestamp
+	16, // 2: server_v1.RunMain.logical_date:type_name -> google.protobuf.Timestamp
+	17, // 3: server_v1.RunMain.params:type_name -> google.protobuf.Struct
+	16, // 4: server_v1.TaskInstanceMain.queued_at:type_name -> google.protobuf.Timestamp
+	16, // 5: server_v1.TaskInstanceMain.started_at:type_name -> google.protobuf.Timestamp
+	16, // 6: server_v1.TaskInstanceMain.finished_at:type_name -> google.protobuf.Timestamp
+	16, // 7: server_v1.TaskInstanceMain.retry_at:type_name -> google.protobuf.Timestamp
+	16, // 8: server_v1.AttemptMain.created_at:type_name -> google.protobuf.Timestamp
+	16, // 9: server_v1.AttemptMain.started_at:type_name -> google.protobuf.Timestamp
+	16, // 10: server_v1.AttemptMain.finished_at:type_name -> google.protobuf.Timestamp
+	17, // 11: server_v1.RunTriggerReq.params:type_name -> google.protobuf.Struct
+	18, // 12: server_v1.RunListReq.list_params:type_name -> common.ListParamsSt
+	19, // 13: server_v1.RunListRep.pagination_info:type_name -> common.PaginationInfoSt
 	0,  // 14: server_v1.RunListRep.results:type_name -> server_v1.RunMain
-	13, // 15: server_v1.RunBackfillReq.from:type_name -> google.protobuf.Timestamp
-	13, // 16: server_v1.RunBackfillReq.to:type_name -> google.protobuf.Timestamp
-	14, // 17: server_v1.RunBackfillReq.params:type_name -> google.protobuf.Struct
+	16, // 15: server_v1.RunBackfillReq.from:type_name -> google.protobuf.Timestamp
+	16, // 16: server_v1.RunBackfillReq.to:type_name -> google.protobuf.Timestamp
+	17, // 17: server_v1.RunBackfillReq.params:type_name -> google.protobuf.Struct
 	0,  // 18: server_v1.RunGetRep.run:type_name -> server_v1.RunMain
 	1,  // 19: server_v1.RunGetRep.tasks:type_name -> server_v1.TaskInstanceMain
 	2,  // 20: server_v1.RunGetRep.attempts:type_name -> server_v1.AttemptMain
-	17, // 21: server_v1.RunGetRep.manifest_tasks:type_name -> server_v1.DagTaskMain
-	3,  // 22: server_v1.RunService.TriggerRun:input_type -> server_v1.RunTriggerReq
-	5,  // 23: server_v1.RunService.ListRun:input_type -> server_v1.RunListReq
-	7,  // 24: server_v1.RunService.GetRun:input_type -> server_v1.RunGetReq
-	8,  // 25: server_v1.RunService.RetryTask:input_type -> server_v1.RunRetryTaskReq
-	9,  // 26: server_v1.RunService.CancelRun:input_type -> server_v1.RunCancelReq
-	10, // 27: server_v1.RunService.BackfillRun:input_type -> server_v1.RunBackfillReq
-	4,  // 28: server_v1.RunService.TriggerRun:output_type -> server_v1.RunTriggerRep
-	6,  // 29: server_v1.RunService.ListRun:output_type -> server_v1.RunListRep
-	12, // 30: server_v1.RunService.GetRun:output_type -> server_v1.RunGetRep
-	18, // 31: server_v1.RunService.RetryTask:output_type -> google.protobuf.Empty
-	18, // 32: server_v1.RunService.CancelRun:output_type -> google.protobuf.Empty
-	11, // 33: server_v1.RunService.BackfillRun:output_type -> server_v1.RunBackfillRep
-	28, // [28:34] is the sub-list for method output_type
-	22, // [22:28] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	20, // 21: server_v1.RunGetRep.manifest_tasks:type_name -> server_v1.DagTaskMain
+	13, // 22: server_v1.RunGetRep.env:type_name -> server_v1.RunEnvMain
+	16, // 23: server_v1.RunEnvMain.resolved_at:type_name -> google.protobuf.Timestamp
+	3,  // 24: server_v1.RunService.TriggerRun:input_type -> server_v1.RunTriggerReq
+	5,  // 25: server_v1.RunService.ListRun:input_type -> server_v1.RunListReq
+	7,  // 26: server_v1.RunService.GetRun:input_type -> server_v1.RunGetReq
+	8,  // 27: server_v1.RunService.RetryTask:input_type -> server_v1.RunRetryTaskReq
+	9,  // 28: server_v1.RunService.CancelRun:input_type -> server_v1.RunCancelReq
+	10, // 29: server_v1.RunService.BackfillRun:input_type -> server_v1.RunBackfillReq
+	14, // 30: server_v1.RunService.CountRun:input_type -> server_v1.RunCountReq
+	4,  // 31: server_v1.RunService.TriggerRun:output_type -> server_v1.RunTriggerRep
+	6,  // 32: server_v1.RunService.ListRun:output_type -> server_v1.RunListRep
+	12, // 33: server_v1.RunService.GetRun:output_type -> server_v1.RunGetRep
+	21, // 34: server_v1.RunService.RetryTask:output_type -> google.protobuf.Empty
+	21, // 35: server_v1.RunService.CancelRun:output_type -> google.protobuf.Empty
+	11, // 36: server_v1.RunService.BackfillRun:output_type -> server_v1.RunBackfillRep
+	15, // 37: server_v1.RunService.CountRun:output_type -> server_v1.RunCountRep
+	31, // [31:38] is the sub-list for method output_type
+	24, // [24:31] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_run_proto_init() }
@@ -1069,13 +1306,14 @@ func file_server_v1_run_proto_init() {
 	file_server_v1_run_proto_msgTypes[1].OneofWrappers = []any{}
 	file_server_v1_run_proto_msgTypes[2].OneofWrappers = []any{}
 	file_server_v1_run_proto_msgTypes[5].OneofWrappers = []any{}
+	file_server_v1_run_proto_msgTypes[14].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_v1_run_proto_rawDesc), len(file_server_v1_run_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

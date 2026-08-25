@@ -313,10 +313,14 @@ func (x *DashboardPool) GetBusy() int64 {
 }
 
 type DashboardFailure struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	DagName       string                 `protobuf:"bytes,2,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"`
-	FinishedAt    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	RunId      string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	DagName    string                 `protobuf:"bytes,2,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"`
+	FinishedAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
+	// Первый упавший таск рана и исход его последней попытки — чтобы с
+	// дашборда было видно «что именно сломалось» без открытия рана.
+	Task          string `protobuf:"bytes,4,opt,name=task,proto3" json:"task,omitempty"`
+	ExitReason    string `protobuf:"bytes,5,opt,name=exit_reason,json=exitReason,proto3" json:"exit_reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -370,6 +374,20 @@ func (x *DashboardFailure) GetFinishedAt() *timestamppb.Timestamp {
 		return x.FinishedAt
 	}
 	return nil
+}
+
+func (x *DashboardFailure) GetTask() string {
+	if x != nil {
+		return x.Task
+	}
+	return ""
+}
+
+func (x *DashboardFailure) GetExitReason() string {
+	if x != nil {
+		return x.ExitReason
+	}
+	return ""
 }
 
 type DashboardDay struct {
@@ -536,12 +554,15 @@ const file_server_v1_dashboard_proto_rawDesc = "" +
 	"\rDashboardPool\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05slots\x18\x02 \x01(\x03R\x05slots\x12\x12\n" +
-	"\x04busy\x18\x03 \x01(\x03R\x04busy\"\x81\x01\n" +
+	"\x04busy\x18\x03 \x01(\x03R\x04busy\"\xb6\x01\n" +
 	"\x10DashboardFailure\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x19\n" +
 	"\bdag_name\x18\x02 \x01(\tR\adagName\x12;\n" +
 	"\vfinished_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"finishedAt\"n\n" +
+	"finishedAt\x12\x12\n" +
+	"\x04task\x18\x04 \x01(\tR\x04task\x12\x1f\n" +
+	"\vexit_reason\x18\x05 \x01(\tR\n" +
+	"exitReason\"n\n" +
 	"\fDashboardDay\x12\x12\n" +
 	"\x04date\x18\x01 \x01(\tR\x04date\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\x03R\asuccess\x12\x16\n" +

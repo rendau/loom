@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { getStorageStats } from '~/api/artifact.api'
 import { apiErrorMessage } from '~/api/client'
 import { getDashboard } from '~/api/dashboard.api'
 import { listRuns } from '~/api/run.api'
+import type { StorageStats } from '~/types/artifact'
 import type { Dashboard } from '~/types/dashboard'
 import type { Run } from '~/types/run'
 
@@ -12,6 +14,7 @@ import type { Run } from '~/types/run'
 
 const data = ref<Dashboard | null>(null)
 const activeRuns = ref<Run[]>([])
+const storage = ref<StorageStats | null>(null)
 const loading = ref(false)
 const loadError = ref('')
 
@@ -26,6 +29,15 @@ async function load(background = false) {
     data.value = dashboard
     activeRuns.value = running.results
     loadError.value = ''
+
+    // ёмкость хранилища — best effort (недоступный artifact-сервер не
+    // валит обзор)
+    try {
+      storage.value = await getStorageStats()
+    }
+    catch {
+      storage.value = null
+    }
   }
   catch (error) {
     loadError.value = apiErrorMessage(error)
@@ -65,6 +77,15 @@ const slowRuns = computed(() => activeRuns.value.filter(isSlow))
 
 const needsAttention = computed(() =>
   (data.value?.recent_failures?.length ?? 0) > 0 || slowRuns.value.length > 0)
+
+// доля занятого места на volume хранилища (для прогресса и подсветки)
+const volumeUsedShare = computed(() => {
+  const s = storage.value
+  if (!s)
+    return 0
+  const total = Number(s.data.total_bytes)
+  return total > 0 ? (total - Number(s.data.free_bytes)) / total : 0
+})
 
 // пулы: показываем только занятые и стоящие на паузе — свободные не
 // требуют внимания и сворачиваются в одну строку
@@ -106,7 +127,12 @@ const busyPools = computed(() =>
               >
                 <UIcon name="i-lucide-circle-x" class="size-4 shrink-0 self-center text-error" />
                 <span class="font-medium text-highlighted">{{ run.dag_name }}</span>
-                <span class="text-muted">провал</span>
+                <template v-if="run.task">
+                  <span class="text-muted">упал таск</span>
+                  <span class="font-medium">{{ run.task }}</span>
+                  <span v-if="run.exit_reason" class="truncate font-mono text-xs text-error">{{ run.exit_reason }}</span>
+                </template>
+                <span v-else class="text-muted">провал</span>
                 <span class="truncate font-mono text-xs text-dimmed">{{ run.run_id }}</span>
                 <span class="ms-auto shrink-0 text-xs text-muted"><RelativeTime :time="run.finished_at" /></span>
               </NuxtLink>
@@ -207,7 +233,36 @@ const busyPools = computed(() =>
             </UCard>
           </section>
 
-          <section class="lg:col-span-2">
+          <section v-if="storage">
+            <SectionHeader title="Хранилище артефактов" />
+            <UCard :ui="{ body: 'p-4 sm:p-4' }">
+              <div class="space-y-2 text-sm">
+                <div class="flex items-baseline justify-between gap-2">
+                  <span>Артефакты</span>
+                  <span class="text-xs tabular-nums text-muted">{{ formatBytes(storage.data.used_bytes) }}</span>
+                </div>
+                <div class="flex items-baseline justify-between gap-2">
+                  <span>Логи тасков</span>
+                  <span class="text-xs tabular-nums text-muted">{{ formatBytes(storage.logs.used_bytes) }}</span>
+                </div>
+                <div class="flex items-baseline justify-between gap-2 border-t border-default pt-2">
+                  <span class="text-muted">Свободно на volume</span>
+                  <span class="text-xs tabular-nums text-muted">
+                    {{ formatBytes(storage.data.free_bytes) }} из {{ formatBytes(storage.data.total_bytes) }}
+                  </span>
+                </div>
+                <div class="h-1.5 w-full overflow-hidden rounded-full bg-elevated">
+                  <div
+                    class="h-full rounded-full"
+                    :class="volumeUsedShare > 0.9 ? 'bg-error' : volumeUsedShare > 0.75 ? 'bg-warning' : 'bg-primary'"
+                    :style="{ width: `${Math.min(100, volumeUsedShare * 100)}%` }"
+                  />
+                </div>
+              </div>
+            </UCard>
+          </section>
+
+          <section :class="storage ? '' : 'lg:col-span-2'">
             <SectionHeader title="Длительность ранов (неделя)" />
             <UCard :ui="{ body: 'p-4 sm:p-4' }">
               <DashboardDurationList v-if="data.dag_durations?.length" :items="data.dag_durations" />

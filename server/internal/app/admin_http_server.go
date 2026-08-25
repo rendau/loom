@@ -1,13 +1,12 @@
 package app
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
-	json "github.com/goccy/go-json"
 
 	"github.com/rendau/loom/server/internal/config"
 )

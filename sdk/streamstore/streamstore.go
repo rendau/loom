@@ -14,6 +14,7 @@ package streamstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,7 +27,6 @@ import (
 	"sync"
 	"time"
 
-	json "github.com/goccy/go-json"
 	"github.com/samber/lo"
 )
 

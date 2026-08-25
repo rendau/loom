@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"time"
 
-	json "github.com/goccy/go-json"
 	"github.com/samber/lo"
 
 	"github.com/rendau/loom/server/internal/domain/dag/manifest"

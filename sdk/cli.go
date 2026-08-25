@@ -2,6 +2,7 @@ package loom
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -10,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	json "github.com/goccy/go-json"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 

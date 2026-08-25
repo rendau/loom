@@ -4,9 +4,9 @@
 package manifest
 
 import (
+	"encoding/json"
 	"fmt"
 
-	json "github.com/goccy/go-json"
 	"github.com/samber/lo"
 
 	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"

@@ -9,6 +9,7 @@ package dockerexecutor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -17,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	json "github.com/goccy/go-json"
 	"github.com/samber/lo"
 	k8sResource "k8s.io/apimachinery/pkg/api/resource"
 

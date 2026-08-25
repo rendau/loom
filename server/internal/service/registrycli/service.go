@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -20,8 +21,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	json "github.com/goccy/go-json"
 )
 
 const (

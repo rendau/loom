@@ -1,9 +1,9 @@
 package dto
 
 import (
+	"encoding/json"
 	"fmt"
 
-	json "github.com/goccy/go-json"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 

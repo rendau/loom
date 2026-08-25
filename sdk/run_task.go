@@ -2,6 +2,7 @@ package loom
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,8 +10,6 @@ import (
 	"os"
 	"strconv"
 	"time"
-
-	json "github.com/goccy/go-json"
 )
 
 // Env-контракт контейнера таска: executor передаёт параметры запуска через

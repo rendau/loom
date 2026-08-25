@@ -7,6 +7,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	json "github.com/goccy/go-json"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 

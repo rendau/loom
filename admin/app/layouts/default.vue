@@ -21,6 +21,24 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
   return [items, adminItems]
 })
 
+const { theme, setTheme, themes } = useLoomTheme()
+
+// Выбор цветовой темы: галочка у активной (type: 'checkbox' — Nuxt UI
+// сам рисует индикатор), подпись — характер палитры.
+const themeMenuItems = computed<DropdownMenuItem[][]>(() => [
+  themes.map(t => ({
+    label: t.label,
+    description: t.description,
+    type: 'checkbox' as const,
+    checked: theme.value === t.value,
+    onSelect: (e: Event) => {
+      // без preventDefault меню закрывается раньше, чем применится тема
+      e.preventDefault()
+      setTheme(t.value)
+    },
+  })),
+])
+
 const userMenuItems = computed<DropdownMenuItem[][]>(() => [[
   {
     label: me.value?.username ?? '',
@@ -65,15 +83,28 @@ const userMenuItems = computed<DropdownMenuItem[][]>(() => [[
       </template>
 
       <template #footer="{ collapsed }">
-        <UDropdownMenu :items="userMenuItems" class="w-full">
-          <UButton
-            icon="i-lucide-circle-user"
-            :label="collapsed ? undefined : (me?.username ?? 'Профиль')"
-            color="neutral"
-            variant="ghost"
-            block
-          />
-        </UDropdownMenu>
+        <!-- свёрнутый сайдбар — узкая колонка: профиль и тема друг под другом -->
+        <div class="flex w-full gap-1" :class="collapsed ? 'flex-col' : 'items-center'">
+          <UDropdownMenu :items="userMenuItems" :class="collapsed ? 'w-full' : 'flex-1 min-w-0'">
+            <UButton
+              icon="i-lucide-circle-user"
+              :label="collapsed ? undefined : (me?.username ?? 'Профиль')"
+              color="neutral"
+              variant="ghost"
+              block
+            />
+          </UDropdownMenu>
+
+          <UDropdownMenu :items="themeMenuItems" :class="collapsed ? 'w-full' : undefined">
+            <UButton
+              icon="i-lucide-palette"
+              color="neutral"
+              variant="ghost"
+              :block="collapsed"
+              aria-label="Цветовая тема"
+            />
+          </UDropdownMenu>
+        </div>
       </template>
     </UDashboardSidebar>
 

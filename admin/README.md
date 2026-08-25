@@ -26,6 +26,21 @@ Gateway при этом должен быть запущен с `HTTP_CORS=true`
 
 Проверки: `pnpm typecheck` и `pnpm lint`.
 
+## Цветовые темы
+
+Три темы — `emerald` (по умолчанию), `indigo`, `amber`. Тема = акцент
+(`primary`) + затонированная под него нейтральная шкала, из которой Nuxt UI
+берёт фон, карточки, границы и текст; семантика статусов
+(success/error/warning/info) от темы не зависит.
+
+Палитры — в `app/assets/css/main.css` (селекторы
+`:root[data-loom-theme='…']`, переопределяют те же переменные
+`--ui-color-primary-*` / `--ui-color-neutral-*`, что Nuxt UI генерит из
+app.config), выбор — `useLoomTheme` (localStorage, предпочтение браузера),
+переключатель — кнопка-палитра в подвале сайдбара. Смена темы работает без
+пересборки; `plugins/loom-theme.client.ts` ставит атрибут на `<html>` до
+первого рендера, поэтому вспышки старой палитры нет.
+
 ## Прод: раздача от control plane server
 
 `make build-admin` (в корне репо) собирает статику (`pnpm generate` →
@@ -48,7 +63,9 @@ app/
   api/         # тонкие типизированные вызовы gateway (client.ts — flattenQuery)
   types/       # DTO (зеркало api/proto/server_v1)
   composables/ # useApiAction (loading + тосты), useAuth (сессия и права),
-               # usePolling (тик + пауза на скрытой вкладке), useTimeTick
+               # usePolling (тик + пауза на скрытой вкладке), useTimeTick,
+               # useLoomTheme (выбор цветовой темы)
+  plugins/     # loom-theme.client — тема на <html> до первого рендера
   utils/       # config (рантайм-конфиг), format (даты/relative/байты), status
                # (цвет+подпись+иконка), table (denseTableUi), runenv (резолв
                # env-привязок), logparse (logfmt/JSON/ANSI), auth (токен)

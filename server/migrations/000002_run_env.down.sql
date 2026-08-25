@@ -1,1 +1,1 @@
-drop table run_env;
+drop table if exists run_env cascade;

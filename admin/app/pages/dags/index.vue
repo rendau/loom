@@ -120,9 +120,11 @@ onMounted(async () => {
 
 onUnmounted(stopRegPolling)
 
-// регистрация дага по образу (асинхронная: describe выполняется в фоне)
+// регистрация дагов по образам (асинхронная: describe выполняется в фоне);
+// образов можно ввести сразу несколько — по строке, через запятую и т.п.
 const registerOpen = ref(false)
-const registerImage = ref('')
+const registerImages = ref('')
+const registerBusy = ref(false)
 const registerAutoUpdate = ref(false)
 const registerSchedule = ref('')
 const registerCatchup = ref(false)
@@ -139,6 +141,8 @@ const poolItems = computed(() => [
   ...pools.value.map(p => ({ label: `${p.name} · ${p.slots} слотов`, value: p.name })),
 ])
 
+const registerImageList = computed(() => parseImageList(registerImages.value))
+
 async function loadPools() {
   try {
     pools.value = (await listPools()).results ?? []
@@ -149,31 +153,61 @@ async function loadPools() {
 }
 
 async function submitRegister() {
-  const image = registerImage.value.trim()
-  if (!image)
+  const images = registerImageList.value
+  if (images.length === 0)
     return
 
   const schedule = registerSchedule.value.trim()
-  const rep = await action.run(() => registerDag({
-    image,
+  const settings = {
     auto_update: registerAutoUpdate.value,
     schedule: schedule || undefined,
     catchup: schedule ? registerCatchup.value : undefined,
     paused: schedule ? !registerStartScheduled.value : undefined,
     pool: registerPool.value === NO_POOL ? undefined : registerPool.value,
-  }), { success: 'Регистрация поставлена в очередь' })
+  }
 
-  if (rep) {
-    registerOpen.value = false
-    registerImage.value = ''
-    registerAutoUpdate.value = false
-    registerSchedule.value = ''
-    registerCatchup.value = false
-    registerStartScheduled.value = true
-    registerPool.value = NO_POOL
+  // RegisterDag принимает один образ — ставим в очередь по одному, но
+  // частичный успех не теряем: упавшие остаются в поле для повтора
+  const failed: { image: string, error: string }[] = []
+  registerBusy.value = true
+  try {
+    for (const image of images) {
+      try {
+        await registerDag({ image, ...settings })
+      }
+      catch (error) {
+        failed.push({ image, error: apiErrorMessage(error) })
+      }
+    }
+  }
+  finally {
+    registerBusy.value = false
+  }
+
+  const queued = images.length - failed.length
+  if (queued > 0) {
+    toast.add({
+      title: queued === 1 ? 'Регистрация поставлена в очередь' : `Регистраций поставлено в очередь: ${queued}`,
+      color: 'success',
+    })
     await loadRegistrations()
     ensureRegPolling()
   }
+  for (const f of failed)
+    toast.add({ title: `Не удалось поставить в очередь ${f.image}`, description: f.error, color: 'error' })
+
+  if (failed.length > 0) {
+    registerImages.value = failed.map(f => f.image).join('\n')
+    return
+  }
+
+  registerOpen.value = false
+  registerImages.value = ''
+  registerAutoUpdate.value = false
+  registerSchedule.value = ''
+  registerCatchup.value = false
+  registerStartScheduled.value = true
+  registerPool.value = NO_POOL
 }
 
 // модалки над дагом — общие компоненты (используются и карточкой дага)
@@ -446,18 +480,38 @@ const columns: TableColumn<Dag>[] = [
       </div>
 
       <!-- регистрация дага -->
-      <UModal v-model:open="registerOpen" title="Регистрация дага" description="Pull образа и describe выполняются в фоне — статус появится в панели над таблицей.">
+      <UModal v-model:open="registerOpen" title="Регистрация дагов" description="Pull образов и describe выполняются в фоне — статус появится в панели над таблицей.">
         <template #body>
           <div class="space-y-4">
-            <UFormField label="Docker-образ" hint="например registry/my-dag:latest">
-              <UInput
-                v-model="registerImage"
-                class="w-full"
-                placeholder="registry/my-dag:latest"
+            <UFormField label="Docker-образы" hint="можно списком: перенос строки, запятая, ; или пробел">
+              <UTextarea
+                v-model="registerImages"
+                class="w-full font-mono"
+                :rows="3"
+                autoresize
+                :maxrows="12"
+                placeholder="registry/my-dag:latest&#10;registry/other-dag:v2"
                 autofocus
-                @keyup.enter="submitRegister"
               />
             </UFormField>
+            <!-- разбор списка виден до отправки: настройки ниже уедут в каждый образ -->
+            <div v-if="registerImageList.length > 1" class="space-y-1.5">
+              <p class="text-xs text-muted">
+                Образов: {{ registerImageList.length }} — настройки ниже применятся к каждому.
+              </p>
+              <div class="flex flex-wrap gap-1">
+                <UBadge
+                  v-for="image in registerImageList"
+                  :key="image"
+                  color="neutral"
+                  variant="subtle"
+                  size="sm"
+                  class="font-mono"
+                >
+                  {{ image }}
+                </UBadge>
+              </div>
+            </div>
             <UCheckbox
               v-model="registerAutoUpdate"
               label="Авто-обновление образа"
@@ -490,7 +544,12 @@ const columns: TableColumn<Dag>[] = [
         <template #footer>
           <div class="flex w-full justify-end gap-2">
             <UButton color="neutral" variant="ghost" label="Отмена" @click="registerOpen = false" />
-            <UButton label="Зарегистрировать" :loading="action.loading.value" @click="submitRegister" />
+            <UButton
+              :label="registerImageList.length > 1 ? `Зарегистрировать (${registerImageList.length})` : 'Зарегистрировать'"
+              :disabled="registerImageList.length === 0"
+              :loading="registerBusy"
+              @click="submitRegister"
+            />
           </div>
         </template>
       </UModal>

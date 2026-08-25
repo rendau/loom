@@ -28,7 +28,67 @@ import (
 const (
 	readReconnectMinDelay = 200 * time.Millisecond
 	readReconnectMaxDelay = 3 * time.Second
+	// readReconnectBudget — предел ожидания artifact-сервера в разовом
+	// чтении (лог без follow, скачивание артефакта): дальше ждать нечего,
+	// и честная ошибка лучше бесконечно пустой панели в админке.
+	// follow-чтение живёт по другому правилу: оно обязано пережить рестарт
+	// artifact-сервера, поэтому реконнектится без предела.
+	readReconnectBudget = 10 * time.Second
 )
+
+// errReconnectGiveUp — бюджет реконнекта разового чтения исчерпан; вызывающий
+// отдаёт исходную причину обрыва, а не этот маркер.
+var errReconnectGiveUp = errors.New("reconnect budget exhausted")
+
+// reconnectLoop — политика переподключения read-стримов к artifact-серверу:
+// пауза с экспоненциальным backoff, а для разового чтения (bounded) — ещё и
+// предел суммарного ожидания. Прогресс (отданные строки/байты) начинает серию
+// заново: долгое чтение с несколькими обрывами не упирается в бюджет.
+type reconnectLoop struct {
+	bounded  bool
+	budget   time.Duration
+	minDelay time.Duration
+	maxDelay time.Duration
+
+	delay    time.Duration
+	deadline time.Time
+}
+
+func newReconnectLoop(bounded bool) *reconnectLoop {
+	return &reconnectLoop{
+		bounded:  bounded,
+		budget:   readReconnectBudget,
+		minDelay: readReconnectMinDelay,
+		maxDelay: readReconnectMaxDelay,
+		delay:    readReconnectMinDelay,
+	}
+}
+
+// wait выдерживает паузу перед следующей попыткой. progressed — успел ли
+// читатель получить данные в прошлой попытке. Возвращает errReconnectGiveUp,
+// когда ждать больше нельзя, или ошибку контекста.
+func (l *reconnectLoop) wait(ctx context.Context, progressed bool) error {
+	if progressed {
+		l.delay = l.minDelay
+		l.deadline = time.Time{}
+	}
+	if l.bounded {
+		switch {
+		case l.deadline.IsZero():
+			l.deadline = time.Now().Add(l.budget)
+		case !time.Now().Before(l.deadline):
+			return errReconnectGiveUp
+		}
+	}
+
+	select {
+	case <-time.After(l.delay):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	l.delay = min(l.delay*2, l.maxDelay)
+	return nil
+}
 
 type Service struct {
 	conn      *grpc.ClientConn
@@ -148,9 +208,11 @@ func (s *Service) GetStorageStats(ctx context.Context) (artifactModel.StorageSta
 // с продолжением с последнего отданного байта.
 func (s *Service) ReadArtifactTo(ctx context.Context, ref artifactModel.Ref, offset, limit int64, w io.Writer) error {
 	written := int64(0)
-	delay := readReconnectMinDelay
+	// follow тут нет — чтение всегда разовое, ждать сервер вечно незачем
+	loop := newReconnectLoop(true)
 
 	for {
+		before := written
 		err := s.readArtifactOnce(ctx, ref, offset+written, limit-written, limit > 0, w, &written)
 		if err == nil {
 			return nil
@@ -162,12 +224,12 @@ func (s *Service) ReadArtifactTo(ctx context.Context, ref artifactModel.Ref, off
 			return decodeArtifactErr(err)
 		}
 
-		select {
-		case <-time.After(delay):
-		case <-ctx.Done():
-			return ctx.Err()
+		if waitErr := loop.wait(ctx, written > before); waitErr != nil {
+			if errors.Is(waitErr, errReconnectGiveUp) {
+				return decodeArtifactErr(err)
+			}
+			return waitErr
 		}
-		delay = min(delay*2, readReconnectMaxDelay)
 	}
 }
 
@@ -273,9 +335,11 @@ func (e errReadFn) Error() string { return e.err.Error() }
 // читатель не замечает рестарта и не получает дублей.
 func (s *Service) ReadTaskLog(ctx context.Context, key tasklogModel.AttemptKey, afterSeq int64, follow bool, fn func([]tasklogModel.Entry) error) error {
 	seq := afterSeq
-	delay := readReconnectMinDelay
+	// разовое чтение не ждёт вечно: см. readReconnectBudget
+	loop := newReconnectLoop(!follow)
 
 	for {
+		before := seq
 		err := s.readTaskLogOnce(ctx, key, &seq, follow, fn)
 		if err == nil {
 			return nil
@@ -287,12 +351,12 @@ func (s *Service) ReadTaskLog(ctx context.Context, key tasklogModel.AttemptKey, 
 			return decodeLogErr(err)
 		}
 
-		select {
-		case <-time.After(delay):
-		case <-ctx.Done():
-			return ctx.Err()
+		if waitErr := loop.wait(ctx, seq > before); waitErr != nil {
+			if errors.Is(waitErr, errReconnectGiveUp) {
+				return decodeLogErr(err)
+			}
+			return waitErr
 		}
-		delay = min(delay*2, readReconnectMaxDelay)
 	}
 }
 

@@ -46,11 +46,13 @@ async function load(background = false) {
 
 // ── табы (?tab=): overview — дефолт ─────────────────────
 
-const tab = ref(route.query.tab === 'schema' ? 'schema' : 'overview')
+const knownTabs = ['overview', 'schema', 'settings']
+const tab = ref(knownTabs.includes(String(route.query.tab)) ? String(route.query.tab) : 'overview')
 
 const tabItems: TabsItem[] = [
   { label: 'Обзор', value: 'overview', icon: 'i-lucide-activity' },
   { label: 'Схема', value: 'schema', icon: 'i-lucide-workflow' },
+  { label: 'Настройки', value: 'settings', icon: 'i-lucide-settings-2' },
 ]
 
 watch(tab, () => {
@@ -301,6 +303,15 @@ const taskColumns: TableColumn<DagTask>[] = [
   { id: 'injections', header: 'Инъекции (env)' },
 ]
 
+// таба «Настройки»: эффективные ресурсы тасков + источник
+const resourceColumns: TableColumn<DagTask>[] = [
+  { accessorKey: 'name', header: 'Таск' },
+  { id: 'cpu', header: 'CPU (req/lim)' },
+  { id: 'memory', header: 'Память (req/lim)' },
+  { id: 'source', header: 'Источник' },
+  { id: 'actions', header: '' },
+]
+
 const regColumns: TableColumn<DagRegistration>[] = [
   { accessorKey: 'status', header: 'Статус' },
   { accessorKey: 'source', header: 'Источник' },
@@ -491,12 +502,10 @@ const regColumns: TableColumn<DagRegistration>[] = [
               (семплы executor'а) и может отсутствовать у коротких попыток.
             </p>
           </section>
-
-          <DagSettingsCard :dag-name="dagName" :can-manage="canManage" />
         </template>
 
         <!-- ── Схема: как даг устроен ── -->
-        <template v-else>
+        <template v-else-if="tab === 'schema'">
           <section>
             <SectionHeader title="Граф" />
             <RunDagGraph :manifest-tasks="dag.tasks" />
@@ -606,6 +615,53 @@ const regColumns: TableColumn<DagRegistration>[] = [
               <CopyText :text="dag.image_digest" mono />
             </MetaItem>
           </MetaGrid>
+        </template>
+
+        <!-- ── Настройки: хранение, лимиты, ресурсы тасков ── -->
+        <template v-else>
+          <DagSettingsCard :dag-name="dagName" :can-manage="canManage" />
+
+          <section>
+            <SectionHeader title="Ресурсы тасков" />
+            <UTable :data="dag.tasks" :columns="resourceColumns" :ui="denseTableUi">
+              <template #name-cell="{ row }">
+                <span class="font-medium">{{ row.original.name }}</span>
+              </template>
+              <template #cpu-cell="{ row }">
+                <span class="font-mono text-xs">
+                  {{ effectiveResources(row.original)?.cpu_request || '—' }} /
+                  {{ effectiveResources(row.original)?.cpu_limit || '—' }}
+                </span>
+              </template>
+              <template #memory-cell="{ row }">
+                <span class="font-mono text-xs">
+                  {{ effectiveResources(row.original)?.memory_request || '—' }} /
+                  {{ effectiveResources(row.original)?.memory_limit || '—' }}
+                </span>
+              </template>
+              <template #source-cell="{ row }">
+                <UBadge v-if="overrideByTask.has(row.original.name)" color="info" variant="subtle" size="sm">
+                  админка
+                </UBadge>
+                <span v-else class="text-xs text-muted">из кода</span>
+              </template>
+              <template #actions-cell="{ row }">
+                <div class="flex justify-end">
+                  <UTooltip v-if="canManage" text="Изменить лимиты таска">
+                    <UButton
+                      icon="i-lucide-pencil" size="xs" color="neutral" variant="ghost"
+                      aria-label="Изменить лимиты таска" @click="openResources(row.original.name)"
+                    />
+                  </UTooltip>
+                </div>
+              </template>
+            </UTable>
+            <p class="mt-1.5 flex items-center gap-1 text-xs text-muted">
+              <UIcon name="i-lucide-info" class="size-3.5 shrink-0" />
+              Показаны эффективные значения: непустое поле из админки перекрывает значение из
+              кода дага и применяется со следующего запуска попытки.
+            </p>
+          </section>
         </template>
       </template>
 

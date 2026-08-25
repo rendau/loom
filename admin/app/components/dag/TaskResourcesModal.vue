@@ -84,7 +84,8 @@ async function save() {
           v-for="f in fields"
           :key="f.key"
           :label="f.label"
-          :hint="manifestValue(f.key) ? `в коде: ${manifestValue(f.key)}` : 'в коде не задано'"
+          :help="manifestValue(f.key) ? `в коде: ${manifestValue(f.key)}` : 'в коде не задано'"
+          :ui="{ label: 'whitespace-nowrap' }"
         >
           <UInput
             v-model="values[f.key]"

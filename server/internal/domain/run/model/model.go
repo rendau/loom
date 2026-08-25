@@ -71,8 +71,8 @@ func TaskStatusTerminal(status string) bool {
 
 // Main — ран дага. Manifest — снапшот манифеста на момент триггера
 // (ран не зависит от последующих перерегистраций дага). Params — параметры
-// рана (raw JSON-объект, nil — без параметров), LogicalDate — «дата данных»
-//.
+// рана (raw JSON-объект, nil — без параметров), LogicalDate — «дата
+// данных».
 type Main struct {
 	Id          string
 	DagName     string

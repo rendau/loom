@@ -66,8 +66,9 @@ func (r *Repo) List(ctx context.Context, dagName *string) ([]*model.Main, error)
 	return result, nil
 }
 
-// GetValues — значения по скоупам для резолва: глобальный ('') всегда
-// включён, плюс перечисленные даги; map[dagName]map[name]value.
+// GetValues — значения по скоупам для резолва: глобальный (пустой
+// dag_name) всегда включён, плюс перечисленные даги;
+// map[dagName]map[name]value.
 func (r *Repo) GetValues(ctx context.Context, dagNames []string) (map[string]map[string]string, error) {
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
 		SELECT dag_name, name, value FROM setting

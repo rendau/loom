@@ -62,12 +62,24 @@ const activeRegistrations = computed(() =>
   registrations.value.filter(r => r.status === 'pending' || r.status === 'running'))
 
 // провалы за последние сутки: у новой (несозданной) записи дага это
-// единственное место увидеть причину
+// единственное место увидеть причину. Прочитанную плашку можно закрыть —
+// скрываем всё, что не новее отметки (отметка в localStorage, чтобы
+// закрытое не всплывало после перезагрузки); новый провал придёт позже
+// и покажется снова
+const FAILED_DISMISS_KEY = 'loom.dag-reg-failed-dismissed-at'
+const failedDismissedAt = ref(Number(localStorage.getItem(FAILED_DISMISS_KEY)) || 0)
+
 const failedRegistrations = computed(() => {
-  const dayAgo = Date.now() - 24 * 60 * 60 * 1000
+  const since = Math.max(Date.now() - 24 * 60 * 60 * 1000, failedDismissedAt.value)
   return registrations.value.filter(r =>
-    r.status === 'failed' && r.finished_at && new Date(r.finished_at).getTime() > dayAgo)
+    r.status === 'failed' && r.finished_at && new Date(r.finished_at).getTime() > since)
 })
+
+function dismissFailed() {
+  const newest = Math.max(...failedRegistrations.value.map(r => new Date(r.finished_at!).getTime()))
+  failedDismissedAt.value = newest
+  localStorage.setItem(FAILED_DISMISS_KEY, String(newest))
+}
 
 // даг «обновляется»: активная регистрация с его именем (auto) или образом
 function isUpdating(dag: Dag): boolean {
@@ -360,7 +372,11 @@ const columns: TableColumn<Dag>[] = [
 
       <!-- активные и недавно провалившиеся регистрации: пачка сворачивается
            в одну строку, иначе список дагов уезжает за экран -->
-      <DagRegistrationQueue :active="activeRegistrations" :failed="failedRegistrations" />
+      <DagRegistrationQueue
+        :active="activeRegistrations"
+        :failed="failedRegistrations"
+        @dismiss-failed="dismissFailed"
+      />
 
       <UTable
         :data="dags"

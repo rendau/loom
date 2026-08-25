@@ -10,6 +10,10 @@ const props = defineProps<{
   failed: DagRegistration[]
 }>()
 
+// провалы висят сутки — прочитанную причину надо уметь убрать с глаз
+// (активные закрывать нечем: они уходят сами, когда доедут)
+const emit = defineEmits<{ dismissFailed: [] }>()
+
 const runningCount = computed(() => props.active.filter(r => r.status === 'running').length)
 
 const activeTitle = computed(() =>
@@ -73,7 +77,9 @@ const failedTitle = computed(() =>
       color="error"
       variant="subtle"
       icon="i-lucide-circle-x"
+      close
       :title="failedTitle"
+      @update:open="emit('dismissFailed')"
     >
       <template #description>
         <p v-if="failed.length === 1">{{ failed[0]!.error }}</p>

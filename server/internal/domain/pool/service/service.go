@@ -28,8 +28,8 @@ func (s *Service) List(ctx context.Context) ([]*model.Main, error) {
 	return items, nil
 }
 
-// Set создаёт пул или меняет число слотов существующего. Удаления пулов нет
-//: на пул могут ссылаться манифесты дагов и ранов; slots = 0
+// Set создаёт пул или меняет число слотов существующего. Удаления пулов
+// нет: на пул могут ссылаться манифесты дагов и ранов; slots = 0
 // ставит пул на паузу.
 func (s *Service) Set(ctx context.Context, name string, slots int) error {
 	if !nameRe.MatchString(name) {

@@ -19,8 +19,9 @@ type plan struct {
 // buildPlan — чистая функция раскрутки графа.
 //
 // Готовность pending-таска: обычное ребро (After) ждёт success отправителя;
-// стримовое (AfterStreamed) — ко-старт, достаточно starting/running/success
-//. Падение любой зависимости каскадно валит pending-потомков
+// стримовое (AfterStreamed) — ко-старт, достаточно
+// starting/running/success. Падение любой зависимости каскадно валит
+// pending-потомков
 // в upstream_failed. Ран завершён, когда все таски терминальны.
 func buildPlan(tasks []dagModel.Task, statuses map[string]string) plan {
 	result := plan{}

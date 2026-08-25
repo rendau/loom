@@ -1,5 +1,5 @@
-// Package k8sexecutor — kubernetes-реализация executor-порта планировщика
-//: 1 pod (Job с backoffLimit=0) = 1 attempt, ретраями управляет
+// Package k8sexecutor — kubernetes-реализация executor-порта
+// планировщика: 1 pod (Job с backoffLimit=0) = 1 attempt, ретраями управляет
 // планировщик loom, не k8s. Наблюдение — informer по подам с лейблом loom;
 // идентификация попытки — в аннотациях (значения лейблов ограничены 63
 // символами, run id может быть длиннее).

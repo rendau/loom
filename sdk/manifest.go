@@ -30,16 +30,19 @@ type TaskManifest struct {
 }
 
 // SecretManifest — инъекция секрета control plane в env контейнера таска.
+// Description необязателен: подсказка тому, кто заполняет значение в админке.
 type SecretManifest struct {
-	Env    string `json:"env"`
-	Secret string `json:"secret"`
+	Env         string `json:"env"`
+	Secret      string `json:"secret"`
+	Description string `json:"description,omitempty"`
 }
 
 // VariableManifest — инъекция переменной control plane в env контейнера
 // таска (значение, в отличие от секрета, видно в админке).
 type VariableManifest struct {
-	Env      string `json:"env"`
-	Variable string `json:"variable"`
+	Env         string `json:"env"`
+	Variable    string `json:"variable"`
+	Description string `json:"description,omitempty"`
 }
 
 type DepManifest struct {
@@ -73,12 +76,12 @@ func (d *DAG) Manifest() Manifest {
 			}
 			if len(t.secrets) > 0 {
 				m.Secrets = lo.Map(t.secrets, func(s secretRef, _ int) SecretManifest {
-					return SecretManifest{Env: s.env, Secret: s.secret}
+					return SecretManifest{Env: s.env, Secret: s.secret, Description: s.desc}
 				})
 			}
 			if len(t.variables) > 0 {
 				m.Variables = lo.Map(t.variables, func(v variableRef, _ int) VariableManifest {
-					return VariableManifest{Env: v.env, Variable: v.variable}
+					return VariableManifest{Env: v.env, Variable: v.variable, Description: v.desc}
 				})
 			}
 			if t.resources != (ResourceSpec{}) {

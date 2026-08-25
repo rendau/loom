@@ -32,13 +32,15 @@ type manifestTask struct {
 }
 
 type manifestSecret struct {
-	Env    string `json:"env"`
-	Secret string `json:"secret"`
+	Env         string `json:"env"`
+	Secret      string `json:"secret"`
+	Description string `json:"description"`
 }
 
 type manifestVariable struct {
-	Env      string `json:"env"`
-	Variable string `json:"variable"`
+	Env         string `json:"env"`
+	Variable    string `json:"variable"`
+	Description string `json:"description"`
 }
 
 type manifestDep struct {
@@ -76,10 +78,10 @@ func encodeManifestTask(v manifestTask, _ int) dagModel.Task {
 		TimeoutSec:    v.TimeoutSec,
 		Priority:      v.Priority,
 		Secrets: lo.Map(v.Secrets, func(s manifestSecret, _ int) dagModel.SecretRef {
-			return dagModel.SecretRef{Env: s.Env, Secret: s.Secret}
+			return dagModel.SecretRef{Env: s.Env, Secret: s.Secret, Description: s.Description}
 		}),
 		Variables: lo.Map(v.Variables, func(vr manifestVariable, _ int) dagModel.VariableRef {
-			return dagModel.VariableRef{Env: vr.Env, Variable: vr.Variable}
+			return dagModel.VariableRef{Env: vr.Env, Variable: vr.Variable, Description: vr.Description}
 		}),
 	}
 	if v.Resources != nil {

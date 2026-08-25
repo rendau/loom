@@ -65,18 +65,20 @@ type TaskResourcesEntry struct {
 	ModifiedAt time.Time
 }
 
-// SecretRef — инъекция секрета control plane в env контейнера таска
-// .
+// SecretRef — инъекция секрета control plane в env контейнера таска.
+// Description — необязательная подсказка из кода дага для админки.
 type SecretRef struct {
-	Env    string
-	Secret string
+	Env         string
+	Secret      string
+	Description string
 }
 
 // VariableRef — инъекция переменной control plane в env контейнера таска
 // (значение, в отличие от секрета, видно в админке).
 type VariableRef struct {
-	Env      string
-	Variable string
+	Env         string
+	Variable    string
+	Description string
 }
 
 // TaskResources — ресурсы контейнера попытки (kubernetes quantities).

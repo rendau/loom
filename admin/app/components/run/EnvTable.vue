@@ -13,9 +13,10 @@ const props = defineProps<{
   snapshot?: boolean
 }>()
 
+// тип — иконкой слева от имени: отдельная колонка ради двух слов съедала
+// место, которое нужнее значению
 const columns: TableColumn<RunEnvBinding>[] = [
   { id: 'source', header: 'Имя' },
-  { accessorKey: 'kind', header: 'Тип' },
   { id: 'value', header: 'Значение' },
 ]
 
@@ -32,19 +33,17 @@ function envLink(b: RunEnvBinding): string {
 <template>
   <div>
     <UTable :data="bindings" :columns="columns" :ui="denseTableUi">
-      <template #kind-cell="{ row }">
-        <UBadge
-          :color="row.original.kind === 'secret' ? 'warning' : 'neutral'"
-          variant="subtle"
-          size="sm"
-        >
-          <UIcon :name="row.original.kind === 'secret' ? 'i-lucide-key-round' : 'i-lucide-variable'" class="size-3" />
-          {{ row.original.kind === 'secret' ? 'секрет' : 'переменная' }}
-        </UBadge>
-      </template>
-
       <template #source-cell="{ row }">
         <div class="flex items-center gap-1.5">
+          <UTooltip
+            :text="`${row.original.kind === 'secret' ? 'секрет' : 'переменная'} · в контейнере: ${row.original.env}`"
+          >
+            <UIcon
+              :name="row.original.kind === 'secret' ? 'i-lucide-key-round' : 'i-lucide-variable'"
+              class="size-3.5 shrink-0"
+              :class="row.original.kind === 'secret' ? 'text-warning' : 'text-dimmed'"
+            />
+          </UTooltip>
           <UTooltip :text="`в контейнере: ${row.original.env}`">
             <NuxtLink :to="envLink(row.original)" class="font-mono text-xs font-medium text-highlighted hover:text-primary hover:underline">
               {{ row.original.name }}
@@ -60,7 +59,7 @@ function envLink(b: RunEnvBinding): string {
 
       <template #value-cell="{ row }">
         <template v-if="row.original.kind === 'variable' && row.original.value !== undefined">
-          <span class="block max-w-80 truncate font-mono text-xs" :title="row.original.value">
+          <span class="block max-w-80 truncate font-mono text-xs font-medium text-highlighted" :title="row.original.value">
             {{ row.original.value || '—' }}
           </span>
         </template>

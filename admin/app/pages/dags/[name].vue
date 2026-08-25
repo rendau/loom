@@ -44,16 +44,34 @@ async function load(background = false) {
   }
 }
 
+// ── переменные и секреты дага (таба «Env») ──────────────
+
+// состав — из манифеста, заполненность — из записей админки; счётчик
+// «не заполнено» нужен на бейдже табы до её открытия, поэтому грузим
+// здесь, а не в самой карточке
+const dagTasks = computed(() => dag.value?.tasks ?? [])
+const dagEnv = useDagEnvRequirements(computed(() => dagName), dagTasks)
+
 // ── табы (?tab=): overview — дефолт ─────────────────────
 
-const knownTabs = ['overview', 'schema', 'settings']
+const knownTabs = ['overview', 'schema', 'env', 'settings']
 const tab = ref(knownTabs.includes(String(route.query.tab)) ? String(route.query.tab) : 'overview')
 
-const tabItems: TabsItem[] = [
+// бейдж табы — число незаполненных: даг с пустой переменной упадёт
+// launch_failed, и это надо видеть, не открывая табу
+const tabItems = computed<TabsItem[]>(() => [
   { label: 'Обзор', value: 'overview', icon: 'i-lucide-activity' },
   { label: 'Схема', value: 'schema', icon: 'i-lucide-workflow' },
+  {
+    label: 'Env',
+    value: 'env',
+    icon: 'i-lucide-key-round',
+    badge: dagEnv.missing.value > 0
+      ? { label: String(dagEnv.missing.value), color: 'error' as const, variant: 'subtle' as const }
+      : undefined,
+  },
   { label: 'Настройки', value: 'settings', icon: 'i-lucide-settings-2' },
-]
+])
 
 watch(tab, () => {
   const query = { ...route.query } as Record<string, string>
@@ -135,7 +153,7 @@ function openResources(taskName: string) {
 // пока идёт регистрация/обновление — частый поллинг карточки; раны
 // обновляются фоновым тиком на табе «Обзор»
 onMounted(async () => {
-  await Promise.all([load(), loadRuns(), loadStats(), loadOverrides()])
+  await Promise.all([load(), loadRuns(), loadStats(), loadOverrides(), dagEnv.load()])
 })
 usePolling(() => load(true), 3000, () => isUpdating.value)
 usePolling(() => {
@@ -329,6 +347,18 @@ const regColumns: TableColumn<DagRegistration>[] = [
         </template>
         <template #right>
           <UBadge v-if="dag?.paused" color="warning" variant="subtle" size="lg">пауза</UBadge>
+          <UTooltip v-if="dagEnv.missing.value > 0" text="Запуск таска упадёт launch_failed — заполните значения">
+            <UBadge
+              color="error"
+              variant="subtle"
+              size="lg"
+              class="cursor-pointer"
+              @click="tab = 'env'"
+            >
+              <UIcon name="i-lucide-triangle-alert" />
+              не заполнено: {{ dagEnv.missing.value }}
+            </UBadge>
+          </UTooltip>
           <UBadge v-if="isUpdating" color="info" variant="subtle" size="lg">
             <UIcon name="i-lucide-loader-circle" class="animate-spin" />
             обновляется
@@ -614,6 +644,17 @@ const regColumns: TableColumn<DagRegistration>[] = [
               <CopyText :text="dag.image_digest" mono />
             </MetaItem>
           </MetaGrid>
+        </template>
+
+        <!-- ── Env: что даг требует от окружения ── -->
+        <template v-else-if="tab === 'env'">
+          <DagEnvCard
+            :dag-name="dagName"
+            :requirements="dagEnv.requirements.value"
+            :loading="dagEnv.loading.value"
+            :load-error="dagEnv.loadError.value"
+            @reload="dagEnv.load()"
+          />
         </template>
 
         <!-- ── Настройки: хранение, лимиты, ресурсы тасков ── -->

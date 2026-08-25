@@ -2,6 +2,7 @@ package loom
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -110,4 +111,34 @@ func TestManifest(t *testing.T) {
 		Name:      "load",
 		DependsOn: []DepManifest{{Task: "transform"}},
 	}, m.Tasks[2])
+}
+
+// описание env-привязок необязательно, но если задано — уезжает в манифест:
+// по нему админка подсказывает, что от заполняющего ждут
+func TestManifestEnvDescription(t *testing.T) {
+	d := New("etl")
+	d.Task("load", nopTask,
+		Variable("PG_DSN", "pg_dsn", "  DSN основной БД  "),
+		Variable("BATCH", "batch_size"),
+		Secret("S3_KEY", "s3_key", "ключ доступа к бакету выгрузок"),
+		Secret("S3_SECRET", "s3_secret"),
+	)
+
+	m := d.Manifest()
+	require.Len(t, m.Tasks, 1)
+
+	assert.Equal(t, []VariableManifest{
+		{Env: "PG_DSN", Variable: "pg_dsn", Description: "DSN основной БД"},
+		{Env: "BATCH", Variable: "batch_size"},
+	}, m.Tasks[0].Variables)
+	assert.Equal(t, []SecretManifest{
+		{Env: "S3_KEY", Secret: "s3_key", Description: "ключ доступа к бакету выгрузок"},
+		{Env: "S3_SECRET", Secret: "s3_secret"},
+	}, m.Tasks[0].Secrets)
+
+	// в JSON пустое описание не попадает — манифесты старых дагов не меняются
+	raw, err := json.Marshal(m)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `"variable":"pg_dsn","description":"DSN основной БД"`)
+	assert.Contains(t, string(raw), `"variable":"batch_size"}`)
 }

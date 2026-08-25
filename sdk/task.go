@@ -2,6 +2,7 @@ package loom
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -27,11 +28,13 @@ type Task struct {
 type secretRef struct {
 	env    string // имя env-переменной в контейнере таска
 	secret string // имя секрета на control plane
+	desc   string // человекочитаемое описание (для админки), необязательно
 }
 
 type variableRef struct {
 	env      string // имя env-переменной в контейнере таска
 	variable string // имя переменной на control plane
+	desc     string // человекочитаемое описание (для админки), необязательно
 }
 
 type taskDep struct {
@@ -109,8 +112,14 @@ func Priority(n int) TaskOption {
 // через API/админку; отсутствующий на момент запуска секрет валит попытку
 // (launch_failed). Читайте значение обычным os.Getenv. В локальном режиме
 // игнорируется — задавайте переменную окружением процесса.
-func Secret(envName, secretName string) TaskOption {
-	return func(t *Task) { t.secrets = append(t.secrets, secretRef{env: envName, secret: secretName}) }
+//
+// Необязательный третий аргумент — описание секрета: оно уезжает в манифест
+// и показывается в админке рядом с полем ввода значения, чтобы заполняющий
+// не спрашивал у автора дага, что тут ожидается.
+func Secret(envName, secretName string, description ...string) TaskOption {
+	return func(t *Task) {
+		t.secrets = append(t.secrets, secretRef{env: envName, secret: secretName, desc: firstDesc(description)})
+	}
 }
 
 // Variable инъектит переменную control plane в env контейнера таска:
@@ -120,6 +129,21 @@ func Secret(envName, secretName string) TaskOption {
 // отсутствующая на момент запуска переменная валит попытку (launch_failed).
 // Читайте значение обычным os.Getenv. В локальном режиме игнорируется —
 // задавайте переменную окружением процесса.
-func Variable(envName, varName string) TaskOption {
-	return func(t *Task) { t.variables = append(t.variables, variableRef{env: envName, variable: varName}) }
+//
+// Необязательный третий аргумент — описание переменной: оно уезжает в
+// манифест и показывается в админке рядом с полем ввода значения, чтобы
+// заполняющий не спрашивал у автора дага, что тут ожидается.
+func Variable(envName, varName string, description ...string) TaskOption {
+	return func(t *Task) {
+		t.variables = append(t.variables, variableRef{env: envName, variable: varName, desc: firstDesc(description)})
+	}
+}
+
+// firstDesc — описание из вариадик-хвоста: лишние аргументы игнорируем,
+// чтобы опечатка в вызове не роняла даг на ровном месте.
+func firstDesc(description []string) string {
+	if len(description) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(description[0])
 }

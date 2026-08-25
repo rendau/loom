@@ -26,11 +26,15 @@ export interface TaskResourcesOverride {
 export interface DagTaskEnvSecret {
   env: string
   secret: string
+  // описание из кода дага (опция loom.Secret) — подсказка при заполнении
+  description?: string
 }
 
 export interface DagTaskEnvVariable {
   env: string
   variable: string
+  // описание из кода дага (опция loom.Variable) — подсказка при заполнении
+  description?: string
 }
 
 export interface DagTask {

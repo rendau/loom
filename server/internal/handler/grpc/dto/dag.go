@@ -50,10 +50,10 @@ func EncodeDagTaskMain(v domainModel.Task, _ int) *pb.DagTaskMain {
 		TimeoutSec:    int32(v.TimeoutSec),
 		Priority:      int32(v.Priority),
 		Secrets: lo.Map(v.Secrets, func(s domainModel.SecretRef, _ int) *pb.DagTaskEnvSecret {
-			return &pb.DagTaskEnvSecret{Env: s.Env, Secret: s.Secret}
+			return &pb.DagTaskEnvSecret{Env: s.Env, Secret: s.Secret, Description: s.Description}
 		}),
 		Variables: lo.Map(v.Variables, func(vr domainModel.VariableRef, _ int) *pb.DagTaskEnvVariable {
-			return &pb.DagTaskEnvVariable{Env: vr.Env, Variable: vr.Variable}
+			return &pb.DagTaskEnvVariable{Env: vr.Env, Variable: vr.Variable, Description: vr.Description}
 		}),
 	}
 	if v.Resources != nil {

@@ -21,6 +21,10 @@ const loading = ref(false)
 const loadError = ref('')
 const action = useApiAction()
 
+// даг требует переменных, значения которых ещё не заведены: до первого
+// запуска это больше нигде не видно
+const envGaps = useDagEnvGaps()
+
 async function load() {
   loading.value = true
   try {
@@ -35,6 +39,8 @@ async function load() {
     dags.value = rep.results
     totalCount.value = Number(rep.pagination_info.total_count)
     loadError.value = ''
+    // незаполненные переменные/секреты — по уже загруженным дагам
+    await envGaps.load(dags.value)
   }
   catch (error) {
     // ошибка загрузки — inline alert (тост исчезает, а страница остаётся пустой)
@@ -336,6 +342,12 @@ const columns: TableColumn<Dag>[] = [
         <template #name-cell="{ row }">
           <div class="flex items-center gap-2">
             <span class="font-medium text-highlighted">{{ row.original.name }}</span>
+            <UTooltip v-if="envGaps.missing(row.original.name)" text="Не заполнены переменные или секреты — запуск таска упадёт launch_failed">
+              <UBadge color="error" variant="subtle" size="sm">
+                <UIcon name="i-lucide-triangle-alert" class="size-3" />
+                env: {{ envGaps.missing(row.original.name) }}
+              </UBadge>
+            </UTooltip>
             <UBadge v-if="row.original.paused" color="warning" variant="subtle" size="sm">
               пауза
             </UBadge>

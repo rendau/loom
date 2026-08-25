@@ -351,9 +351,12 @@ func (x *DagTaskMain) GetVariables() []*DagTaskEnvVariable {
 }
 
 type DagTaskEnvSecret struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Env           string                 `protobuf:"bytes,1,opt,name=env,proto3" json:"env,omitempty"`       // имя env-переменной в контейнере
-	Secret        string                 `protobuf:"bytes,2,opt,name=secret,proto3" json:"secret,omitempty"` // имя секрета control plane
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Env    string                 `protobuf:"bytes,1,opt,name=env,proto3" json:"env,omitempty"`       // имя env-переменной в контейнере
+	Secret string                 `protobuf:"bytes,2,opt,name=secret,proto3" json:"secret,omitempty"` // имя секрета control plane
+	// Описание из кода дага (необязательное): подсказка тому, кто заполняет
+	// значение в админке.
+	Description   string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -402,10 +405,20 @@ func (x *DagTaskEnvSecret) GetSecret() string {
 	return ""
 }
 
+func (x *DagTaskEnvSecret) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
 type DagTaskEnvVariable struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Env           string                 `protobuf:"bytes,1,opt,name=env,proto3" json:"env,omitempty"`           // имя env-переменной в контейнере
-	Variable      string                 `protobuf:"bytes,2,opt,name=variable,proto3" json:"variable,omitempty"` // имя переменной control plane
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Env      string                 `protobuf:"bytes,1,opt,name=env,proto3" json:"env,omitempty"`           // имя env-переменной в контейнере
+	Variable string                 `protobuf:"bytes,2,opt,name=variable,proto3" json:"variable,omitempty"` // имя переменной control plane
+	// Описание из кода дага (необязательное): подсказка тому, кто заполняет
+	// значение в админке.
+	Description   string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -450,6 +463,13 @@ func (x *DagTaskEnvVariable) GetEnv() string {
 func (x *DagTaskEnvVariable) GetVariable() string {
 	if x != nil {
 		return x.Variable
+	}
+	return ""
+}
+
+func (x *DagTaskEnvVariable) GetDescription() string {
+	if x != nil {
+		return x.Description
 	}
 	return ""
 }
@@ -2111,13 +2131,15 @@ const file_server_v1_dag_proto_rawDesc = "" +
 	"\tvariables\x18\n" +
 	" \x03(\v2\x1d.server_v1.DagTaskEnvVariableR\tvariablesB\f\n" +
 	"\n" +
-	"_resourcesJ\x04\b\a\x10\b\"<\n" +
+	"_resourcesJ\x04\b\a\x10\b\"^\n" +
 	"\x10DagTaskEnvSecret\x12\x10\n" +
 	"\x03env\x18\x01 \x01(\tR\x03env\x12\x16\n" +
-	"\x06secret\x18\x02 \x01(\tR\x06secret\"B\n" +
+	"\x06secret\x18\x02 \x01(\tR\x06secret\x12 \n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\"d\n" +
 	"\x12DagTaskEnvVariable\x12\x10\n" +
 	"\x03env\x18\x01 \x01(\tR\x03env\x12\x1a\n" +
-	"\bvariable\x18\x02 \x01(\tR\bvariable\"@\n" +
+	"\bvariable\x18\x02 \x01(\tR\bvariable\x12 \n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\"@\n" +
 	"\x0eDagTaskDepMain\x12\x12\n" +
 	"\x04task\x18\x01 \x01(\tR\x04task\x12\x1a\n" +
 	"\bstreamed\x18\x02 \x01(\bR\bstreamed\"\x9a\x01\n" +

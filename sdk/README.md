@@ -78,9 +78,19 @@ go run . run --params='{"day":"x"}'  # с параметрами рана
 - **Таска**: `After(dep)` — ждать успеха отправителя; `AfterStreamed(dep)` —
   ко-старт и чтение по мере записи; `Retries(n)`, `RetryDelay(d)`,
   `Timeout(d)`, `Resources(spec)`, `Priority(n)`,
-  `Secret(envName, secretName)`, `Variable(envName, varName)` — инъекции
-  секретов и переменных control plane в env контейнера (в локальном режиме
-  не инжектятся — задавайте окружением процесса).
+  `Secret(envName, secretName[, description])`,
+  `Variable(envName, varName[, description])` — инъекции секретов и
+  переменных control plane в env контейнера (в локальном режиме не
+  инжектятся — задавайте окружением процесса). Необязательное описание
+  уезжает в манифест: админка показывает по нему, какие переменные нужны
+  дагу и что в них класть, — спрашивать автора дага не приходится.
+
+  ```go
+  dag.Task("load", loadFn,
+      loom.Variable("PG_DSN", "pg_dsn", "DSN основной БД, формат postgres://…"),
+      loom.Secret("S3_KEY", "s3_key", "ключ доступа к бакету выгрузок"),
+  )
+  ```
 - **Runtime**: `Output`/`Input` — стримы артефактов; `PushValue`/`PullValue` —
   мелкие значения (аналог XCom, ≤64KB); `Params`/`BindParams` — параметры
   рана; `LogicalDate` — «дата данных»; `Log()` — логгер (в распределённом

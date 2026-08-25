@@ -207,11 +207,17 @@ message DagTaskMain {
 message DagTaskEnvSecret {
   string env = 1;    // имя env-переменной в контейнере
   string secret = 2; // имя секрета control plane
+  // Описание из кода дага (необязательное): подсказка тому, кто заполняет
+  // значение в админке.
+  string description = 3;
 }
 
 message DagTaskEnvVariable {
   string env = 1;      // имя env-переменной в контейнере
   string variable = 2; // имя переменной control plane
+  // Описание из кода дага (необязательное): подсказка тому, кто заполняет
+  // значение в админке.
+  string description = 3;
 }
 
 message DagTaskDepMain {

@@ -18,6 +18,12 @@ const storage = ref<StorageStats | null>(null)
 const loading = ref(false)
 const loadError = ref('')
 
+// даги с незаполненными переменными/секретами: состав задаёт код дага,
+// значения — админка, и до первого падения launch_failed о разрыве никто
+// не узнаёт. Меняется редко — обновляем не фоновым тиком, а вместе с
+// явной загрузкой обзора.
+const envGaps = useDagEnvGaps()
+
 async function load(background = false) {
   if (!background)
     loading.value = true
@@ -29,6 +35,9 @@ async function load(background = false) {
     data.value = dashboard
     activeRuns.value = running.results
     loadError.value = ''
+
+    if (!background)
+      await envGaps.load()
 
     // ёмкость хранилища — best effort (недоступный artifact-сервер не
     // валит обзор)
@@ -75,8 +84,14 @@ function isSlow(run: Run): boolean {
 
 const slowRuns = computed(() => activeRuns.value.filter(isSlow))
 
+const envGapDags = computed(() => [...envGaps.gaps.value.entries()]
+  .map(([dagName, missing]) => ({ dagName, missing }))
+  .sort((a, b) => b.missing - a.missing))
+
 const needsAttention = computed(() =>
-  (data.value?.recent_failures?.length ?? 0) > 0 || slowRuns.value.length > 0)
+  (data.value?.recent_failures?.length ?? 0) > 0
+  || slowRuns.value.length > 0
+  || envGapDags.value.length > 0)
 
 // доля занятого места на volume хранилища (для прогресса и подсветки)
 const volumeUsedShare = computed(() => {
@@ -137,6 +152,18 @@ const busyPools = computed(() =>
                 <span class="ms-auto shrink-0 text-xs text-muted"><RelativeTime :time="run.finished_at" /></span>
               </NuxtLink>
               <NuxtLink
+                v-for="gap in envGapDags"
+                :key="gap.dagName"
+                :to="`/dags/${encodeURIComponent(gap.dagName)}?tab=env`"
+                class="flex items-baseline gap-2 rounded-md px-2 py-1 text-sm hover:bg-elevated"
+              >
+                <UIcon name="i-lucide-key-round" class="size-4 shrink-0 self-center text-error" />
+                <span class="font-medium text-highlighted">{{ gap.dagName }}</span>
+                <span class="text-muted">
+                  не заполнено переменных и секретов: {{ gap.missing }} — таски упадут launch_failed
+                </span>
+              </NuxtLink>
+              <NuxtLink
                 v-for="run in slowRuns"
                 :key="run.id"
                 :to="`/runs/${encodeURIComponent(run.id)}`"
@@ -150,7 +177,7 @@ const busyPools = computed(() =>
             </div>
             <p v-else class="flex items-center gap-2 px-2 py-1 text-sm text-muted">
               <UIcon name="i-lucide-circle-check" class="size-4 text-success" />
-              Провалов нет, зависших ранов нет.
+              Провалов нет, зависших ранов нет, переменные дагов заполнены.
             </p>
           </UCard>
         </section>

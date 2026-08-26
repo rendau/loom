@@ -225,10 +225,11 @@
 ## Деплой
 
 Helm-чарты живут в отдельной репе — в этой их нет и на них не оглядываемся.
-Для локальной проверки **k8s-режима** (Job'ы тасков и describe) есть
-dev-стенд `deploy/dev-k8s/` под docker-desktop — см. его README; контекст
-kubectl указывать явно (`--context docker-desktop`), дефолтный может
-смотреть на боевой кластер.
+Dev-стенд — `deploy/dev-stand/`: инфраструктура (Postgres, registry) в
+kubernetes docker-desktop, процессы loom нативно (`go run`, `pnpm dev`),
+таски — docker-контейнерами. Порты и доступы зафиксированы в его README,
+менять их не нужно. Контекст kubectl указывать явно
+(`--context docker-desktop`), дефолтный может смотреть на боевой кластер.
 CI (`.github/workflows/ci.yml`) пересобирает и пушит образ только при
 изменении content-хэша его входов (git-блобы модуля + общие `api/`/`sdk/`,
 для server ещё `admin/`): digest тега `latest` без изменений не меняется, и
@@ -245,21 +246,17 @@ cd examples && go run ./multi-dag run --dag=orders_etl
 ```
 
 Интеграционные тесты `server/test` требуют Postgres: `TEST_PG_DSN=postgres://...`
-(без него — skip). БД поднимать **только через docker** (не через
-Postgres.app/initdb) и **без `--rm`**: контейнер с `--rm` умирает на
-`docker stop` вместе с данными, а их регулярно хочется посмотреть после
-падения — стенд должен переживать остановку и подниматься `docker start`.
-Удаление — отдельным явным `docker rm`.
+(без него — skip). Берём базу `loom_test` в Postgres dev-стенда
+(`deploy/dev-stand/`), отдельный контейнер поднимать не нужно:
 
 ```bash
-docker run -d --name loom-test-pg -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=loom_test -p 54329:5432 postgres:17
-TEST_PG_DSN='postgres://postgres:postgres@127.0.0.1:54329/loom_test?sslmode=disable' make test
-docker stop loom-test-pg   # данные остаются; вернуть — docker start loom-test-pg
+TEST_PG_DSN='postgres://postgres:postgres@127.0.0.1:30432/loom_test?sslmode=disable' make test
 ```
 
-То же правило и для e2e-стендов (Postgres, registry, всё остальное): без
-`--rm`, чтобы состояние стенда переживало паузу между сессиями.
+Если БД всё же поднимается контейнером — **только через docker** (не через
+Postgres.app/initdb) и **без `--rm`**: контейнер с `--rm` умирает на
+`docker stop` вместе с данными, а их регулярно хочется посмотреть после
+падения. Удаление — отдельным явным `docker rm`.
 
 Рестарт-устойчивость покрыта тестами: `artifact/test` (реконнект лог-синка и
 стримов артефактов через рестарт сервера), `sdk/streamstore` (resume),

@@ -9,7 +9,9 @@ import { deleteVariable, listVariables, setVariable } from '~/api/variable.api'
 
 // Переменные и секреты — одно env-пространство таска (и те, и другие
 // инжектятся в под переменными окружения), поэтому показываем их единым
-// списком: тип — колонка и фильтр, а не отдельный раздел меню. Скоупы
+// списком: тип — колонка и фильтр, а не отдельный раздел меню. Тип и
+// скоуп правятся у существующей записи: это перенос — создание на новом
+// месте плюс удаление со старого (отдельного RPC «переместить» нет). Скоупы
 // трёхуровневые: глобальный, проекта и дага — более узкий перекрывает
 // более широкий при запуске. Значение переменной видно в списке, значение секрета — по
 // кнопке (getSecretValue, RBAC).
@@ -205,12 +207,27 @@ const editScope = ref('')
 const editName = ref('')
 const editValue = ref('')
 const editIsNew = ref(true)
+// исходная запись: тип и скоуп можно поменять, и тогда сохранение — это
+// перенос (запись создаётся в новом месте и удаляется из старого)
+const editOrigin = ref<{ kind: EnvKind, scope: string } | null>(null)
 
+// скоупы, где вызывающий вправе менять записи: глобальный — только admin,
+// проектный — владелец проекта, дага — владелец дага
 const editScopeItems = computed(() => [
-  { label: 'Глобальный', value: GLOBAL_SCOPE },
-  ...projectNames.value.map(n => ({ label: `Проект: ${n}`, value: n })),
-  ...dagLabels.value.map(n => ({ label: `Даг: ${n}`, value: n })),
+  { label: 'Глобальный', value: GLOBAL_SCOPE, scope: globalScope },
+  ...projectNames.value.map(n => ({ label: `Проект: ${n}`, value: n, scope: projectScope(n) })),
+  ...dagLabels.value.map(n => ({ label: `Даг: ${n}`, value: n, scope: parseScopeLabel(n) })),
+].filter(item => canManageScope(item.scope)))
+
+const editKindItems = computed<TabsItem[]>(() => [
+  { label: kindMeta.variable.label, value: 'variable', icon: kindMeta.variable.icon },
+  { label: kindMeta.secret.label, value: 'secret', icon: kindMeta.secret.icon },
 ])
+
+// перенос: сменили тип или скоуп существующей записи
+const editMoved = computed(() =>
+  !editIsNew.value && editOrigin.value !== null
+  && (editOrigin.value.kind !== editKind.value || editOrigin.value.scope !== editScope.value))
 
 const createItems = computed<DropdownMenuItem[][]>(() => [[
   {
@@ -227,6 +244,7 @@ const createItems = computed<DropdownMenuItem[][]>(() => [[
 
 function openCreate(kind: EnvKind) {
   editIsNew.value = true
+  editOrigin.value = null
   editKind.value = kind
   editScope.value = scopeFilter.value === ALL_SCOPES ? GLOBAL_SCOPE : scopeFilter.value
   editName.value = ''
@@ -239,6 +257,7 @@ function openEdit(entry: EnvEntry) {
   editIsNew.value = false
   editKind.value = entry.kind
   editScope.value = scopeKind(entry.scope) === 'global' ? GLOBAL_SCOPE : scopeLabel(entry.scope)
+  editOrigin.value = { kind: editKind.value, scope: editScope.value }
   editName.value = entry.name
   editValue.value = entry.kind === 'variable' ? (entry.value ?? '') : ''
   editOpen.value = true
@@ -247,24 +266,51 @@ function openEdit(entry: EnvEntry) {
 const editTitle = computed(() => {
   if (editIsNew.value)
     return editKind.value === 'variable' ? 'Создание переменной' : 'Создание секрета'
+  if (editMoved.value)
+    return `Перенос ${editName.value}`
   return editKind.value === 'variable'
     ? `Переменная ${editName.value}`
     : `Замена значения ${editName.value}`
 })
 
+// Значение обязательно у секрета: его текущее значение форме неизвестно
+// (сервер не отдаёт), поэтому и при создании, и при переносе его вводят
+// заново. У переменной пустое значение — легальное.
 const canSubmitEdit = computed(() =>
   editName.value.trim() !== '' && (editKind.value === 'variable' || editValue.value !== ''),
 )
+
+function scopeOf(label: string) {
+  return label === GLOBAL_SCOPE ? globalScope : parseScopeLabel(label)
+}
 
 async function submitEdit() {
   if (!canSubmitEdit.value)
     return
   const name = editName.value.trim()
-  const scope = editScope.value === GLOBAL_SCOPE ? globalScope : parseScopeLabel(editScope.value)
+  const scope = scopeOf(editScope.value)
   const isVariable = editKind.value === 'variable'
+  const origin = editOrigin.value
+  const moved = editMoved.value
+
   const ok = await action.run(
-    () => isVariable ? setVariable(scope, name, editValue.value) : setSecret(scope, name, editValue.value),
-    { success: isVariable ? 'Переменная сохранена' : 'Секрет сохранён' },
+    async () => {
+      // сначала создаём на новом месте: если упадёт, старая запись цела
+      if (isVariable)
+        await setVariable(scope, name, editValue.value)
+      else
+        await setSecret(scope, name, editValue.value)
+
+      if (moved && origin) {
+        const from = scopeOf(origin.scope)
+        if (origin.kind === 'variable')
+          await deleteVariable(from, name)
+        else
+          await deleteSecret(from, name)
+      }
+      return true
+    },
+    { success: moved ? 'Запись перенесена' : (isVariable ? 'Переменная сохранена' : 'Секрет сохранён') },
   )
   if (ok !== undefined) {
     editOpen.value = false
@@ -489,9 +535,32 @@ const columns: TableColumn<EnvEntry>[] = [
       <UModal v-model:open="editOpen" :title="editTitle" :description="kindMeta[editKind].hint">
         <template #body>
           <div class="space-y-4">
-            <UFormField v-if="editIsNew" label="Скоуп" hint="более узкий перекрывает более широкий с тем же именем">
+            <UFormField label="Тип">
+              <UTabs
+                v-model="editKind"
+                :items="editKindItems"
+                :content="false"
+                color="neutral"
+                variant="pill"
+                size="sm"
+                class="w-full"
+              />
+            </UFormField>
+            <UFormField label="Скоуп" hint="более узкий перекрывает более широкий с тем же именем">
               <USelect v-model="editScope" :items="editScopeItems" value-key="value" class="w-full" />
             </UFormField>
+            <!-- смена типа или скоупа существующей записи — перенос:
+                 создаём на новом месте и удаляем со старого -->
+            <UAlert
+              v-if="editMoved"
+              color="info"
+              variant="subtle"
+              icon="i-lucide-arrow-right-left"
+              :title="`Запись будет перенесена в «${editScopeItems.find(i => i.value === editScope)?.label ?? editScope}»`"
+              :description="editKind === 'secret'
+                ? 'Значение секрета сервер не отдаёт — введите его заново, старая запись удалится после успешного сохранения.'
+                : 'Старая запись удалится после успешного сохранения новой.'"
+            />
             <UFormField v-if="editIsNew" :label="editKind === 'variable' ? 'Имя переменной' : 'Имя секрета'">
               <UInput
                 v-model="editName"
@@ -511,7 +580,12 @@ const columns: TableColumn<EnvEntry>[] = [
         <template #footer>
           <div class="flex w-full justify-end gap-2">
             <UButton color="neutral" variant="ghost" label="Отмена" @click="editOpen = false" />
-            <UButton label="Сохранить" :disabled="!canSubmitEdit" :loading="action.loading.value" @click="submitEdit" />
+            <UButton
+              :label="editMoved ? 'Перенести' : 'Сохранить'"
+              :disabled="!canSubmitEdit"
+              :loading="action.loading.value"
+              @click="submitEdit"
+            />
           </div>
         </template>
       </UModal>

@@ -4,14 +4,17 @@ import { apiErrorMessage } from '~/api/client'
 import type { Scope } from '~/types/common'
 import { listDags } from '~/api/dag.api'
 import { listProjects } from '~/api/project.api'
-import { deleteSecret, getSecretValue, listSecrets, setSecret } from '~/api/secret.api'
-import { deleteVariable, listVariables, setVariable } from '~/api/variable.api'
+import { deleteSecret, getSecretValue, listSecrets, moveSecret, setSecret } from '~/api/secret.api'
+import { deleteVariable, listVariables, moveVariable, setVariable } from '~/api/variable.api'
 
 // Переменные и секреты — одно env-пространство таска (и те, и другие
 // инжектятся в под переменными окружения), поэтому показываем их единым
-// списком: тип — колонка и фильтр, а не отдельный раздел меню. Тип и
-// скоуп правятся у существующей записи: это перенос — создание на новом
-// месте плюс удаление со старого (отдельного RPC «переместить» нет). Скоупы
+// списком: тип — колонка и фильтр, а не отдельный раздел меню.
+//
+// У существующей записи правятся и тип, и скоуп. Смена скоупа — серверный
+// перенос (Move): значение переезжает как есть, поэтому секрет не нужно
+// вводить заново. Смена типа — другая сущность, её переносим здесь:
+// создаём запись нового типа и удаляем старую. Скоупы
 // трёхуровневые: глобальный, проекта и дага — более узкий перекрывает
 // более широкий при запуске. Значение переменной видно в списке, значение секрета — по
 // кнопке (getSecretValue, RBAC).
@@ -224,10 +227,16 @@ const editKindItems = computed<TabsItem[]>(() => [
   { label: kindMeta.secret.label, value: 'secret', icon: kindMeta.secret.icon },
 ])
 
-// перенос: сменили тип или скоуп существующей записи
-const editMoved = computed(() =>
-  !editIsNew.value && editOrigin.value !== null
-  && (editOrigin.value.kind !== editKind.value || editOrigin.value.scope !== editScope.value))
+// сменили тип существующей записи: переменная и секрет — разные сущности,
+// перенести одним запросом нельзя
+const editKindChanged = computed(() =>
+  !editIsNew.value && editOrigin.value !== null && editOrigin.value.kind !== editKind.value)
+
+// сменили только скоуп — это Move на сервере
+const editScopeChanged = computed(() =>
+  !editIsNew.value && editOrigin.value !== null && editOrigin.value.scope !== editScope.value)
+
+const editMoved = computed(() => editKindChanged.value || editScopeChanged.value)
 
 const createItems = computed<DropdownMenuItem[][]>(() => [[
   {
@@ -273,11 +282,14 @@ const editTitle = computed(() => {
     : `Замена значения ${editName.value}`
 })
 
-// Значение обязательно у секрета: его текущее значение форме неизвестно
-// (сервер не отдаёт), поэтому и при создании, и при переносе его вводят
-// заново. У переменной пустое значение — легальное.
+// Значение обязательно у секрета, когда запись создаётся или меняет тип:
+// текущее значение форме неизвестно (сервер его не отдаёт). При переносе
+// секрета между скоупами значение не нужно — его двигает сервер.
+const secretValueRequired = computed(() =>
+  editKind.value === 'secret' && (editIsNew.value || editKindChanged.value))
+
 const canSubmitEdit = computed(() =>
-  editName.value.trim() !== '' && (editKind.value === 'variable' || editValue.value !== ''),
+  editName.value.trim() !== '' && (!secretValueRequired.value || editValue.value !== ''),
 )
 
 function scopeOf(label: string) {
@@ -291,17 +303,33 @@ async function submitEdit() {
   const scope = scopeOf(editScope.value)
   const isVariable = editKind.value === 'variable'
   const origin = editOrigin.value
-  const moved = editMoved.value
+  const kindChanged = editKindChanged.value
+  const scopeChanged = editScopeChanged.value
 
   const ok = await action.run(
     async () => {
-      // сначала создаём на новом месте: если упадёт, старая запись цела
+      // сменился только скоуп — перенос делает сервер, значение остаётся
+      if (scopeChanged && !kindChanged && origin) {
+        const from = scopeOf(origin.scope)
+        if (isVariable)
+          await moveVariable(from, scope, name)
+        else
+          await moveSecret(from, scope, name)
+        // у переменной заодно могли поправить значение
+        if (isVariable && editValue.value !== '')
+          await setVariable(scope, name, editValue.value)
+        return true
+      }
+
+      // сменился тип (возможно, вместе со скоупом): создаём запись нового
+      // типа и удаляем старую — сначала создание, чтобы при ошибке старая
+      // осталась
       if (isVariable)
         await setVariable(scope, name, editValue.value)
       else
         await setSecret(scope, name, editValue.value)
 
-      if (moved && origin) {
+      if (kindChanged && origin) {
         const from = scopeOf(origin.scope)
         if (origin.kind === 'variable')
           await deleteVariable(from, name)
@@ -310,7 +338,11 @@ async function submitEdit() {
       }
       return true
     },
-    { success: moved ? 'Запись перенесена' : (isVariable ? 'Переменная сохранена' : 'Секрет сохранён') },
+    {
+      success: kindChanged
+        ? 'Тип записи изменён'
+        : scopeChanged ? 'Запись перенесена' : (isVariable ? 'Переменная сохранена' : 'Секрет сохранён'),
+    },
   )
   if (ok !== undefined) {
     editOpen.value = false
@@ -556,10 +588,14 @@ const columns: TableColumn<EnvEntry>[] = [
               color="info"
               variant="subtle"
               icon="i-lucide-arrow-right-left"
-              :title="`Запись будет перенесена в «${editScopeItems.find(i => i.value === editScope)?.label ?? editScope}»`"
-              :description="editKind === 'secret'
-                ? 'Значение секрета сервер не отдаёт — введите его заново, старая запись удалится после успешного сохранения.'
-                : 'Старая запись удалится после успешного сохранения новой.'"
+              :title="editKindChanged
+                ? `Запись станет ${editKind === 'secret' ? 'секретом' : 'переменной'}`
+                : `Запись будет перенесена в «${editScopeItems.find(i => i.value === editScope)?.label ?? editScope}»`"
+              :description="editKindChanged
+                ? (editKind === 'secret'
+                  ? 'Тип меняется на секрет: введите значение — сервер хранит секреты зашифрованными и старое значение переменной не переносит.'
+                  : 'Тип меняется на переменную: значение секрета сервер не отдаёт, введите его заново.')
+                : 'Значение переезжает вместе с записью — вводить его заново не нужно.'"
             />
             <UFormField v-if="editIsNew" :label="editKind === 'variable' ? 'Имя переменной' : 'Имя секрета'">
               <UInput
@@ -569,9 +605,14 @@ const columns: TableColumn<EnvEntry>[] = [
                 autofocus
               />
             </UFormField>
+            <!-- при переносе секрета между скоупами значение не трогаем:
+                 его двигает сервер, поле только сбило бы с толку -->
             <UFormField
+              v-if="!(editKind === 'secret' && editScopeChanged && !editKindChanged)"
               label="Значение"
-              :hint="!editIsNew && editKind === 'secret' ? 'старое значение не показывается' : undefined"
+              :hint="!editIsNew && editKind === 'secret'
+                ? (secretValueRequired ? 'введите новое значение' : 'старое значение не показывается')
+                : undefined"
             >
               <UTextarea v-model="editValue" class="w-full font-mono" :rows="3" />
             </UFormField>

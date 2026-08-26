@@ -23,6 +23,7 @@ const (
 	VariableService_ListVariable_FullMethodName   = "/server_v1.VariableService/ListVariable"
 	VariableService_SetVariable_FullMethodName    = "/server_v1.VariableService/SetVariable"
 	VariableService_DeleteVariable_FullMethodName = "/server_v1.VariableService/DeleteVariable"
+	VariableService_MoveVariable_FullMethodName   = "/server_v1.VariableService/MoveVariable"
 )
 
 // VariableServiceClient is the client API for VariableService service.
@@ -39,6 +40,9 @@ type VariableServiceClient interface {
 	// SetVariable создаёт переменную или перезаписывает значение существующей.
 	SetVariable(ctx context.Context, in *VariableSetReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	DeleteVariable(ctx context.Context, in *VariableDeleteReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// MoveVariable переносит переменную в другой скоуп, сохраняя значение.
+	// Права нужны на оба скоупа: перенос — это и удаление, и создание.
+	MoveVariable(ctx context.Context, in *VariableMoveReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type variableServiceClient struct {
@@ -79,6 +83,16 @@ func (c *variableServiceClient) DeleteVariable(ctx context.Context, in *Variable
 	return out, nil
 }
 
+func (c *variableServiceClient) MoveVariable(ctx context.Context, in *VariableMoveReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, VariableService_MoveVariable_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // VariableServiceServer is the server API for VariableService service.
 // All implementations must embed UnimplementedVariableServiceServer
 // for forward compatibility.
@@ -93,6 +107,9 @@ type VariableServiceServer interface {
 	// SetVariable создаёт переменную или перезаписывает значение существующей.
 	SetVariable(context.Context, *VariableSetReq) (*emptypb.Empty, error)
 	DeleteVariable(context.Context, *VariableDeleteReq) (*emptypb.Empty, error)
+	// MoveVariable переносит переменную в другой скоуп, сохраняя значение.
+	// Права нужны на оба скоупа: перенос — это и удаление, и создание.
+	MoveVariable(context.Context, *VariableMoveReq) (*emptypb.Empty, error)
 	mustEmbedUnimplementedVariableServiceServer()
 }
 
@@ -111,6 +128,9 @@ func (UnimplementedVariableServiceServer) SetVariable(context.Context, *Variable
 }
 func (UnimplementedVariableServiceServer) DeleteVariable(context.Context, *VariableDeleteReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteVariable not implemented")
+}
+func (UnimplementedVariableServiceServer) MoveVariable(context.Context, *VariableMoveReq) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MoveVariable not implemented")
 }
 func (UnimplementedVariableServiceServer) mustEmbedUnimplementedVariableServiceServer() {}
 func (UnimplementedVariableServiceServer) testEmbeddedByValue()                         {}
@@ -187,6 +207,24 @@ func _VariableService_DeleteVariable_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _VariableService_MoveVariable_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VariableMoveReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VariableServiceServer).MoveVariable(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VariableService_MoveVariable_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VariableServiceServer).MoveVariable(ctx, req.(*VariableMoveReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // VariableService_ServiceDesc is the grpc.ServiceDesc for VariableService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -205,6 +243,10 @@ var VariableService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteVariable",
 			Handler:    _VariableService_DeleteVariable_Handler,
+		},
+		{
+			MethodName: "MoveVariable",
+			Handler:    _VariableService_MoveVariable_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -23,6 +23,7 @@ const (
 	SecretService_ListSecret_FullMethodName     = "/server_v1.SecretService/ListSecret"
 	SecretService_SetSecret_FullMethodName      = "/server_v1.SecretService/SetSecret"
 	SecretService_DeleteSecret_FullMethodName   = "/server_v1.SecretService/DeleteSecret"
+	SecretService_MoveSecret_FullMethodName     = "/server_v1.SecretService/MoveSecret"
 	SecretService_GetSecretValue_FullMethodName = "/server_v1.SecretService/GetSecretValue"
 )
 
@@ -40,6 +41,10 @@ type SecretServiceClient interface {
 	// SetSecret создаёт секрет или перезаписывает значение существующего.
 	SetSecret(ctx context.Context, in *SecretSetReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	DeleteSecret(ctx context.Context, in *SecretDeleteReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// MoveSecret переносит секрет в другой скоуп. Значение переезжает как
+	// есть (зашифрованным) — вводить его заново не нужно; права нужны на
+	// оба скоупа.
+	MoveSecret(ctx context.Context, in *SecretMoveReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// GetSecretValue возвращает расшифрованное значение секрета («посмотреть
 	// по кнопке» в админке). Доступ ограничивается ролями.
 	GetSecretValue(ctx context.Context, in *SecretGetValueReq, opts ...grpc.CallOption) (*SecretValueRep, error)
@@ -83,6 +88,16 @@ func (c *secretServiceClient) DeleteSecret(ctx context.Context, in *SecretDelete
 	return out, nil
 }
 
+func (c *secretServiceClient) MoveSecret(ctx context.Context, in *SecretMoveReq, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, SecretService_MoveSecret_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *secretServiceClient) GetSecretValue(ctx context.Context, in *SecretGetValueReq, opts ...grpc.CallOption) (*SecretValueRep, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SecretValueRep)
@@ -107,6 +122,10 @@ type SecretServiceServer interface {
 	// SetSecret создаёт секрет или перезаписывает значение существующего.
 	SetSecret(context.Context, *SecretSetReq) (*emptypb.Empty, error)
 	DeleteSecret(context.Context, *SecretDeleteReq) (*emptypb.Empty, error)
+	// MoveSecret переносит секрет в другой скоуп. Значение переезжает как
+	// есть (зашифрованным) — вводить его заново не нужно; права нужны на
+	// оба скоупа.
+	MoveSecret(context.Context, *SecretMoveReq) (*emptypb.Empty, error)
 	// GetSecretValue возвращает расшифрованное значение секрета («посмотреть
 	// по кнопке» в админке). Доступ ограничивается ролями.
 	GetSecretValue(context.Context, *SecretGetValueReq) (*SecretValueRep, error)
@@ -128,6 +147,9 @@ func (UnimplementedSecretServiceServer) SetSecret(context.Context, *SecretSetReq
 }
 func (UnimplementedSecretServiceServer) DeleteSecret(context.Context, *SecretDeleteReq) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteSecret not implemented")
+}
+func (UnimplementedSecretServiceServer) MoveSecret(context.Context, *SecretMoveReq) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MoveSecret not implemented")
 }
 func (UnimplementedSecretServiceServer) GetSecretValue(context.Context, *SecretGetValueReq) (*SecretValueRep, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetSecretValue not implemented")
@@ -207,6 +229,24 @@ func _SecretService_DeleteSecret_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SecretService_MoveSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SecretMoveReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SecretServiceServer).MoveSecret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SecretService_MoveSecret_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SecretServiceServer).MoveSecret(ctx, req.(*SecretMoveReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SecretService_GetSecretValue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SecretGetValueReq)
 	if err := dec(in); err != nil {
@@ -243,6 +283,10 @@ var SecretService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteSecret",
 			Handler:    _SecretService_DeleteSecret_Handler,
+		},
+		{
+			MethodName: "MoveSecret",
+			Handler:    _SecretService_MoveSecret_Handler,
 		},
 		{
 			MethodName: "GetSecretValue",

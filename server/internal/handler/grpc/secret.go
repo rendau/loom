@@ -45,6 +45,15 @@ func (h *Secret) DeleteSecret(ctx context.Context, req *pb.SecretDeleteReq) (*em
 	return &emptypb.Empty{}, nil
 }
 
+func (h *Secret) MoveSecret(ctx context.Context, req *pb.SecretMoveReq) (*emptypb.Empty, error) {
+	err := h.usecase.Move(ctx,
+		dto.DecodeScope(req.GetScope()), dto.DecodeScope(req.GetToScope()), req.GetName())
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
 func (h *Secret) GetSecretValue(ctx context.Context, req *pb.SecretGetValueReq) (*pb.SecretValueRep, error) {
 	value, err := h.usecase.GetValue(ctx, dto.DecodeScope(req.GetScope()), req.GetName())
 	if err != nil {

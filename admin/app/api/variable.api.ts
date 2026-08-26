@@ -17,6 +17,15 @@ export function setVariable(scope: Scope, name: string, value: string) {
   })
 }
 
+// Перенос переменной в другой скоуп: значение переезжает как есть, права
+// нужны на оба скоупа.
+export function moveVariable(from: Scope, to: Scope, name: string) {
+  return apiFetch<object>(`/variable/${encodeURIComponent(name)}/move`, {
+    method: 'POST',
+    body: { scope: from, to_scope: to },
+  })
+}
+
 export function deleteVariable(scope: Scope, name: string) {
   return apiFetch<object>(`/variable/${encodeURIComponent(name)}`, {
     method: 'DELETE',

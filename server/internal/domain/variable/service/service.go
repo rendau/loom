@@ -67,6 +67,35 @@ func (s *Service) Delete(ctx context.Context, scope commonModel.Scope, name stri
 	return nil
 }
 
+// Move переносит запись в другой скоуп, сохраняя значение: адрес меняется
+// одним UPDATE, поэтому значение переменной не нужно вводить заново (у
+// секрета клиент его и не знает).
+func (s *Service) Move(ctx context.Context, from, to commonModel.Scope, name string) error {
+	if !from.Valid() || !to.Valid() {
+		return errs.ErrFull{Err: errs.InvalidRequest, Desc: "некорректный скоуп"}
+	}
+	if from == to {
+		return nil // переносить некуда — не ошибка
+	}
+
+	occupied, err := s.repoDb.Exists(ctx, to, name)
+	if err != nil {
+		return fmt.Errorf("repoDb.Exists: %w", err)
+	}
+	if occupied {
+		return errs.VariableExists
+	}
+
+	found, err := s.repoDb.Move(ctx, from, to, name)
+	if err != nil {
+		return fmt.Errorf("repoDb.Move: %w", err)
+	}
+	if !found {
+		return errs.VariableNotFound
+	}
+	return nil
+}
+
 // ResolveValues возвращает значения переменных для инъекции в env попытки
 // дага (даг перекрывает проект, проект — глобальный); любая отсутствующая
 // переменная — ошибка (попытка не должна стартовать с пустой переменной).

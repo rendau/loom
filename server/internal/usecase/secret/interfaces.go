@@ -10,6 +10,7 @@ type ServiceI interface {
 	List(ctx context.Context, scope *commonModel.Scope) ([]*model.Meta, error)
 	Set(ctx context.Context, scope commonModel.Scope, name string, value []byte) error
 	Delete(ctx context.Context, scope commonModel.Scope, name string) error
+	Move(ctx context.Context, from, to commonModel.Scope, name string) error
 	GetValue(ctx context.Context, scope commonModel.Scope, name string) ([]byte, error)
 }
 

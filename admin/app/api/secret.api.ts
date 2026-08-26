@@ -17,6 +17,15 @@ export function setSecret(scope: Scope, name: string, value: string) {
   })
 }
 
+// Перенос секрета в другой скоуп: значение переезжает зашифрованным —
+// вводить его заново не нужно; права нужны на оба скоупа.
+export function moveSecret(from: Scope, to: Scope, name: string) {
+  return apiFetch<object>(`/secret/${encodeURIComponent(name)}/move`, {
+    method: 'POST',
+    body: { scope: from, to_scope: to },
+  })
+}
+
 export function deleteSecret(scope: Scope, name: string) {
   return apiFetch<object>(`/secret/${encodeURIComponent(name)}`, {
     method: 'DELETE',

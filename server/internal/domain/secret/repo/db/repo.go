@@ -43,6 +43,35 @@ func (r *Repo) Delete(ctx context.Context, scope commonModel.Scope, name string)
 	return tag.RowsAffected() > 0, nil
 }
 
+// Exists — есть ли запись с таким именем в скоупе (проверка перед
+// переносом: занятое имя — понятная ошибка вместо конфликта в UPDATE).
+func (r *Repo) Exists(ctx context.Context, scope commonModel.Scope, name string) (bool, error) {
+	var exists bool
+	err := r.TxM.GetConnection(ctx).QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM secret
+			WHERE project_name = $1 AND dag_name = $2 AND name = $3)`,
+		scope.Project, scope.Dag, name).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("Exists: %w", err)
+	}
+	return exists, nil
+}
+
+// Move переносит запись в другой скоуп: значение и created_at остаются
+// прежними — переезжает только адрес. false — записи в исходном скоупе
+// нет. Занятое имя в целевом скоупе ловится уникальным индексом, поэтому
+// проверка-и-перенос не разъезжаются между конкурентными запросами.
+func (r *Repo) Move(ctx context.Context, from, to commonModel.Scope, name string) (bool, error) {
+	tag, err := r.TxM.GetConnection(ctx).Exec(ctx, `
+		UPDATE secret SET project_name = $1, dag_name = $2, modified_at = now()
+		WHERE project_name = $3 AND dag_name = $4 AND name = $5`,
+		to.Project, to.Dag, from.Project, from.Dag, name)
+	if err != nil {
+		return false, fmt.Errorf("Move: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // ListMeta — метаданные секретов; scope nil — все скоупы.
 func (r *Repo) ListMeta(ctx context.Context, scope *commonModel.Scope) ([]*model.Meta, error) {
 	query := `SELECT project_name, dag_name, name, created_at, modified_at FROM secret`

@@ -294,6 +294,66 @@ func (x *SecretDeleteReq) GetScope() *common.ScopeSt {
 	return nil
 }
 
+type SecretMoveReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Scope         *common.ScopeSt        `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`                    // откуда; пустой — глобальный скоуп
+	ToScope       *common.ScopeSt        `protobuf:"bytes,3,opt,name=to_scope,json=toScope,proto3" json:"to_scope,omitempty"` // куда; пустой — глобальный скоуп
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretMoveReq) Reset() {
+	*x = SecretMoveReq{}
+	mi := &file_server_v1_secret_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretMoveReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretMoveReq) ProtoMessage() {}
+
+func (x *SecretMoveReq) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_secret_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretMoveReq.ProtoReflect.Descriptor instead.
+func (*SecretMoveReq) Descriptor() ([]byte, []int) {
+	return file_server_v1_secret_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SecretMoveReq) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SecretMoveReq) GetScope() *common.ScopeSt {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+func (x *SecretMoveReq) GetToScope() *common.ScopeSt {
+	if x != nil {
+		return x.ToScope
+	}
+	return nil
+}
+
 type SecretGetValueReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -304,7 +364,7 @@ type SecretGetValueReq struct {
 
 func (x *SecretGetValueReq) Reset() {
 	*x = SecretGetValueReq{}
-	mi := &file_server_v1_secret_proto_msgTypes[5]
+	mi := &file_server_v1_secret_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -316,7 +376,7 @@ func (x *SecretGetValueReq) String() string {
 func (*SecretGetValueReq) ProtoMessage() {}
 
 func (x *SecretGetValueReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_secret_proto_msgTypes[5]
+	mi := &file_server_v1_secret_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -329,7 +389,7 @@ func (x *SecretGetValueReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecretGetValueReq.ProtoReflect.Descriptor instead.
 func (*SecretGetValueReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_secret_proto_rawDescGZIP(), []int{5}
+	return file_server_v1_secret_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SecretGetValueReq) GetName() string {
@@ -355,7 +415,7 @@ type SecretValueRep struct {
 
 func (x *SecretValueRep) Reset() {
 	*x = SecretValueRep{}
-	mi := &file_server_v1_secret_proto_msgTypes[6]
+	mi := &file_server_v1_secret_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -367,7 +427,7 @@ func (x *SecretValueRep) String() string {
 func (*SecretValueRep) ProtoMessage() {}
 
 func (x *SecretValueRep) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_secret_proto_msgTypes[6]
+	mi := &file_server_v1_secret_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -380,7 +440,7 @@ func (x *SecretValueRep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecretValueRep.ProtoReflect.Descriptor instead.
 func (*SecretValueRep) Descriptor() ([]byte, []int) {
-	return file_server_v1_secret_proto_rawDescGZIP(), []int{6}
+	return file_server_v1_secret_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SecretValueRep) GetValue() string {
@@ -414,17 +474,23 @@ const file_server_v1_secret_proto_rawDesc = "" +
 	"\x05scope\x18\x03 \x01(\v2\x0f.common.ScopeStR\x05scope\"L\n" +
 	"\x0fSecretDeleteReq\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
-	"\x05scope\x18\x02 \x01(\v2\x0f.common.ScopeStR\x05scope\"N\n" +
+	"\x05scope\x18\x02 \x01(\v2\x0f.common.ScopeStR\x05scope\"v\n" +
+	"\rSecretMoveReq\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
+	"\x05scope\x18\x02 \x01(\v2\x0f.common.ScopeStR\x05scope\x12*\n" +
+	"\bto_scope\x18\x03 \x01(\v2\x0f.common.ScopeStR\atoScope\"N\n" +
 	"\x11SecretGetValueReq\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\x05scope\x18\x02 \x01(\v2\x0f.common.ScopeStR\x05scope\"&\n" +
 	"\x0eSecretValueRep\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value2\x80\x03\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value2\xe0\x03\n" +
 	"\rSecretService\x12Q\n" +
 	"\n" +
 	"ListSecret\x12\x18.server_v1.SecretListReq\x1a\x18.server_v1.SecretListRep\"\x0f\x82\xd3\xe4\x93\x02\t\x12\a/secret\x12W\n" +
 	"\tSetSecret\x12\x17.server_v1.SecretSetReq\x1a\x16.google.protobuf.Empty\"\x19\x82\xd3\xe4\x93\x02\x13:\x01*\x1a\x0e/secret/{name}\x12Z\n" +
-	"\fDeleteSecret\x12\x1a.server_v1.SecretDeleteReq\x1a\x16.google.protobuf.Empty\"\x16\x82\xd3\xe4\x93\x02\x10*\x0e/secret/{name}\x12g\n" +
+	"\fDeleteSecret\x12\x1a.server_v1.SecretDeleteReq\x1a\x16.google.protobuf.Empty\"\x16\x82\xd3\xe4\x93\x02\x10*\x0e/secret/{name}\x12^\n" +
+	"\n" +
+	"MoveSecret\x12\x18.server_v1.SecretMoveReq\x1a\x16.google.protobuf.Empty\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/secret/{name}/move\x12g\n" +
 	"\x0eGetSecretValue\x12\x1c.server_v1.SecretGetValueReq\x1a\x19.server_v1.SecretValueRep\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/secret/{name}/valueB0Z.github.com/rendau/loom/api/server_v1;server_v1b\x06proto3"
 
 var (
@@ -439,41 +505,46 @@ func file_server_v1_secret_proto_rawDescGZIP() []byte {
 	return file_server_v1_secret_proto_rawDescData
 }
 
-var file_server_v1_secret_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_server_v1_secret_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_server_v1_secret_proto_goTypes = []any{
 	(*SecretMetaMain)(nil),        // 0: server_v1.SecretMetaMain
 	(*SecretListReq)(nil),         // 1: server_v1.SecretListReq
 	(*SecretListRep)(nil),         // 2: server_v1.SecretListRep
 	(*SecretSetReq)(nil),          // 3: server_v1.SecretSetReq
 	(*SecretDeleteReq)(nil),       // 4: server_v1.SecretDeleteReq
-	(*SecretGetValueReq)(nil),     // 5: server_v1.SecretGetValueReq
-	(*SecretValueRep)(nil),        // 6: server_v1.SecretValueRep
-	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
-	(*common.ScopeSt)(nil),        // 8: common.ScopeSt
-	(*emptypb.Empty)(nil),         // 9: google.protobuf.Empty
+	(*SecretMoveReq)(nil),         // 5: server_v1.SecretMoveReq
+	(*SecretGetValueReq)(nil),     // 6: server_v1.SecretGetValueReq
+	(*SecretValueRep)(nil),        // 7: server_v1.SecretValueRep
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
+	(*common.ScopeSt)(nil),        // 9: common.ScopeSt
+	(*emptypb.Empty)(nil),         // 10: google.protobuf.Empty
 }
 var file_server_v1_secret_proto_depIdxs = []int32{
-	7,  // 0: server_v1.SecretMetaMain.created_at:type_name -> google.protobuf.Timestamp
-	7,  // 1: server_v1.SecretMetaMain.modified_at:type_name -> google.protobuf.Timestamp
-	8,  // 2: server_v1.SecretMetaMain.scope:type_name -> common.ScopeSt
-	8,  // 3: server_v1.SecretListReq.scope:type_name -> common.ScopeSt
+	8,  // 0: server_v1.SecretMetaMain.created_at:type_name -> google.protobuf.Timestamp
+	8,  // 1: server_v1.SecretMetaMain.modified_at:type_name -> google.protobuf.Timestamp
+	9,  // 2: server_v1.SecretMetaMain.scope:type_name -> common.ScopeSt
+	9,  // 3: server_v1.SecretListReq.scope:type_name -> common.ScopeSt
 	0,  // 4: server_v1.SecretListRep.results:type_name -> server_v1.SecretMetaMain
-	8,  // 5: server_v1.SecretSetReq.scope:type_name -> common.ScopeSt
-	8,  // 6: server_v1.SecretDeleteReq.scope:type_name -> common.ScopeSt
-	8,  // 7: server_v1.SecretGetValueReq.scope:type_name -> common.ScopeSt
-	1,  // 8: server_v1.SecretService.ListSecret:input_type -> server_v1.SecretListReq
-	3,  // 9: server_v1.SecretService.SetSecret:input_type -> server_v1.SecretSetReq
-	4,  // 10: server_v1.SecretService.DeleteSecret:input_type -> server_v1.SecretDeleteReq
-	5,  // 11: server_v1.SecretService.GetSecretValue:input_type -> server_v1.SecretGetValueReq
-	2,  // 12: server_v1.SecretService.ListSecret:output_type -> server_v1.SecretListRep
-	9,  // 13: server_v1.SecretService.SetSecret:output_type -> google.protobuf.Empty
-	9,  // 14: server_v1.SecretService.DeleteSecret:output_type -> google.protobuf.Empty
-	6,  // 15: server_v1.SecretService.GetSecretValue:output_type -> server_v1.SecretValueRep
-	12, // [12:16] is the sub-list for method output_type
-	8,  // [8:12] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	9,  // 5: server_v1.SecretSetReq.scope:type_name -> common.ScopeSt
+	9,  // 6: server_v1.SecretDeleteReq.scope:type_name -> common.ScopeSt
+	9,  // 7: server_v1.SecretMoveReq.scope:type_name -> common.ScopeSt
+	9,  // 8: server_v1.SecretMoveReq.to_scope:type_name -> common.ScopeSt
+	9,  // 9: server_v1.SecretGetValueReq.scope:type_name -> common.ScopeSt
+	1,  // 10: server_v1.SecretService.ListSecret:input_type -> server_v1.SecretListReq
+	3,  // 11: server_v1.SecretService.SetSecret:input_type -> server_v1.SecretSetReq
+	4,  // 12: server_v1.SecretService.DeleteSecret:input_type -> server_v1.SecretDeleteReq
+	5,  // 13: server_v1.SecretService.MoveSecret:input_type -> server_v1.SecretMoveReq
+	6,  // 14: server_v1.SecretService.GetSecretValue:input_type -> server_v1.SecretGetValueReq
+	2,  // 15: server_v1.SecretService.ListSecret:output_type -> server_v1.SecretListRep
+	10, // 16: server_v1.SecretService.SetSecret:output_type -> google.protobuf.Empty
+	10, // 17: server_v1.SecretService.DeleteSecret:output_type -> google.protobuf.Empty
+	10, // 18: server_v1.SecretService.MoveSecret:output_type -> google.protobuf.Empty
+	7,  // 19: server_v1.SecretService.GetSecretValue:output_type -> server_v1.SecretValueRep
+	15, // [15:20] is the sub-list for method output_type
+	10, // [10:15] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_secret_proto_init() }
@@ -489,7 +560,7 @@ func file_server_v1_secret_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_v1_secret_proto_rawDesc), len(file_server_v1_secret_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

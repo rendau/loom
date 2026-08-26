@@ -34,6 +34,15 @@ service VariableService {
       delete: "/variable/{name}"
     };
   }
+
+  // MoveVariable переносит переменную в другой скоуп, сохраняя значение.
+  // Права нужны на оба скоупа: перенос — это и удаление, и создание.
+  rpc MoveVariable(VariableMoveReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/variable/{name}/move"
+      body: "*"
+    };
+  }
 }
 
 // ── Messages ────────────────────────────────────────────
@@ -64,4 +73,10 @@ message VariableSetReq {
 message VariableDeleteReq {
   string name = 1;
   common.ScopeSt scope = 2; // пустой — глобальный скоуп
+}
+
+message VariableMoveReq {
+  string name = 1;
+  common.ScopeSt scope = 2;    // откуда; пустой — глобальный скоуп
+  common.ScopeSt to_scope = 3; // куда; пустой — глобальный скоуп
 }

@@ -302,6 +302,66 @@ func (x *VariableDeleteReq) GetScope() *common.ScopeSt {
 	return nil
 }
 
+type VariableMoveReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Scope         *common.ScopeSt        `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`                    // откуда; пустой — глобальный скоуп
+	ToScope       *common.ScopeSt        `protobuf:"bytes,3,opt,name=to_scope,json=toScope,proto3" json:"to_scope,omitempty"` // куда; пустой — глобальный скоуп
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VariableMoveReq) Reset() {
+	*x = VariableMoveReq{}
+	mi := &file_server_v1_variable_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VariableMoveReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VariableMoveReq) ProtoMessage() {}
+
+func (x *VariableMoveReq) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_variable_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VariableMoveReq.ProtoReflect.Descriptor instead.
+func (*VariableMoveReq) Descriptor() ([]byte, []int) {
+	return file_server_v1_variable_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *VariableMoveReq) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *VariableMoveReq) GetScope() *common.ScopeSt {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+func (x *VariableMoveReq) GetToScope() *common.ScopeSt {
+	if x != nil {
+		return x.ToScope
+	}
+	return nil
+}
+
 var File_server_v1_variable_proto protoreflect.FileDescriptor
 
 const file_server_v1_variable_proto_rawDesc = "" +
@@ -327,11 +387,16 @@ const file_server_v1_variable_proto_rawDesc = "" +
 	"\x05scope\x18\x03 \x01(\v2\x0f.common.ScopeStR\x05scope\"N\n" +
 	"\x11VariableDeleteReq\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
-	"\x05scope\x18\x02 \x01(\v2\x0f.common.ScopeStR\x05scope2\xad\x02\n" +
+	"\x05scope\x18\x02 \x01(\v2\x0f.common.ScopeStR\x05scope\"x\n" +
+	"\x0fVariableMoveReq\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
+	"\x05scope\x18\x02 \x01(\v2\x0f.common.ScopeStR\x05scope\x12*\n" +
+	"\bto_scope\x18\x03 \x01(\v2\x0f.common.ScopeStR\atoScope2\x93\x03\n" +
 	"\x0fVariableService\x12Y\n" +
 	"\fListVariable\x12\x1a.server_v1.VariableListReq\x1a\x1a.server_v1.VariableListRep\"\x11\x82\xd3\xe4\x93\x02\v\x12\t/variable\x12]\n" +
 	"\vSetVariable\x12\x19.server_v1.VariableSetReq\x1a\x16.google.protobuf.Empty\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\x1a\x10/variable/{name}\x12`\n" +
-	"\x0eDeleteVariable\x12\x1c.server_v1.VariableDeleteReq\x1a\x16.google.protobuf.Empty\"\x18\x82\xd3\xe4\x93\x02\x12*\x10/variable/{name}B0Z.github.com/rendau/loom/api/server_v1;server_v1b\x06proto3"
+	"\x0eDeleteVariable\x12\x1c.server_v1.VariableDeleteReq\x1a\x16.google.protobuf.Empty\"\x18\x82\xd3\xe4\x93\x02\x12*\x10/variable/{name}\x12d\n" +
+	"\fMoveVariable\x12\x1a.server_v1.VariableMoveReq\x1a\x16.google.protobuf.Empty\" \x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/variable/{name}/moveB0Z.github.com/rendau/loom/api/server_v1;server_v1b\x06proto3"
 
 var (
 	file_server_v1_variable_proto_rawDescOnce sync.Once
@@ -345,36 +410,41 @@ func file_server_v1_variable_proto_rawDescGZIP() []byte {
 	return file_server_v1_variable_proto_rawDescData
 }
 
-var file_server_v1_variable_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_server_v1_variable_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_server_v1_variable_proto_goTypes = []any{
 	(*VariableMain)(nil),          // 0: server_v1.VariableMain
 	(*VariableListReq)(nil),       // 1: server_v1.VariableListReq
 	(*VariableListRep)(nil),       // 2: server_v1.VariableListRep
 	(*VariableSetReq)(nil),        // 3: server_v1.VariableSetReq
 	(*VariableDeleteReq)(nil),     // 4: server_v1.VariableDeleteReq
-	(*common.ScopeSt)(nil),        // 5: common.ScopeSt
-	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
-	(*emptypb.Empty)(nil),         // 7: google.protobuf.Empty
+	(*VariableMoveReq)(nil),       // 5: server_v1.VariableMoveReq
+	(*common.ScopeSt)(nil),        // 6: common.ScopeSt
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
+	(*emptypb.Empty)(nil),         // 8: google.protobuf.Empty
 }
 var file_server_v1_variable_proto_depIdxs = []int32{
-	5,  // 0: server_v1.VariableMain.scope:type_name -> common.ScopeSt
-	6,  // 1: server_v1.VariableMain.created_at:type_name -> google.protobuf.Timestamp
-	6,  // 2: server_v1.VariableMain.modified_at:type_name -> google.protobuf.Timestamp
-	5,  // 3: server_v1.VariableListReq.scope:type_name -> common.ScopeSt
+	6,  // 0: server_v1.VariableMain.scope:type_name -> common.ScopeSt
+	7,  // 1: server_v1.VariableMain.created_at:type_name -> google.protobuf.Timestamp
+	7,  // 2: server_v1.VariableMain.modified_at:type_name -> google.protobuf.Timestamp
+	6,  // 3: server_v1.VariableListReq.scope:type_name -> common.ScopeSt
 	0,  // 4: server_v1.VariableListRep.results:type_name -> server_v1.VariableMain
-	5,  // 5: server_v1.VariableSetReq.scope:type_name -> common.ScopeSt
-	5,  // 6: server_v1.VariableDeleteReq.scope:type_name -> common.ScopeSt
-	1,  // 7: server_v1.VariableService.ListVariable:input_type -> server_v1.VariableListReq
-	3,  // 8: server_v1.VariableService.SetVariable:input_type -> server_v1.VariableSetReq
-	4,  // 9: server_v1.VariableService.DeleteVariable:input_type -> server_v1.VariableDeleteReq
-	2,  // 10: server_v1.VariableService.ListVariable:output_type -> server_v1.VariableListRep
-	7,  // 11: server_v1.VariableService.SetVariable:output_type -> google.protobuf.Empty
-	7,  // 12: server_v1.VariableService.DeleteVariable:output_type -> google.protobuf.Empty
-	10, // [10:13] is the sub-list for method output_type
-	7,  // [7:10] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	6,  // 5: server_v1.VariableSetReq.scope:type_name -> common.ScopeSt
+	6,  // 6: server_v1.VariableDeleteReq.scope:type_name -> common.ScopeSt
+	6,  // 7: server_v1.VariableMoveReq.scope:type_name -> common.ScopeSt
+	6,  // 8: server_v1.VariableMoveReq.to_scope:type_name -> common.ScopeSt
+	1,  // 9: server_v1.VariableService.ListVariable:input_type -> server_v1.VariableListReq
+	3,  // 10: server_v1.VariableService.SetVariable:input_type -> server_v1.VariableSetReq
+	4,  // 11: server_v1.VariableService.DeleteVariable:input_type -> server_v1.VariableDeleteReq
+	5,  // 12: server_v1.VariableService.MoveVariable:input_type -> server_v1.VariableMoveReq
+	2,  // 13: server_v1.VariableService.ListVariable:output_type -> server_v1.VariableListRep
+	8,  // 14: server_v1.VariableService.SetVariable:output_type -> google.protobuf.Empty
+	8,  // 15: server_v1.VariableService.DeleteVariable:output_type -> google.protobuf.Empty
+	8,  // 16: server_v1.VariableService.MoveVariable:output_type -> google.protobuf.Empty
+	13, // [13:17] is the sub-list for method output_type
+	9,  // [9:13] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_variable_proto_init() }
@@ -390,7 +460,7 @@ func file_server_v1_variable_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_v1_variable_proto_rawDesc), len(file_server_v1_variable_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

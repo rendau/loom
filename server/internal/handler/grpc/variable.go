@@ -45,6 +45,15 @@ func (h *Variable) DeleteVariable(ctx context.Context, req *pb.VariableDeleteReq
 	return &emptypb.Empty{}, nil
 }
 
+func (h *Variable) MoveVariable(ctx context.Context, req *pb.VariableMoveReq) (*emptypb.Empty, error) {
+	err := h.usecase.Move(ctx,
+		dto.DecodeScope(req.GetScope()), dto.DecodeScope(req.GetToScope()), req.GetName())
+	if err != nil {
+		return nil, encodeErr(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
 func encodeVariableMain(v *variableModel.Main, _ int) *pb.VariableMain {
 	result := &pb.VariableMain{
 		Name:      v.Name,

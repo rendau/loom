@@ -51,6 +51,24 @@ func (u *Usecase) Delete(ctx context.Context, scope commonModel.Scope, name stri
 	return nil
 }
 
+// Move переносит запись в другой скоуп. Права нужны на оба: это разом и
+// удаление из старого места, и создание в новом.
+func (u *Usecase) Move(ctx context.Context, from, to commonModel.Scope, name string) error {
+	if name == "" {
+		return errs.IdRequired
+	}
+	if err := u.authz.RequireScope(ctx, from); err != nil {
+		return err
+	}
+	if err := u.authz.RequireScope(ctx, to); err != nil {
+		return err
+	}
+	if err := u.svc.Move(ctx, from, to, name); err != nil {
+		return fmt.Errorf("svc.Move: %w", err)
+	}
+	return nil
+}
+
 // GetValue — расшифрованное значение секрета («посмотреть по кнопке»):
 // глобальные видит только admin, локальные — ещё и владелец дага.
 func (u *Usecase) GetValue(ctx context.Context, scope commonModel.Scope, name string) ([]byte, error) {

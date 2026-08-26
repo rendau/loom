@@ -1762,3 +1762,51 @@ func TestTaskResourcesOverride(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, list)
 }
+
+// Перенос переменной и секрета в другой скоуп: значение переезжает как
+// есть (у секрета клиент его и не знает), занятое имя в целевом скоупе —
+// ошибка, а не молчаливая перезапись.
+func TestVariableAndSecretMove(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "move-dag",
+		"tasks": [{"name": "a"}]
+	}`)
+	global := commonModel.GlobalScope()
+
+	// ── переменная: глобальная → скоуп дага ──
+	require.NoError(t, e.variableSvc.Set(ctx, global, "api-url", "https://example"))
+	require.NoError(t, e.variableSvc.Move(ctx, global, dagName.Scope(), "api-url"))
+
+	vars, err := e.variableSvc.List(ctx, nil)
+	require.NoError(t, err)
+	require.Len(t, vars, 1, "запись одна: перенос, а не копия")
+	assert.Equal(t, dagName.Scope(), vars[0].Scope)
+	assert.Equal(t, "https://example", vars[0].Value, "значение сохранилось")
+
+	// ── секрет: значение переезжает, вводить заново не нужно ──
+	require.NoError(t, e.secretSvc.Set(ctx, global, "db-password", []byte("s3cr3t")))
+	require.NoError(t, e.secretSvc.Move(ctx, global, dagName.Scope(), "db-password"))
+
+	value, err := e.secretSvc.GetValue(ctx, dagName.Scope(), "db-password")
+	require.NoError(t, err)
+	assert.Equal(t, "s3cr3t", string(value))
+
+	// ── имя занято в целевом скоупе ──
+	require.NoError(t, e.variableSvc.Set(ctx, global, "api-url", "https://other"))
+	err = e.variableSvc.Move(ctx, global, dagName.Scope(), "api-url")
+	require.ErrorIs(t, err, errs.VariableExists)
+
+	// исходная запись на месте — перенос не состоялся
+	globalVars, err := e.variableSvc.List(ctx, &global)
+	require.NoError(t, err)
+	require.Len(t, globalVars, 1)
+	assert.Equal(t, "https://other", globalVars[0].Value)
+
+	// ── переносить нечего ──
+	err = e.secretSvc.Move(ctx, global, dagName.Scope(), "missing")
+	require.ErrorIs(t, err, errs.SecretNotFound)
+}

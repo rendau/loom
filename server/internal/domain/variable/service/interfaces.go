@@ -10,6 +10,8 @@ import (
 type RepoDbI interface {
 	Set(ctx context.Context, scope commonModel.Scope, name, value string) error
 	Delete(ctx context.Context, scope commonModel.Scope, name string) (bool, error)
+	Move(ctx context.Context, from, to commonModel.Scope, name string) (bool, error)
+	Exists(ctx context.Context, scope commonModel.Scope, name string) (bool, error)
 	List(ctx context.Context, scope *commonModel.Scope) ([]*model.Main, error)
 	GetValues(ctx context.Context, scope commonModel.Scope, names []string) (map[string]model.Resolved, error)
 }

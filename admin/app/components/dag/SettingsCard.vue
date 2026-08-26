@@ -129,8 +129,12 @@ async function save(name: string) {
     </UCard>
     <p class="mt-1.5 flex items-center gap-1 text-xs text-muted">
       <UIcon name="i-lucide-info" class="size-3.5 shrink-0" />
-      Пустое поле — действует глобальное значение (<NuxtLink to="/settings" class="text-primary hover:underline">Настройки</NuxtLink>).
-      Длительности в Go-нотации: 720h, 90m, 0 — выключено.
+      <!-- текст одним узлом: у родителя flex+gap, иначе ссылка станет
+           отдельным flex-элементом и вокруг неё появятся пробелы -->
+      <span>
+        Пустое поле — действует глобальное значение (<NuxtLink to="/settings" class="text-primary hover:underline">Настройки</NuxtLink>).
+        Длительности в Go-нотации: 720h, 90m, 0 — выключено.
+      </span>
     </p>
   </section>
 </template>

@@ -50,12 +50,24 @@ function isValid(name: string): boolean {
   const def = settingDefs.find(d => d.name === name)
   if (!def)
     return false
-  return settingValueValid(def, (values.value[name] ?? '').trim())
+  const raw = (values.value[name] ?? '').trim()
+  // пустое поле — «вернуть как было из коробки»: глобальное значение
+  // нельзя удалить (retention и executor обязаны видеть полный набор),
+  // поэтому записываем дефолт из реестра
+  return raw === '' || settingValueValid(def, raw)
 }
 
 async function save(name: string) {
-  const value = (values.value[name] ?? '').trim()
-  const ok = await action.run(() => setSetting(globalScope, name, value), { success: 'Настройка сохранена' })
+  const def = settingDefs.find(d => d.name === name)
+  if (!def)
+    return
+  const raw = (values.value[name] ?? '').trim()
+  const value = raw === '' ? def.default : raw
+
+  const ok = await action.run(
+    () => setSetting(globalScope, name, value),
+    { success: raw === '' ? `Возвращено значение по умолчанию: ${def.default}` : 'Настройка сохранена' },
+  )
   if (ok !== undefined)
     await load()
 }
@@ -89,6 +101,8 @@ async function save(name: string) {
           Глобальные значения инсталляции: действуют на все даги и подхватываются фоновыми
           процессами без рестарта. Настройки хранения ранов и TTL Job'ов можно уточнить для
           конкретного дага в его карточке — уточнение приоритетнее.
+          Пустое поле возвращает значение по умолчанию (оно же в подсказке поля): глобальное
+          значение не удаляется, иначе фоновым процессам было бы нечего читать.
         </p>
 
         <UCard :ui="{ body: 'p-0 sm:p-0' }">

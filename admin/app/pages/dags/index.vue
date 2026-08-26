@@ -272,9 +272,6 @@ const columns: TableColumn<Dag>[] = [
               <UIcon name="i-lucide-loader-circle" class="animate-spin" />
               обновляется
             </UBadge>
-            <UTooltip v-if="row.original.auto_update" text="Авто-обновление проекта: digest тега отслеживается в registry">
-              <UBadge color="info" variant="subtle" size="sm">auto</UBadge>
-            </UTooltip>
             <UTooltip v-if="row.original.template_orphaned" text="Шаблон пропал из образа при последней регистрации — даг работает на последнем известном манифесте">
               <UBadge color="warning" variant="subtle" size="sm">шаблон исчез</UBadge>
             </UTooltip>

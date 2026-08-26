@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DagRef } from '~/types/common'
 import { setTaskResources } from '~/api/dag.api'
 import type { DagTask, TaskResourcesOverride } from '~/types/dag'
 
@@ -7,7 +8,7 @@ import type { DagTask, TaskResourcesOverride } from '~/types/dag'
 // Все поля пустые — оверрайд снимается.
 
 const props = defineProps<{
-  dagName: string
+  dagRef: DagRef
   task: DagTask | null
   override: TaskResourcesOverride | null
 }>()
@@ -58,7 +59,7 @@ async function save() {
   const task = props.task
   if (!task)
     return
-  const ok = await action.run(() => setTaskResources(props.dagName, task.name, {
+  const ok = await action.run(() => setTaskResources(props.dagRef, task.name, {
     cpu_request: values.value.cpu_request.trim(),
     cpu_limit: values.value.cpu_limit.trim(),
     memory_request: values.value.memory_request.trim(),

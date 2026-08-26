@@ -1,80 +1,53 @@
 <script setup lang="ts">
-import type { DashboardDay } from '~/types/dashboard'
+import type { ActivityPoint } from '~/utils/activity'
 
-// Столбики «раны по дням»: успех снизу, провалы сверху. Рукописный SVG —
-// ради двух графиков chart-либа не нужна (тот же приём, что в RunDagGraph).
+// Столбики «раны по времени»: успех снизу, провалы, сверху выполняющиеся.
+// Точки готовит activityWindow — это могут быть и дни, и часы. Вёрстка на
+// flex, а не SVG: столбики тянутся на всю ширину карточки, иначе у
+// инсталляции с парой дагов график занимал бы левую четверть.
 
-const props = defineProps<{ days: DashboardDay[] }>()
+const props = defineProps<{ points: ActivityPoint[] }>()
 
-const BAR_W = 18
-const GAP = 6
-const HEIGHT = 120
-const PAD_BOTTOM = 18
+const HEIGHT_PX = 120
 
-const layout = computed(() => {
-  const days = props.days.map(d => ({
-    date: d.date,
-    success: Number(d.success),
-    failed: Number(d.failed),
-    running: Number(d.running),
+const bars = computed(() => {
+  const max = Math.max(1, ...props.points.map(p => p.success + p.failed + p.running))
+
+  return props.points.map(p => ({
+    ...p,
+    total: p.success + p.failed + p.running,
+    // доля высоты в процентах — столбик масштабируется вместе с колонкой
+    successH: (p.success / max) * 100,
+    failedH: (p.failed / max) * 100,
+    runningH: (p.running / max) * 100,
   }))
-  const max = Math.max(1, ...days.map(d => d.success + d.failed + d.running))
-  const scale = (HEIGHT - PAD_BOTTOM - 4) / max
-
-  const bars = days.map((d, i) => {
-    const x = i * (BAR_W + GAP)
-    const successH = d.success * scale
-    const failedH = d.failed * scale
-    const runningH = d.running * scale
-    const base = HEIGHT - PAD_BOTTOM
-    return {
-      ...d,
-      x,
-      total: d.success + d.failed + d.running,
-      // снизу вверх: успех → провалы → выполняются
-      successY: base - successH,
-      successH,
-      failedY: base - successH - failedH,
-      failedH,
-      runningY: base - successH - failedH - runningH,
-      runningH,
-      label: d.date.slice(8), // день месяца
-      base,
-    }
-  })
-
-  return { bars, width: Math.max(1, days.length) * (BAR_W + GAP) - GAP, max }
 })
 </script>
 
 <template>
-  <div class="overflow-x-auto">
-    <svg :width="layout.width" :height="HEIGHT" class="block">
-      <g v-for="bar in layout.bars" :key="bar.date">
-        <title>{{ bar.date }}: {{ bar.success }} успешно, {{ bar.failed }} провал, {{ bar.running }} выполняется</title>
-        <rect
-          v-if="bar.total === 0"
-          :x="bar.x"
-          :y="bar.base - 2"
-          :width="BAR_W"
-          height="2"
-          rx="1"
-          fill="var(--ui-border-accented)"
-        />
-        <rect v-if="bar.successH > 0" :x="bar.x" :y="bar.successY" :width="BAR_W" :height="bar.successH" rx="2" fill="var(--ui-success)" />
-        <rect v-if="bar.failedH > 0" :x="bar.x" :y="bar.failedY" :width="BAR_W" :height="bar.failedH" rx="2" fill="var(--ui-error)" />
-        <rect v-if="bar.runningH > 0" :x="bar.x" :y="bar.runningY" :width="BAR_W" :height="bar.runningH" rx="2" fill="var(--ui-info)" />
-        <text
-          :x="bar.x + BAR_W / 2"
-          :y="HEIGHT - 4"
-          text-anchor="middle"
-          font-size="10"
-          fill="var(--ui-text-dimmed)"
-        >{{ bar.label }}</text>
-      </g>
-    </svg>
+  <div>
+    <div class="flex items-end gap-1.5" :style="{ height: `${HEIGHT_PX}px` }">
+      <div
+        v-for="bar in bars"
+        :key="bar.key"
+        class="flex h-full max-w-14 min-w-2 flex-1 flex-col justify-end"
+        :title="bar.title"
+      >
+        <div v-if="bar.runningH" class="rounded-t-sm bg-info" :style="{ height: `${bar.runningH}%` }" />
+        <div v-if="bar.failedH" class="bg-error" :class="{ 'rounded-t-sm': !bar.runningH }" :style="{ height: `${bar.failedH}%` }" />
+        <div v-if="bar.successH" class="bg-success" :class="{ 'rounded-t-sm': !bar.runningH && !bar.failedH }" :style="{ height: `${bar.successH}%` }" />
+        <!-- интервал без ранов: тонкая риска, чтобы шкала не «проваливалась» -->
+        <div v-if="!bar.total" class="h-0.5 rounded-sm bg-accented" />
+      </div>
+    </div>
 
-    <div class="mt-1 flex items-center gap-3 text-xs text-muted">
+    <div class="mt-1 flex items-end gap-1.5">
+      <div v-for="bar in bars" :key="bar.key" class="max-w-14 min-w-2 flex-1 text-center text-xs text-dimmed">
+        {{ bar.label }}
+      </div>
+    </div>
+
+    <div class="mt-2 flex items-center gap-3 text-xs text-muted">
       <span class="flex items-center gap-1"><span class="size-2 rounded-sm bg-success" />успех</span>
       <span class="flex items-center gap-1"><span class="size-2 rounded-sm bg-error" />провал</span>
       <span class="flex items-center gap-1"><span class="size-2 rounded-sm bg-info" />выполняется</span>

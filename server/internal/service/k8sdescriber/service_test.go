@@ -172,7 +172,7 @@ func TestInspectPodSucceededWithoutPush(t *testing.T) {
 
 	_, _, err := e.svc.Inspect(context.Background(), "registry/demo:latest")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "without pushing manifest")
+	assert.Contains(t, err.Error(), "without pushing catalog")
 }
 
 func TestInspectTimeout(t *testing.T) {

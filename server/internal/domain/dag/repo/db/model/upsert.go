@@ -6,27 +6,24 @@ import (
 	domainModel "github.com/rendau/loom/server/internal/domain/dag/model"
 )
 
+// Upsert пишется в таблицу dag: образ и манифест сюда не входят — они
+// живут в project и dag_template.
 type Upsert struct {
-	PKName string
+	PKProject string
+	PKName    string
 
-	Image       *string
-	ImageDigest *string
-	Schedule    *string
-	Catchup     *bool
-	Paused      *bool
-	AutoUpdate  *bool
-	Pool        *string
-	Manifest    *[]byte
-	ModifiedAt  *time.Time
+	Template   *string
+	Schedule   *string
+	Catchup    *bool
+	Paused     *bool
+	Pool       *string
+	ModifiedAt *time.Time
 }
 
 func (m *Upsert) CreateColumnMap() map[string]any {
-	result := map[string]any{"name": m.PKName}
-	if m.Image != nil {
-		result["image"] = *m.Image
-	}
-	if m.ImageDigest != nil {
-		result["image_digest"] = *m.ImageDigest
+	result := map[string]any{"project_name": m.PKProject, "name": m.PKName}
+	if m.Template != nil {
+		result["template"] = *m.Template
 	}
 	if m.Schedule != nil {
 		result["schedule"] = *m.Schedule
@@ -37,14 +34,8 @@ func (m *Upsert) CreateColumnMap() map[string]any {
 	if m.Paused != nil {
 		result["paused"] = *m.Paused
 	}
-	if m.AutoUpdate != nil {
-		result["auto_update"] = *m.AutoUpdate
-	}
 	if m.Pool != nil {
 		result["pool"] = *m.Pool
-	}
-	if m.Manifest != nil {
-		result["manifest"] = *m.Manifest
 	}
 	if m.ModifiedAt != nil {
 		result["modified_at"] = *m.ModifiedAt
@@ -54,12 +45,13 @@ func (m *Upsert) CreateColumnMap() map[string]any {
 
 func (m *Upsert) UpdateColumnMap() map[string]any {
 	result := m.CreateColumnMap()
+	delete(result, "project_name")
 	delete(result, "name")
 	return result
 }
 
 func (m *Upsert) PKColumnMap() map[string]any {
-	return map[string]any{"name": m.PKName}
+	return map[string]any{"project_name": m.PKProject, "name": m.PKName}
 }
 
 func (m *Upsert) ReturningColumnMap() map[string]any {
@@ -70,14 +62,11 @@ func (m *Upsert) ReturningColumnMap() map[string]any {
 
 func DecodeUpsert(v *domainModel.Edit) *Upsert {
 	return &Upsert{
-		Image:       v.Image,
-		ImageDigest: v.ImageDigest,
-		Schedule:    v.Schedule,
-		Catchup:     v.Catchup,
-		Paused:      v.Paused,
-		AutoUpdate:  v.AutoUpdate,
-		Pool:        v.Pool,
-		Manifest:    v.Manifest,
-		ModifiedAt:  v.ModifiedAt,
+		Template:   v.Template,
+		Schedule:   v.Schedule,
+		Catchup:    v.Catchup,
+		Paused:     v.Paused,
+		Pool:       v.Pool,
+		ModifiedAt: v.ModifiedAt,
 	}
 }

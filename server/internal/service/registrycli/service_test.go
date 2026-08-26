@@ -140,3 +140,44 @@ func TestResolveDigestHTTPError(t *testing.T) {
 	_, err := New("").ResolveDigest(context.Background(), testHost(t, srv)+"/demo:gone")
 	require.ErrorContains(t, err, "HTTP 404")
 }
+
+func TestResolveSize(t *testing.T) {
+	manifest := `{"schemaVersion":2,"config":{"size":1000},
+		"layers":[{"size":20000},{"size":300000}]}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/v2/demo/manifests/e2e", r.URL.Path)
+		_, _ = w.Write([]byte(manifest))
+	}))
+	defer srv.Close()
+
+	size, err := New("").ResolveSize(context.Background(), testHost(t, srv)+"/demo:e2e")
+	require.NoError(t, err)
+	assert.Equal(t, int64(321000), size)
+}
+
+// Мультиплатформенный образ: считаем по linux-манифесту, attestation'ы
+// (platform unknown/unknown) пропускаем.
+func TestResolveSizeIndex(t *testing.T) {
+	index := `{"schemaVersion":2,"manifests":[
+		{"digest":"sha256:att","platform":{"os":"unknown","architecture":"unknown"}},
+		{"digest":"sha256:arm","platform":{"os":"linux","architecture":"arm64"}}]}`
+	manifest := `{"schemaVersion":2,"config":{"size":500},"layers":[{"size":1500}]}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v2/demo/manifests/latest":
+			_, _ = w.Write([]byte(index))
+		case "/v2/demo/manifests/sha256:arm":
+			_, _ = w.Write([]byte(manifest))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	size, err := New("").ResolveSize(context.Background(), testHost(t, srv)+"/demo")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2000), size)
+}

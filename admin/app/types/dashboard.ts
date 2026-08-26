@@ -7,6 +7,7 @@ export interface DashboardWindow {
 }
 
 export interface DashboardUpcoming {
+  project: string
   dag_name: string
   next_run_at: string
   schedule: string
@@ -20,6 +21,7 @@ export interface DashboardPool {
 
 export interface DashboardFailure {
   run_id: string
+  project: string
   dag_name: string
   finished_at: string
   // первый упавший таск и исход его последней попытки
@@ -34,7 +36,17 @@ export interface DashboardDay {
   running: string
 }
 
+// Раны за час; hour — момент начала часа (ISO), показывается в таймзоне
+// смотрящего.
+export interface DashboardHour {
+  hour: string
+  success: string
+  failed: string
+  running: string
+}
+
 export interface DashboardDagDuration {
+  project: string
   dag_name: string
   avg_sec: number
   max_sec: number
@@ -51,5 +63,6 @@ export interface Dashboard {
   pools: DashboardPool[]
   recent_failures: DashboardFailure[]
   activity: DashboardDay[]
+  activity_hours: DashboardHour[]
   dag_durations: DashboardDagDuration[]
 }

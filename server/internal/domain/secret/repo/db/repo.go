@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	commonModel "github.com/rendau/loom/server/internal/domain/common/model"
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
 	"github.com/rendau/loom/server/internal/domain/secret/model"
 )
@@ -20,35 +21,37 @@ func New(base *commonRepoPg.Base) *Repo {
 	return &Repo{Base: base}
 }
 
-func (r *Repo) Set(ctx context.Context, dagName, name string, value []byte) error {
+func (r *Repo) Set(ctx context.Context, scope commonModel.Scope, name string, value []byte) error {
 	_, err := r.TxM.GetConnection(ctx).Exec(ctx, `
-		INSERT INTO secret (dag_name, name, value) VALUES ($1, $2, $3)
-		ON CONFLICT (dag_name, name) DO UPDATE SET value = excluded.value, modified_at = now()`,
-		dagName, name, value)
+		INSERT INTO secret (project_name, dag_name, name, value) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (project_name, dag_name, name)
+		DO UPDATE SET value = excluded.value, modified_at = now()`,
+		scope.Project, scope.Dag, name, value)
 	if err != nil {
 		return fmt.Errorf("Set: %w", err)
 	}
 	return nil
 }
 
-func (r *Repo) Delete(ctx context.Context, dagName, name string) (bool, error) {
+func (r *Repo) Delete(ctx context.Context, scope commonModel.Scope, name string) (bool, error) {
 	tag, err := r.TxM.GetConnection(ctx).Exec(ctx,
-		`DELETE FROM secret WHERE dag_name = $1 AND name = $2`, dagName, name)
+		`DELETE FROM secret WHERE project_name = $1 AND dag_name = $2 AND name = $3`,
+		scope.Project, scope.Dag, name)
 	if err != nil {
 		return false, fmt.Errorf("Delete: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
 }
 
-// ListMeta — метаданные секретов; dagName nil — все скоупы.
-func (r *Repo) ListMeta(ctx context.Context, dagName *string) ([]*model.Meta, error) {
-	query := `SELECT dag_name, name, created_at, modified_at FROM secret`
+// ListMeta — метаданные секретов; scope nil — все скоупы.
+func (r *Repo) ListMeta(ctx context.Context, scope *commonModel.Scope) ([]*model.Meta, error) {
+	query := `SELECT project_name, dag_name, name, created_at, modified_at FROM secret`
 	args := []any{}
-	if dagName != nil {
-		args = append(args, *dagName)
-		query += ` WHERE dag_name = $1`
+	if scope != nil {
+		args = append(args, scope.Project, scope.Dag)
+		query += ` WHERE project_name = $1 AND dag_name = $2`
 	}
-	query += ` ORDER BY dag_name, name`
+	query += ` ORDER BY project_name, dag_name, name`
 
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, query, args...)
 	if err != nil {
@@ -60,7 +63,8 @@ func (r *Repo) ListMeta(ctx context.Context, dagName *string) ([]*model.Meta, er
 	for rows.Next() {
 		var m model.Meta
 		var modifiedAt *time.Time
-		if err = rows.Scan(&m.DagName, &m.Name, &m.CreatedAt, &modifiedAt); err != nil {
+		if err = rows.Scan(&m.Scope.Project, &m.Scope.Dag, &m.Name,
+			&m.CreatedAt, &modifiedAt); err != nil {
 			return nil, fmt.Errorf("ListMeta scan: %w", err)
 		}
 		if modifiedAt != nil {
@@ -75,15 +79,17 @@ func (r *Repo) ListMeta(ctx context.Context, dagName *string) ([]*model.Meta, er
 }
 
 // GetValues возвращает сырые (возможно зашифрованные) значения секретов
-// (со скоупом-источником) по именам для дага: локальный скоуп перекрывает
-// глобальный; отсутствующие имена в результат не попадают.
-func (r *Repo) GetValues(ctx context.Context, dagName string, names []string) (map[string]model.Resolved, error) {
-	// сортировка по dag_name кладёт глобальные ('') первыми — локальные
-	// перезапишут их в map
+// (со скоупом-источником) по именам для скоупа дага: даг перекрывает
+// проект, проект — глобальный; отсутствующие имена в результат не попадают.
+func (r *Repo) GetValues(ctx context.Context, scope commonModel.Scope, names []string) (map[string]model.Resolved, error) {
+	// сортировка по (project_name, dag_name) кладёт глобальные ('','')
+	// первыми, затем проектные, затем дага — каждый следующий уровень
+	// перезаписывает предыдущий в map
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT name, value, dag_name FROM secret
-		WHERE name = ANY($2) AND dag_name IN ('', $1)
-		ORDER BY dag_name`, dagName, names)
+		SELECT name, value, project_name, dag_name FROM secret
+		WHERE name = ANY($3)
+		  AND (project_name, dag_name) IN (('', ''), ($1, ''), ($1, $2))
+		ORDER BY project_name, dag_name`, scope.Project, scope.Dag, names)
 	if err != nil {
 		return nil, fmt.Errorf("GetValues: %w", err)
 	}
@@ -93,7 +99,8 @@ func (r *Repo) GetValues(ctx context.Context, dagName string, names []string) (m
 	for rows.Next() {
 		var name string
 		var resolved model.Resolved
-		if err = rows.Scan(&name, &resolved.Value, &resolved.Scope); err != nil {
+		if err = rows.Scan(&name, &resolved.Value,
+			&resolved.Scope.Project, &resolved.Scope.Dag); err != nil {
 			return nil, fmt.Errorf("GetValues scan: %w", err)
 		}
 		result[name] = resolved
@@ -105,10 +112,11 @@ func (r *Repo) GetValues(ctx context.Context, dagName string, names []string) (m
 }
 
 // GetValue — сырое значение одного секрета точного скоупа (без override).
-func (r *Repo) GetValue(ctx context.Context, dagName, name string) ([]byte, bool, error) {
+func (r *Repo) GetValue(ctx context.Context, scope commonModel.Scope, name string) ([]byte, bool, error) {
 	var value []byte
 	err := r.TxM.GetConnection(ctx).QueryRow(ctx,
-		`SELECT value FROM secret WHERE dag_name = $1 AND name = $2`, dagName, name).Scan(&value)
+		`SELECT value FROM secret WHERE project_name = $1 AND dag_name = $2 AND name = $3`,
+		scope.Project, scope.Dag, name).Scan(&value)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, false, nil

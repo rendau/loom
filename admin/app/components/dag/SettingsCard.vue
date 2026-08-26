@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DagRef } from '~/types/common'
 import { apiErrorMessage } from '~/api/client'
 import { deleteSetting, listSettings, setSetting } from '~/api/setting.api'
 import type { Setting } from '~/types/setting'
@@ -9,7 +10,7 @@ import { perDagSettingDefs, settingValueValid } from '~/types/setting'
 // глобальное.
 
 const props = defineProps<{
-  dagName: string
+  dagRef: DagRef
   canManage: boolean
 }>()
 
@@ -23,7 +24,10 @@ const values = ref<Record<string, string>>({})
 
 async function load() {
   try {
-    const [g, o] = await Promise.all([listSettings(''), listSettings(props.dagName)])
+    const [g, o] = await Promise.all([
+      listSettings(globalScope),
+      listSettings(dagScope(props.dagRef)),
+    ])
     globals.value = g.results ?? []
     overrides.value = o.results ?? []
     loadError.value = ''
@@ -66,9 +70,11 @@ async function save(name: string) {
 
   const ok = raw === ''
     ? (hadOverride
-        ? await action.run(() => deleteSetting(props.dagName, name), { success: 'Возврат к глобальному значению' })
+        ? await action.run(() => deleteSetting(dagScope(props.dagRef), name),
+          { success: 'Возврат к более широкому значению' })
         : undefined)
-    : await action.run(() => setSetting(props.dagName, name, raw), { success: 'Настройка дага сохранена' })
+    : await action.run(() => setSetting(dagScope(props.dagRef), name, raw),
+      { success: 'Настройка дага сохранена' })
   if (ok !== undefined)
     await load()
 }

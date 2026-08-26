@@ -11,15 +11,27 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes/fake"
 
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
 )
 
+// testSpec: имя дага в объектах k8s собирается из проекта и инстанса, но
+// тесты именования проверяют одну часть — проект здесь пустой.
 func testSpec(dag, task string) runModel.LaunchSpec {
 	return runModel.LaunchSpec{
-		Ref:     runModel.AttemptRef{RunId: "0198f0e2-2c1b-7c2a-9f3e-9a1d0f5b7c11", Task: task, Attempt: 2},
-		DagName: dag,
-		Image:   "registry/dag@sha256:deadbeef",
+		Ref:   runModel.AttemptRef{RunId: "0198f0e2-2c1b-7c2a-9f3e-9a1d0f5b7c11", Task: task, Attempt: 2},
+		Dag:   dagModel.NewRef("", dag),
+		Image: "registry/dag@sha256:deadbeef",
 	}
+}
+
+// Даг в имени Job'а — «проект-инстанс»: имена инстансов уникальны только
+// внутри проекта.
+func TestJobNameIncludesProject(t *testing.T) {
+	spec := testSpec("etl", "load")
+	spec.Dag = dagModel.NewRef("nsi", "etl")
+
+	assert.Equal(t, "lt-nsi-etl-load-2-"+refHash(spec.Ref), jobName(spec))
 }
 
 func TestJobName(t *testing.T) {

@@ -1,6 +1,6 @@
 // Package service — секреты для env-инъекции в поды тасков.
-// Скоупы: dag_name = "" — глобальный, иначе локальный для дага; локальный
-// перекрывает глобальный при резолве в Launch. Значение наружу отдаёт
+// Скоупы трёхуровневые (глобальный → проект → даг); более узкий
+// перекрывает более широкий при резолве в Launch. Значение наружу отдаёт
 // только GetValue — ролевые ограничения на нём живут в usecase.
 package service
 
@@ -15,6 +15,7 @@ import (
 
 	"github.com/samber/lo"
 
+	commonModel "github.com/rendau/loom/server/internal/domain/common/model"
 	"github.com/rendau/loom/server/internal/domain/secret/model"
 	"github.com/rendau/loom/server/internal/errs"
 )
@@ -47,10 +48,10 @@ func New(repoDb RepoDbI, keyPhrase string) (*Service, error) {
 	return s, nil
 }
 
-// List — метаданные секретов; dagName nil — все скоупы, "" — только
-// глобальные, имя дага — только его локальные.
-func (s *Service) List(ctx context.Context, dagName *string) ([]*model.Meta, error) {
-	items, err := s.repoDb.ListMeta(ctx, dagName)
+// List — метаданные секретов; scope nil — все скоупы, иначе только
+// указанный.
+func (s *Service) List(ctx context.Context, scope *commonModel.Scope) ([]*model.Meta, error) {
+	items, err := s.repoDb.ListMeta(ctx, scope)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.ListMeta: %w", err)
 	}
@@ -58,7 +59,10 @@ func (s *Service) List(ctx context.Context, dagName *string) ([]*model.Meta, err
 }
 
 // Set создаёт секрет или перезаписывает значение существующего.
-func (s *Service) Set(ctx context.Context, dagName, name string, value []byte) error {
+func (s *Service) Set(ctx context.Context, scope commonModel.Scope, name string, value []byte) error {
+	if !scope.Valid() {
+		return errs.ErrFull{Err: errs.InvalidRequest, Desc: "некорректный скоуп"}
+	}
 	if !nameRe.MatchString(name) {
 		return errs.ErrFull{Err: errs.InvalidRequest, Desc: fmt.Sprintf("недопустимое имя секрета %q", name)}
 	}
@@ -74,14 +78,14 @@ func (s *Service) Set(ctx context.Context, dagName, name string, value []byte) e
 	if err != nil {
 		return err
 	}
-	if err = s.repoDb.Set(ctx, dagName, name, stored); err != nil {
+	if err = s.repoDb.Set(ctx, scope, name, stored); err != nil {
 		return fmt.Errorf("repoDb.Set: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) Delete(ctx context.Context, dagName, name string) error {
-	found, err := s.repoDb.Delete(ctx, dagName, name)
+func (s *Service) Delete(ctx context.Context, scope commonModel.Scope, name string) error {
+	found, err := s.repoDb.Delete(ctx, scope, name)
 	if err != nil {
 		return fmt.Errorf("repoDb.Delete: %w", err)
 	}
@@ -93,8 +97,8 @@ func (s *Service) Delete(ctx context.Context, dagName, name string) error {
 
 // GetValue — расшифрованное значение секрета точного скоупа (просмотр из
 // админки; ролевые ограничения — в usecase).
-func (s *Service) GetValue(ctx context.Context, dagName, name string) ([]byte, error) {
-	blob, found, err := s.repoDb.GetValue(ctx, dagName, name)
+func (s *Service) GetValue(ctx context.Context, scope commonModel.Scope, name string) ([]byte, error) {
+	blob, found, err := s.repoDb.GetValue(ctx, scope, name)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.GetValue: %w", err)
 	}
@@ -110,11 +114,11 @@ func (s *Service) GetValue(ctx context.Context, dagName, name string) ([]byte, e
 }
 
 // ResolveValues возвращает расшифрованные значения секретов для инъекции в
-// env попытки дага (локальный скоуп перекрывает глобальный); любой
+// env попытки дага (даг перекрывает проект, проект — глобальный); любой
 // отсутствующий секрет — ошибка (попытка не должна стартовать с пустой
 // переменной).
-func (s *Service) ResolveValues(ctx context.Context, dagName string, names []string) (map[string]model.Resolved, error) {
-	stored, err := s.repoDb.GetValues(ctx, dagName, names)
+func (s *Service) ResolveValues(ctx context.Context, scope commonModel.Scope, names []string) (map[string]model.Resolved, error) {
+	stored, err := s.repoDb.GetValues(ctx, scope, names)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.GetValues: %w", err)
 	}

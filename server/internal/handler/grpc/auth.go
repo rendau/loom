@@ -3,11 +3,14 @@ package handler
 import (
 	"context"
 
+	"github.com/samber/lo"
+
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/rendau/loom/api/server_v1"
 	userModel "github.com/rendau/loom/server/internal/domain/user/model"
+	"github.com/rendau/loom/server/internal/handler/grpc/dto"
 	userUsc "github.com/rendau/loom/server/internal/usecase/user"
 )
 
@@ -82,7 +85,8 @@ func encodeUserMain(v *userModel.Main, _ int) *pb.UserMain {
 		Id:        v.Id,
 		Username:  v.Username,
 		Role:      v.Role,
-		DagNames:  v.DagNames,
+		Dags:      lo.Map(v.Dags, dto.EncodeDagRef),
+		Projects:  v.Projects,
 		CreatedAt: timestamppb.New(v.CreatedAt),
 	}
 	if !v.ModifiedAt.IsZero() {

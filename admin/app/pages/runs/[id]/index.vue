@@ -21,6 +21,8 @@ const route = useRoute()
 const router = useRouter()
 const runId = String(route.params.id)
 
+// путь рана: раздел → даг, которому он принадлежит → сам ран. Даг
+// подставляется, когда ран загружен: до этого известен только id
 const run = ref<Run | null>(null)
 const tasks = ref<TaskInstance[]>([])
 const attempts = ref<Attempt[]>([])
@@ -30,6 +32,18 @@ const runEnv = ref<RunEnv[]>([])
 const artifacts = ref<ArtifactMain[]>([])
 const loading = ref(false)
 const loadError = ref('')
+
+const crumbs = computed(() => {
+  const items: { label: string, icon?: string, to?: string }[] = [
+    { label: 'Раны', icon: 'i-lucide-list', to: '/runs' },
+  ]
+  if (run.value) {
+    const ref_ = runDagRef(run.value)
+    items.push({ label: dagRefLabel(ref_), to: dagLink(ref_) })
+  }
+  items.push({ label: runId })
+  return items
+})
 
 // background — фоновый рефреш поллинга: без спиннера, чтобы кнопка
 // обновления не мигала каждые 3 секунды
@@ -68,7 +82,7 @@ async function load(background = false) {
 }
 
 // env-контекст: переменные и секреты всех скоупов — для резолва привязок
-// тасков (локальный перекрывает глобальный). Значения — текущие, снапшота
+// тасков (даг перекрывает проект, проект — глобальный). Значения — текущие, снапшота
 // на момент launch в API нет (design/07 №3) — EnvTable показывает пометку.
 const variables = ref<Variable[]>([])
 const secrets = ref<SecretMeta[]>([])
@@ -166,7 +180,7 @@ const selectedBindings = computed(() => {
     return []
   if (hasEnvSnapshot.value)
     return snapshotBindings(taskBindingKeys(mt))
-  return resolveEnvBindings([mt], run.value.dag_name, variables.value, secrets.value)
+  return resolveEnvBindings([mt], runDagRef(run.value), variables.value, secrets.value)
 })
 
 const selectedDeps = computed(() =>
@@ -182,7 +196,7 @@ const runBindings = computed(() => {
     return snapshotBindings()
   if (!run.value || manifestTasks.value.length === 0)
     return []
-  return resolveEnvBindings(manifestTasks.value, run.value.dag_name, variables.value, secrets.value)
+  return resolveEnvBindings(manifestTasks.value, runDagRef(run.value), variables.value, secrets.value)
 })
 
 function selectTask(name: string) {
@@ -257,7 +271,7 @@ const retryTarget = ref<TaskInstance | null>(null)
 function canRetry(ti: TaskInstance | null): boolean {
   return !!ti && run.value?.status !== 'running'
     && (ti.status === 'failed' || ti.status === 'success' || ti.status === 'canceled')
-    && canManageDag(run.value?.dag_name)
+    && canManageDag(run.value ? runDagRef(run.value) : undefined)
 }
 
 const retryTasks = computed(() => tasks.value.filter(canRetry).map(t => t.task))
@@ -309,7 +323,7 @@ async function confirmRetry() {
 const cancelOpen = ref(false)
 
 const canCancel = computed(() =>
-  run.value?.status === 'running' && canManageDag(run.value?.dag_name))
+  run.value?.status === 'running' && canManageDag(run.value ? runDagRef(run.value) : undefined))
 
 async function confirmCancel() {
   await action.run(
@@ -326,9 +340,12 @@ async function confirmCancel() {
 <template>
   <UDashboardPanel id="run-details">
     <template #header>
-      <UDashboardNavbar :title="run ? `${run.dag_name} / ${runId}` : runId">
+      <UDashboardNavbar :title="runId">
         <template #leading>
           <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/runs" aria-label="К списку ранов" />
+        </template>
+        <template #title>
+          <PageCrumbs :items="crumbs" kind="ран" />
         </template>
         <template #right>
           <StatusBadge v-if="run" kind="run" :status="run.status" size="lg" />
@@ -363,7 +380,7 @@ async function confirmCancel() {
         <!-- вертикальный ритм секций — только gap слота #body, без mb-* -->
         <MetaGrid>
           <MetaItem label="Даг">
-            <NuxtLink :to="`/dags/${encodeURIComponent(run.dag_name)}`" class="font-medium text-highlighted hover:text-primary hover:underline">
+            <NuxtLink :to="dagLink(runDagRef(run))" class="font-medium text-highlighted hover:text-primary hover:underline">
               {{ run.dag_name }}
             </NuxtLink>
           </MetaItem>

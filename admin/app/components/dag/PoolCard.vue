@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DagRef } from '~/types/common'
 import { apiErrorMessage } from '~/api/client'
 import { setDagPool } from '~/api/dag.api'
 import { listPools } from '~/api/pool.api'
@@ -9,7 +10,7 @@ import type { Pool } from '~/types/pool'
 // применяется со следующего рана.
 
 const props = defineProps<{
-  dagName: string
+  dagRef: DagRef
   pool: string // '' — пул не задан, таски уходят в общий default
   canManage: boolean
 }>()
@@ -50,7 +51,7 @@ watch(() => props.pool, v => selected.value = v || NO_POOL)
 async function save() {
   const value = selected.value === NO_POOL ? '' : selected.value
   const ok = await action.run(
-    () => setDagPool(props.dagName, value),
+    () => setDagPool(props.dagRef, value),
     { success: value ? `Даг привязан к пулу ${value}` : 'Пул дага снят — таски уйдут в default' },
   )
   if (ok !== undefined)

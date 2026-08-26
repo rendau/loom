@@ -31,6 +31,9 @@ message DashboardRep {
   repeated DashboardFailure recent_failures = 8;  // последние провалившиеся раны
   repeated DashboardDay activity = 9;             // раны по дням (14 дней)
   repeated DashboardDagDuration dag_durations = 10; // длительности за 7 дней
+  // Раны по часам (сутки): у инсталляции, вся история которой моложе
+  // суток, график по дням вырождается в один столбик.
+  repeated DashboardHour activity_hours = 11;
 }
 
 message DashboardWindow {
@@ -39,6 +42,7 @@ message DashboardWindow {
 }
 
 message DashboardUpcoming {
+  string project = 4;
   string dag_name = 1;
   google.protobuf.Timestamp next_run_at = 2;
   string schedule = 3;
@@ -52,6 +56,7 @@ message DashboardPool {
 
 message DashboardFailure {
   string run_id = 1;
+  string project = 6;
   string dag_name = 2;
   google.protobuf.Timestamp finished_at = 3;
   // Первый упавший таск рана и исход его последней попытки — чтобы с
@@ -67,7 +72,15 @@ message DashboardDay {
   int64 running = 4;
 }
 
+message DashboardHour {
+  google.protobuf.Timestamp hour = 1; // начало часа
+  int64 success = 2;
+  int64 failed = 3;
+  int64 running = 4;
+}
+
 message DashboardDagDuration {
+  string project = 5;
   string dag_name = 1;
   double avg_sec = 2;
   double max_sec = 3;

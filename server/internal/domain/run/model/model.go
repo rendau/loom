@@ -74,8 +74,10 @@ func TaskStatusTerminal(status string) bool {
 // рана (raw JSON-объект, nil — без параметров), LogicalDate — «дата
 // данных».
 type Main struct {
-	Id          string
-	DagName     string
+	Id  string
+	Dag dagModel.Ref
+	// Template — имя дага в образе: его получает бинарник таска в LOOM_DAG.
+	Template    string
 	Image       string // образ для запуска подов: repo@digest
 	ImageDigest string
 	Trigger     string
@@ -104,7 +106,9 @@ type Edit struct {
 type ListReq struct {
 	commonModel.ListParams
 
-	DagName *string
+	// Dag — раны конкретного дага; Project — все раны проекта.
+	Dag     *dagModel.Ref
+	Project *string
 	Status  *string
 }
 
@@ -177,8 +181,8 @@ type RunEnv struct {
 	Env        string
 	Kind       string // RunEnvKindVariable | RunEnvKindSecret
 	Name       string
-	Scope      string // '' — глобальный скоуп, иначе имя дага
-	Value      string // только у variable
+	Scope      commonModel.Scope // источник значения: глобальный, проект или даг
+	Value      string            // только у variable
 	ResolvedAt time.Time
 }
 
@@ -219,9 +223,12 @@ type ExitInfo struct {
 // digest), env-контракт LOOM_* и ресурсы контейнера из манифеста.
 type LaunchSpec struct {
 	Ref AttemptRef
-	// DagName — только для читаемых имён объектов executor'а (имя Job'а/пода);
+	// Dag — только для читаемых имён объектов executor'а (имя Job'а/пода);
 	// идентификация попытки — по Ref.
-	DagName   string
+	Dag dagModel.Ref
+	// Template — имя дага в образе для env LOOM_DAG: образ может нести
+	// несколько дагов, и бинарник должен знать, какой из них запускать.
+	Template  string
 	Image     string
 	Env       map[string]string
 	Resources *dagModel.TaskResources

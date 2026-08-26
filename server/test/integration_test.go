@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	loom "github.com/rendau/loom/sdk"
+	commonModel "github.com/rendau/loom/server/internal/domain/common/model"
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
 	"github.com/rendau/loom/server/internal/domain/dag/manifest"
 	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
@@ -33,6 +34,9 @@ import (
 	dagService "github.com/rendau/loom/server/internal/domain/dag/service"
 	poolDb "github.com/rendau/loom/server/internal/domain/pool/repo/db"
 	poolService "github.com/rendau/loom/server/internal/domain/pool/service"
+	projectModel "github.com/rendau/loom/server/internal/domain/project/model"
+	projectDb "github.com/rendau/loom/server/internal/domain/project/repo/db"
+	projectService "github.com/rendau/loom/server/internal/domain/project/service"
 	domainRetention "github.com/rendau/loom/server/internal/domain/retention"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
 	runDb "github.com/rendau/loom/server/internal/domain/run/repo/db"
@@ -206,6 +210,7 @@ func (f *fakeTasklog) deletedRuns() []string {
 // ── окружение ───────────────────────────────────────────
 
 type env struct {
+	projectSvc  *projectService.Service
 	pool        *pgxpool.Pool
 	dagSvc      *dagService.Service
 	runSvc      *runService.Service
@@ -239,8 +244,9 @@ func newEnv(t *testing.T) *env {
 	t.Cleanup(pool.Close)
 
 	_, err = pool.Exec(context.Background(),
-		`TRUNCATE attempt, run_value, run_env, task_instance, run, task_resources, dag, dag_registration, pool, secret,
-			variable, setting, app_user, session, user_dag`)
+		`TRUNCATE attempt, run_value, run_env, task_instance, run, task_resources,
+			dag, dag_template, project, project_registration, pool, secret,
+			variable, setting, app_user, session, user_dag, user_project`)
 	require.NoError(t, err)
 
 	txm := mobone.NewTransactionManager(pool)
@@ -248,6 +254,7 @@ func newEnv(t *testing.T) *env {
 
 	dagSvc := dagService.New(dagDb.New(base))
 	runSvc := runService.New(runDb.New(base), txm)
+	projectSvc := projectService.New(projectDb.New(base))
 	poolSvc := poolService.New(poolDb.New(base))
 	secretSvc, err := secretService.New(secretDb.New(base), "test-secret-key")
 	require.NoError(t, err)
@@ -265,10 +272,13 @@ func newEnv(t *testing.T) *env {
 
 	scheduler := domainScheduler.New(runSvc, dagSvc, executor, artifact, tasklog, secretSvc, variableSvc, settingSvc,
 		domainScheduler.Config{
-			Tick:          30 * time.Millisecond,
-			CronTick:      50 * time.Millisecond,
+			Tick:     30 * time.Millisecond,
+			CronTick: 50 * time.Millisecond,
+			// зомби-детект: grace должен с запасом перекрывать launch —
+			// он делает несколько запросов в БД (резолв ресурсов, настроек,
+			// переменных), а тестовый Postgres живёт в docker
 			ReconcileTick: 30 * time.Millisecond,
-			ZombieGrace:   50 * time.Millisecond,
+			ZombieGrace:   500 * time.Millisecond,
 			ClaimLimit:    10,
 			TaskEnv:       domainScheduler.TaskEnv{ArtifactAddr: "artifact:5051", ServerAddr: "server:5052"},
 		})
@@ -278,6 +288,7 @@ func newEnv(t *testing.T) *env {
 	return &env{
 		pool:        pool,
 		dagSvc:      dagSvc,
+		projectSvc:  projectSvc,
 		runSvc:      runSvc,
 		poolSvc:     poolSvc,
 		secretSvc:   secretSvc,
@@ -295,20 +306,49 @@ func newEnv(t *testing.T) *env {
 // права на даг не ограничиваем (как у внутренних вызовов control plane).
 type allowAllAuthz struct{}
 
-func (allowAllAuthz) RequireDag(context.Context, string) error { return nil }
+func (allowAllAuthz) RequireDag(context.Context, dagModel.Ref) error { return nil }
 
-// registerDag регистрирует даг по сырому манифесту (как из `describe`).
-func (e *env) registerDag(t *testing.T, rawManifest string) string {
+// registerDag регистрирует образ с одним дагом (как из `describe`) и
+// заводит от него даг-инстанс: имя проекта и инстанса совпадают с именем
+// дага в образе.
+func (e *env) registerDag(t *testing.T, rawManifest string) dagModel.Ref {
 	t.Helper()
+	return e.registerDagAs(t, "", rawManifest)
+}
+
+// registerDagAs — то же, но с явным именем инстанса: так заводят несколько
+// дагов от одного шаблона.
+func (e *env) registerDagAs(t *testing.T, name, rawManifest string) dagModel.Ref {
+	t.Helper()
+	ctx := context.Background()
 
 	m, err := manifest.Parse([]byte(rawManifest))
 	require.NoError(t, err)
 
-	dag, err := e.dagSvc.Register(context.Background(), "registry/"+m.Name+":latest",
-		"registry/"+m.Name+"@sha256:deadbeef", []byte(rawManifest), m, nil)
-	require.NoError(t, err)
+	catalog := &dagModel.Catalog{
+		SdkVersion: "0.4.0",
+		Dags:       []dagModel.CatalogDag{{Name: m.Name, Manifest: m, Raw: []byte(rawManifest)}},
+	}
 
-	return dag.Name
+	_, templates, err := e.projectSvc.Register(ctx, projectModel.RegisterSpec{
+		Name:        m.Name,
+		Image:       "registry/" + m.Name + ":latest",
+		ImageDigest: "registry/" + m.Name + "@sha256:deadbeef",
+	}, catalog)
+	require.NoError(t, err)
+	require.Empty(t, templates[0].Error)
+
+	if name == "" {
+		name = m.Name
+	}
+	ref := dagModel.NewRef(m.Name, name)
+
+	if _, _, err = e.dagSvc.Get(ctx, ref, false); err == nil {
+		if dag, gErr := e.dagSvc.Create(ctx, ref, m.Name); gErr == nil {
+			return dag.Ref
+		}
+	}
+	return ref
 }
 
 func (e *env) taskStatuses(t *testing.T, runId string) map[string]string {
@@ -965,13 +1005,14 @@ func TestSchedulerCronTrigger(t *testing.T) {
 
 	// наступление срабатывания имитируем сдвигом next_run_at в прошлое
 	_, err = e.pool.Exec(context.Background(),
-		`UPDATE dag SET next_run_at = now() - interval '1 second' WHERE name = $1`, dagName)
+		`UPDATE dag SET next_run_at = now() - interval '1 second'
+			WHERE project_name = $1 AND name = $2`, dagName.Project, dagName.Name)
 	require.NoError(t, err)
 
 	var runs []*runModel.Main
 	require.Eventually(t, func() bool {
 		runs, _, err = e.runSvc.List(context.Background(),
-			&runModel.ListReq{DagName: &dagName})
+			&runModel.ListReq{Dag: &dagName})
 		require.NoError(t, err)
 		return len(runs) > 0
 	}, waitTimeout, 10*time.Millisecond, "cron не создал ран")
@@ -985,18 +1026,19 @@ func TestSchedulerCronTrigger(t *testing.T) {
 	assert.True(t, dag.NextRunAt.After(time.Now()))
 
 	time.Sleep(200 * time.Millisecond) // несколько cron-проходов
-	runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{DagName: &dagName})
+	runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{Dag: &dagName})
 	require.NoError(t, err)
 	assert.Len(t, runs, 1, "cron не должен дублировать ран")
 
 	// пауза дага останавливает расписание: наступивший next_run_at не триггерит
 	require.NoError(t, e.dagSvc.SetPaused(context.Background(), dagName, true))
 	_, err = e.pool.Exec(context.Background(),
-		`UPDATE dag SET next_run_at = now() - interval '1 second' WHERE name = $1`, dagName)
+		`UPDATE dag SET next_run_at = now() - interval '1 second'
+			WHERE project_name = $1 AND name = $2`, dagName.Project, dagName.Name)
 	require.NoError(t, err)
 
 	time.Sleep(200 * time.Millisecond)
-	runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{DagName: &dagName})
+	runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{Dag: &dagName})
 	require.NoError(t, err)
 	assert.Len(t, runs, 1, "пауза должна останавливать cron-запуски")
 
@@ -1067,19 +1109,20 @@ func TestSchedulerCatchup(t *testing.T) {
 	var backlogStart time.Time
 	err := e.pool.QueryRow(context.Background(), `
 		UPDATE dag SET next_run_at = date_trunc('hour', now()) - interval '3 hours'
-		WHERE name = $1 RETURNING next_run_at`, dagName).Scan(&backlogStart)
+		WHERE project_name = $1 AND name = $2 RETURNING next_run_at`,
+		dagName.Project, dagName.Name).Scan(&backlogStart)
 	require.NoError(t, err)
 
 	// навёрстаны все четыре наступивших тика (-3h, -2h, -1h, -0h)
 	var runs []*runModel.Main
 	require.Eventually(t, func() bool {
-		runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{DagName: &dagName})
+		runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{Dag: &dagName})
 		require.NoError(t, err)
 		return len(runs) >= 4
 	}, waitTimeout, 10*time.Millisecond, "catchup не навёрстывает тики")
 
 	time.Sleep(200 * time.Millisecond) // ещё несколько cron-проходов — дублей нет
-	runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{DagName: &dagName})
+	runs, _, err = e.runSvc.List(context.Background(), &runModel.ListReq{Dag: &dagName})
 	require.NoError(t, err)
 	require.Len(t, runs, 4)
 
@@ -1098,7 +1141,8 @@ func TestSchedulerCatchup(t *testing.T) {
 	require.NoError(t, e.dagSvc.SetPaused(context.Background(), dagName, true))
 	past := time.Now().Add(-time.Hour).Truncate(time.Second).UTC()
 	_, err = e.pool.Exec(context.Background(),
-		`UPDATE dag SET next_run_at = $1 WHERE name = $2`, past, dagName)
+		`UPDATE dag SET next_run_at = $1 WHERE project_name = $2 AND name = $3`,
+		past, dagName.Project, dagName.Name)
 	require.NoError(t, err)
 
 	require.NoError(t, e.dagSvc.SetPaused(context.Background(), dagName, false))
@@ -1331,7 +1375,7 @@ func TestMaxActiveRuns(t *testing.T) {
 // (launch_failed); значение читается через GetValue.
 func TestSecrets(t *testing.T) {
 	e := newEnv(t)
-	require.NoError(t, e.secretSvc.Set(context.Background(), "", "db-password", []byte("s3cr3t-value")))
+	require.NoError(t, e.secretSvc.Set(context.Background(), commonModel.GlobalScope(), "db-password", []byte("s3cr3t-value")))
 
 	// в БД значение зашифровано, плейнтекста нет
 	var stored []byte
@@ -1362,11 +1406,11 @@ func TestSecrets(t *testing.T) {
 	assert.Equal(t, "DB_PASSWORD", env[0].Env)
 	assert.Equal(t, runModel.RunEnvKindSecret, env[0].Kind)
 	assert.Equal(t, "db-password", env[0].Name)
-	assert.Equal(t, "", env[0].Scope, "источник — глобальный скоуп")
+	assert.Equal(t, commonModel.GlobalScope(), env[0].Scope, "источник — глобальный скоуп")
 	assert.Empty(t, env[0].Value, "значение секрета в снапшот не пишется")
 
 	// локальный секрет дага перекрывает глобальный с тем же именем
-	require.NoError(t, e.secretSvc.Set(context.Background(), dagName, "db-password", []byte("local-value")))
+	require.NoError(t, e.secretSvc.Set(context.Background(), dagName.Scope(), "db-password", []byte("local-value")))
 	runId2, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
@@ -1382,7 +1426,7 @@ func TestSecrets(t *testing.T) {
 	env2, err := e.runSvc.ListRunEnv(context.Background(), runId2)
 	require.NoError(t, err)
 	require.Len(t, env2, 1)
-	assert.Equal(t, dagName, env2[0].Scope)
+	assert.Equal(t, dagName.Scope(), env2[0].Scope)
 
 	// список секретов — только метаданные, оба скоупа
 	metas, err := e.secretSvc.List(context.Background(), nil)
@@ -1390,13 +1434,13 @@ func TestSecrets(t *testing.T) {
 	require.Len(t, metas, 2)
 
 	// GetValue отдаёт расшифрованное значение точного скоупа
-	value, err := e.secretSvc.GetValue(context.Background(), "", "db-password")
+	value, err := e.secretSvc.GetValue(context.Background(), commonModel.GlobalScope(), "db-password")
 	require.NoError(t, err)
 	assert.Equal(t, "s3cr3t-value", string(value))
-	value, err = e.secretSvc.GetValue(context.Background(), dagName, "db-password")
+	value, err = e.secretSvc.GetValue(context.Background(), dagName.Scope(), "db-password")
 	require.NoError(t, err)
 	assert.Equal(t, "local-value", string(value))
-	_, err = e.secretSvc.GetValue(context.Background(), "", "ghost")
+	_, err = e.secretSvc.GetValue(context.Background(), commonModel.GlobalScope(), "ghost")
 	assert.ErrorIs(t, err, errs.SecretNotFound)
 
 	// отсутствующий секрет валит запуск: попытка failed с launch_failed
@@ -1415,16 +1459,16 @@ func TestSecrets(t *testing.T) {
 	assert.Equal(t, "launch_failed", attempts[0].ExitReason)
 
 	// удаление секрета — по скоупу
-	require.NoError(t, e.secretSvc.Delete(context.Background(), "", "db-password"))
-	assert.ErrorIs(t, e.secretSvc.Delete(context.Background(), "", "db-password"), errs.SecretNotFound)
-	require.NoError(t, e.secretSvc.Delete(context.Background(), dagName, "db-password"))
+	require.NoError(t, e.secretSvc.Delete(context.Background(), commonModel.GlobalScope(), "db-password"))
+	assert.ErrorIs(t, e.secretSvc.Delete(context.Background(), commonModel.GlobalScope(), "db-password"), errs.SecretNotFound)
+	require.NoError(t, e.secretSvc.Delete(context.Background(), dagName.Scope(), "db-password"))
 }
 
 // Переменные: значение инъектится в env попытки, локальный скоуп дага
 // перекрывает глобальный; отсутствующая переменная валит запуск.
 func TestVariables(t *testing.T) {
 	e := newEnv(t)
-	require.NoError(t, e.variableSvc.Set(context.Background(), "", "api-url", "https://global.example"))
+	require.NoError(t, e.variableSvc.Set(context.Background(), commonModel.GlobalScope(), "api-url", "https://global.example"))
 
 	dagName := e.registerDag(t, `{
 		"sdk_version": "0.1.0",
@@ -1447,10 +1491,10 @@ func TestVariables(t *testing.T) {
 	require.Len(t, env, 1)
 	assert.Equal(t, runModel.RunEnvKindVariable, env[0].Kind)
 	assert.Equal(t, "https://global.example", env[0].Value)
-	assert.Equal(t, "", env[0].Scope)
+	assert.Equal(t, commonModel.GlobalScope(), env[0].Scope)
 
 	// локальная переменная дага перекрывает глобальную
-	require.NoError(t, e.variableSvc.Set(context.Background(), dagName, "api-url", "https://local.example"))
+	require.NoError(t, e.variableSvc.Set(context.Background(), dagName.Scope(), "api-url", "https://local.example"))
 	runId2, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
@@ -1483,8 +1527,8 @@ func TestVariables(t *testing.T) {
 	assert.Equal(t, "launch_failed", attempts[0].ExitReason)
 
 	// удаление — по скоупу
-	require.NoError(t, e.variableSvc.Delete(context.Background(), dagName, "api-url"))
-	assert.ErrorIs(t, e.variableSvc.Delete(context.Background(), dagName, "api-url"), errs.VariableNotFound)
+	require.NoError(t, e.variableSvc.Delete(context.Background(), dagName.Scope(), "api-url"))
+	assert.ErrorIs(t, e.variableSvc.Delete(context.Background(), dagName.Scope(), "api-url"), errs.VariableNotFound)
 }
 
 // Метрики потребления: metrics-события executor'а фиксируют пик памяти
@@ -1543,7 +1587,7 @@ func TestRetentionSweep(t *testing.T) {
 	e.waitRunStatus(t, runId, runModel.RunStatusSuccess)
 
 	// лимиты — настройки в БД: TTL час, по количеству не ограничено
-	require.NoError(t, e.settingSvc.Set(context.Background(), "", "run_ttl", "1h"))
+	require.NoError(t, e.settingSvc.Set(context.Background(), commonModel.GlobalScope(), "run_ttl", "1h"))
 	retention := domainRetention.New(e.runSvc, e.artifact, e.tasklog, nil, e.settingSvc, time.Hour)
 
 	// ран моложе TTL — не удаляется
@@ -1609,8 +1653,8 @@ func TestRetentionKeepLast(t *testing.T) {
 	}
 
 	// чистка по времени выключена, глобально храним 2 последних
-	require.NoError(t, e.settingSvc.Set(ctx, "", "run_ttl", "0"))
-	require.NoError(t, e.settingSvc.Set(ctx, "", "run_keep_last", "2"))
+	require.NoError(t, e.settingSvc.Set(ctx, commonModel.GlobalScope(), "run_ttl", "0"))
+	require.NoError(t, e.settingSvc.Set(ctx, commonModel.GlobalScope(), "run_keep_last", "2"))
 	retention := domainRetention.New(e.runSvc, e.artifact, e.tasklog, nil, e.settingSvc, time.Hour)
 
 	deleted, err := retention.Sweep(ctx)
@@ -1622,7 +1666,7 @@ func TestRetentionKeepLast(t *testing.T) {
 	assert.Equal(t, []string{runIds[0]}, e.artifact.deleted())
 
 	// уточнение на даге приоритетнее глобального: храним 1
-	require.NoError(t, e.settingSvc.Set(ctx, dagName, "run_keep_last", "1"))
+	require.NoError(t, e.settingSvc.Set(ctx, dagName.Scope(), "run_keep_last", "1"))
 	deleted, err = retention.Sweep(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, deleted)
@@ -1641,33 +1685,44 @@ func TestSettings(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
 
-	require.Error(t, e.settingSvc.Set(ctx, "", "no_such_setting", "1"))
-	require.Error(t, e.settingSvc.Set(ctx, "", "run_ttl", "sometimes"))
-	require.Error(t, e.settingSvc.Set(ctx, "", "run_ttl", "-1h"))
-	require.Error(t, e.settingSvc.Set(ctx, "", "run_keep_last", "10.5"))
-	require.Error(t, e.settingSvc.Set(ctx, "some-dag", "dag_reg_ttl", "1h"), "только глобальная")
-	require.Error(t, e.settingSvc.Delete(ctx, "", "run_ttl"), "глобальные не удаляются")
+	require.Error(t, e.settingSvc.Set(ctx, commonModel.GlobalScope(), "no_such_setting", "1"))
+	require.Error(t, e.settingSvc.Set(ctx, commonModel.GlobalScope(), "run_ttl", "sometimes"))
+	require.Error(t, e.settingSvc.Set(ctx, commonModel.GlobalScope(), "run_ttl", "-1h"))
+	require.Error(t, e.settingSvc.Set(ctx, commonModel.GlobalScope(), "run_keep_last", "10.5"))
+	require.Error(t, e.settingSvc.Set(ctx, commonModel.DagScope("p", "some-dag"), "dag_reg_ttl", "1h"),
+		"только глобальная")
+	require.Error(t, e.settingSvc.Delete(ctx, commonModel.GlobalScope(), "run_ttl"), "глобальные не удаляются")
+
+	demoScope := commonModel.DagScope("demo", "demo")
+	otherScope := commonModel.DagScope("other", "other")
 
 	// TRUNCATE снёс сид миграции — работают дефолты реестра
-	eff, err := e.settingSvc.Resolve(ctx, "demo")
+	eff, err := e.settingSvc.Resolve(ctx, demoScope)
 	require.NoError(t, err)
 	assert.Equal(t, 720*time.Hour, eff.RunTTL)
 	assert.EqualValues(t, 0, eff.RunKeepLast)
 	assert.Equal(t, time.Hour, eff.K8sJobTTL)
 
-	// глобаль + уточнение дага
-	require.NoError(t, e.settingSvc.Set(ctx, "", "k8s_job_ttl", "30m"))
-	require.NoError(t, e.settingSvc.Set(ctx, "demo", "k8s_job_ttl", "2h"))
-	eff, err = e.settingSvc.Resolve(ctx, "demo")
+	// глобаль + уточнение проекта + уточнение дага
+	require.NoError(t, e.settingSvc.Set(ctx, commonModel.GlobalScope(), "k8s_job_ttl", "30m"))
+	require.NoError(t, e.settingSvc.Set(ctx, commonModel.ProjectScope("demo"), "k8s_job_ttl", "1h"))
+	require.NoError(t, e.settingSvc.Set(ctx, demoScope, "k8s_job_ttl", "2h"))
+	eff, err = e.settingSvc.Resolve(ctx, demoScope)
 	require.NoError(t, err)
 	assert.Equal(t, 2*time.Hour, eff.K8sJobTTL)
-	eff, err = e.settingSvc.Resolve(ctx, "other")
+	eff, err = e.settingSvc.Resolve(ctx, otherScope)
 	require.NoError(t, err)
 	assert.Equal(t, 30*time.Minute, eff.K8sJobTTL)
 
-	// удаление уточнения возвращает глобаль
-	require.NoError(t, e.settingSvc.Delete(ctx, "demo", "k8s_job_ttl"))
-	eff, err = e.settingSvc.Resolve(ctx, "demo")
+	// удаление уточнения дага возвращает значение проекта, а его удаление —
+	// глобальное
+	require.NoError(t, e.settingSvc.Delete(ctx, demoScope, "k8s_job_ttl"))
+	eff, err = e.settingSvc.Resolve(ctx, demoScope)
+	require.NoError(t, err)
+	assert.Equal(t, time.Hour, eff.K8sJobTTL)
+
+	require.NoError(t, e.settingSvc.Delete(ctx, commonModel.ProjectScope("demo"), "k8s_job_ttl"))
+	eff, err = e.settingSvc.Resolve(ctx, demoScope)
 	require.NoError(t, err)
 	assert.Equal(t, 30*time.Minute, eff.K8sJobTTL)
 }
@@ -1689,7 +1744,7 @@ func TestTaskResourcesOverride(t *testing.T) {
 
 	require.NoError(t, e.dagSvc.SetTaskResources(ctx, dagName, "a",
 		dagModel.TaskResources{MemoryLimit: "1Gi", CPURequest: "100m"}))
-	require.NoError(t, e.settingSvc.Set(ctx, "", "k8s_job_ttl", "45m"))
+	require.NoError(t, e.settingSvc.Set(ctx, commonModel.GlobalScope(), "k8s_job_ttl", "45m"))
 
 	_, err := e.runUsecase.Trigger(ctx, dagName, nil)
 	require.NoError(t, err)

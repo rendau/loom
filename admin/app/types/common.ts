@@ -22,3 +22,17 @@ export interface ErrorRep {
   message: string
   fields?: Record<string, string>
 }
+
+// Составной идентификатор дага: проект (docker-образ) + имя инстанса.
+export interface DagRef {
+  project: string
+  name: string
+}
+
+// Скоуп значения (переменной, секрета, настройки): пустые оба поля —
+// глобальный, только project — проектный, оба — скоуп дага. Более узкий
+// перекрывает более широкий при резолве в момент запуска.
+export interface Scope {
+  project: string
+  dag: string
+}

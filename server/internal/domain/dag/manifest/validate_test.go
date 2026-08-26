@@ -1,4 +1,4 @@
-package service
+package manifest
 
 import (
 	"testing"
@@ -6,14 +6,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rendau/loom/server/internal/domain/dag/model"
+	model "github.com/rendau/loom/server/internal/domain/dag/model"
 	"github.com/rendau/loom/server/internal/errs"
 )
 
 func validManifest() *model.Manifest {
 	return &model.Manifest{
-		SdkVersion: "0.1.0",
-		Name:       "demo-etl",
+		Name: "demo-etl",
 		Tasks: []model.Task{
 			{Name: "extract"},
 			{Name: "transform", DependsOn: []model.Dep{{Task: "extract", Streamed: true}}},
@@ -30,11 +29,11 @@ func requireInvalidManifest(t *testing.T, err error) {
 	assert.Equal(t, errs.InvalidManifest, full.Err)
 }
 
-func TestValidateManifest_Valid(t *testing.T) {
-	require.NoError(t, ValidateManifest(validManifest()))
+func TestValidate_Valid(t *testing.T) {
+	require.NoError(t, Validate(validManifest()))
 }
 
-func TestValidateManifest_ValidPolicyAndResources(t *testing.T) {
+func TestValidate_ValidPolicyAndResources(t *testing.T) {
 	m := validManifest()
 	m.Tasks[0].Retries = 3
 	m.Tasks[0].RetryDelaySec = 60
@@ -45,15 +44,14 @@ func TestValidateManifest_ValidPolicyAndResources(t *testing.T) {
 		MemoryRequest: "128Mi",
 		MemoryLimit:   "512Mi",
 	}
-	require.NoError(t, ValidateManifest(m))
+	require.NoError(t, Validate(m))
 }
 
-func TestValidateManifest_Invalid(t *testing.T) {
+func TestValidate_Invalid(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(m *model.Manifest)
 	}{
-		{"nil sdk version", func(m *model.Manifest) { m.SdkVersion = "" }},
 		{"empty name", func(m *model.Manifest) { m.Name = "" }},
 		{"bad name", func(m *model.Manifest) { m.Name = "bad/name" }},
 		{"no tasks", func(m *model.Manifest) { m.Tasks = nil }},
@@ -84,11 +82,48 @@ func TestValidateManifest_Invalid(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := validManifest()
 			tt.mutate(m)
-			requireInvalidManifest(t, ValidateManifest(m))
+			requireInvalidManifest(t, Validate(m))
 		})
 	}
 }
 
-func TestValidateManifest_NilManifest(t *testing.T) {
-	requireInvalidManifest(t, ValidateManifest(nil))
+func TestValidate_NilManifest(t *testing.T) {
+	requireInvalidManifest(t, Validate(nil))
+}
+
+// ValidateCatalog отвечает за целостность образа: версия SDK, состав дагов
+// и уникальность их имён — ошибки уровня каталога, а не отдельного дага.
+func TestValidateCatalog(t *testing.T) {
+	valid := func() *model.Catalog {
+		return &model.Catalog{
+			SdkVersion: "0.4.0",
+			Dags: []model.CatalogDag{
+				{Name: "demo-etl", Manifest: validManifest()},
+				{Name: "nsi-sync", Error: "broken"},
+			},
+		}
+	}
+
+	require.NoError(t, ValidateCatalog(valid()))
+
+	tests := []struct {
+		name   string
+		mutate func(c *model.Catalog)
+	}{
+		{"no sdk version", func(c *model.Catalog) { c.SdkVersion = "" }},
+		{"no dags", func(c *model.Catalog) { c.Dags = nil }},
+		{"bad dag name", func(c *model.Catalog) { c.Dags[0].Name = "bad/name" }},
+		{"duplicate dag", func(c *model.Catalog) { c.Dags[1].Name = c.Dags[0].Name }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := valid()
+			tt.mutate(c)
+			requireInvalidManifest(t, ValidateCatalog(c))
+		})
+	}
+
+	t.Run("nil catalog", func(t *testing.T) {
+		requireInvalidManifest(t, ValidateCatalog(nil))
+	})
 }

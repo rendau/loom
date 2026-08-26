@@ -4,12 +4,15 @@ import (
 	"database/sql"
 	"time"
 
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	domainModel "github.com/rendau/loom/server/internal/domain/run/model"
 )
 
 type RunSelect struct {
 	Id          string
+	ProjectName string
 	DagName     string
+	Template    string
 	Image       string
 	ImageDigest string
 	Trigger     string
@@ -24,7 +27,9 @@ type RunSelect struct {
 func (m *RunSelect) ListColumnMap() map[string]any {
 	return map[string]any{
 		"id":           &m.Id,
+		"project_name": &m.ProjectName,
 		"dag_name":     &m.DagName,
+		"template":     &m.Template,
 		"image":        &m.Image,
 		"image_digest": &m.ImageDigest,
 		"trigger":      &m.Trigger,
@@ -50,7 +55,8 @@ func (m *RunSelect) DefaultSortColumns() []string {
 func EncodeRunSelect(v *RunSelect, _ int) *domainModel.Main {
 	return &domainModel.Main{
 		Id:          v.Id,
-		DagName:     v.DagName,
+		Dag:         dagModel.NewRef(v.ProjectName, v.DagName),
+		Template:    v.Template,
 		Image:       v.Image,
 		ImageDigest: v.ImageDigest,
 		Trigger:     v.Trigger,

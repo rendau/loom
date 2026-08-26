@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import type { DropdownMenuItem, TableColumn, TableRow } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
-import { listDags, listDagRegistrations, registerDag, setDagAutoUpdate, setDagPaused, syncDag } from '~/api/dag.api'
-import { listPools } from '~/api/pool.api'
-import type { Dag, DagRegistration } from '~/types/dag'
-import type { Pool } from '~/types/pool'
+import { listDags, setDagPaused } from '~/api/dag.api'
+import { listProjectRegistrations, listProjects } from '~/api/project.api'
+import type { Dag } from '~/types/dag'
+import type { Project, ProjectRegistration } from '~/types/project'
 
-// Список дагов: узкая таблица-обзор парка (имя+бейджи, расписание, таски,
-// обновлён) — образ/digest/SDK живут в карточке. Частые действия
-// (запуск, пауза) — inline, остальные — в «⋯»-меню. Строка кликабельна.
+// Список дагов-инстансов: узкая таблица-обзор парка (проект+имя, бейджи,
+// расписание, таски, обновлён) — образ/digest/SDK живут в карточке дага и
+// проекта. Регистрация образов — на странице проектов: даг здесь только
+// заводится от уже зарегистрированного шаблона.
+// Частые действия (запуск, пауза) — inline, остальные — в «⋯»-меню.
 
 const { isAdmin, canManageDag } = useAuth()
+
+const route = useRoute()
 
 const PAGE_SIZE = 100
 
@@ -25,6 +29,18 @@ const action = useApiAction()
 // запуска это больше нигде не видно
 const envGaps = useDagEnvGaps()
 
+// фильтр по проекту: приходит из ссылки карточки проекта (?project=…)
+// reka-ui Select не принимает '' как value — «все проекты» через sentinel
+const ALL_PROJECTS = '__all__'
+
+const projectFilter = ref(String(route.query.project ?? '') || ALL_PROJECTS)
+const projects = ref<Project[]>([])
+
+const projectItems = computed(() => [
+  { label: 'Все проекты', value: ALL_PROJECTS },
+  ...projects.value.map(p => ({ label: p.name, value: p.name })),
+])
+
 async function load() {
   loading.value = true
   try {
@@ -33,8 +49,9 @@ async function load() {
         page: page.value - 1,
         page_size: PAGE_SIZE,
         with_total_count: true,
-        sort: ['name'],
+        sort: ['project_name', 'name'],
       },
+      project: projectFilter.value === ALL_PROJECTS ? undefined : projectFilter.value,
     })
     dags.value = rep.results
     totalCount.value = Number(rep.pagination_info.total_count)
@@ -53,78 +70,39 @@ async function load() {
 
 watch(page, load)
 
-// ── очередь регистраций: панель статусов + поллинг, пока есть активные ──
+watch(projectFilter, async (v) => {
+  page.value = 1
+  await navigateTo({ query: v === ALL_PROJECTS ? {} : { project: v } })
+  await load()
+})
 
-const registrations = ref<DagRegistration[]>([])
+// ── регистрации: индикация «проект обновляется» ────────────────────────
+// Панель статусов и ошибок живёт на странице проектов — здесь достаточно
+// бейджа у дагов того проекта, чей образ сейчас перерегистрируется.
+
+const registrations = ref<ProjectRegistration[]>([])
 let regTimer: ReturnType<typeof setInterval> | undefined
 
 const activeRegistrations = computed(() =>
   registrations.value.filter(r => r.status === 'pending' || r.status === 'running'))
 
-// провалы за последние сутки: у новой (несозданной) записи дага это
-// единственное место увидеть причину. Прочитанную плашку можно закрыть —
-// скрываем всё, что не новее отметки (отметка в localStorage, чтобы
-// закрытое не всплывало после перезагрузки); новый провал придёт позже
-// и покажется снова
-const FAILED_DISMISS_KEY = 'loom.dag-reg-failed-dismissed-at'
-const failedDismissedAt = ref(Number(localStorage.getItem(FAILED_DISMISS_KEY)) || 0)
-
-const failedRegistrations = computed(() => {
-  const since = Math.max(Date.now() - 24 * 60 * 60 * 1000, failedDismissedAt.value)
-  return registrations.value.filter(r =>
-    r.status === 'failed' && r.finished_at && new Date(r.finished_at).getTime() > since)
-})
-
-function dismissFailed() {
-  const newest = Math.max(...failedRegistrations.value.map(r => new Date(r.finished_at!).getTime()))
-  failedDismissedAt.value = newest
-  localStorage.setItem(FAILED_DISMISS_KEY, String(newest))
-}
-
-// даг «обновляется»: активная регистрация с его именем (auto) или образом
 function isUpdating(dag: Dag): boolean {
-  return activeRegistrations.value.some(r => r.dag_name === dag.name || r.image === dag.image)
+  return activeRegistrations.value.some(r => r.project_name === dag.project)
 }
 
 async function loadRegistrations() {
-  registrations.value = (await listDagRegistrations({ limit: 50 })).results
+  registrations.value = (await listProjectRegistrations({ active: true, limit: 50 })).results ?? []
 }
 
 function ensureRegPolling() {
   if (regTimer)
     return
   regTimer = setInterval(async () => {
-    const wasActive = new Set(activeRegistrations.value.map(r => r.id))
+    const wasActive = activeRegistrations.value.length
     await loadRegistrations()
-
-    const nowActive = new Set(activeRegistrations.value.map(r => r.id))
-    const finished = [...wasActive].filter(id => !nowActive.has(id))
-    if (finished.length > 0)
+    // регистрация доехала — манифесты дагов могли обновиться
+    if (wasActive > 0 && activeRegistrations.value.length < wasActive)
       await load()
-    // пачка доезжает разом — тосты по одному завалили бы экран, поэтому
-    // за тик поллинга не больше двух: успехи и провалы одной сводкой
-    const done = finished.map(id => registrations.value.find(r => r.id === id)).filter(r => !!r)
-    const succeeded = done.filter(r => r.status === 'success')
-    const errored = done.filter(r => r.status === 'failed')
-    if (succeeded.length === 1)
-      toast.add({ title: `Даг ${succeeded[0]!.dag_name} зарегистрирован`, color: 'success' })
-    else if (succeeded.length > 1) {
-      toast.add({
-        title: `Дагов зарегистрировано: ${succeeded.length}`,
-        description: succeeded.map(r => r.dag_name).join(', '),
-        color: 'success',
-      })
-    }
-    if (errored.length === 1)
-      toast.add({ title: `Регистрация ${errored[0]!.image} не удалась`, description: errored[0]!.error, color: 'error' })
-    else if (errored.length > 1) {
-      toast.add({
-        title: `Регистраций не удалось: ${errored.length}`,
-        description: 'Причины — в панели над списком дагов.',
-        color: 'error',
-      })
-    }
-
     if (activeRegistrations.value.length === 0)
       stopRegPolling()
   }, 3000)
@@ -137,8 +115,17 @@ function stopRegPolling() {
   }
 }
 
+async function loadProjects() {
+  try {
+    projects.value = (await listProjects({ list_params: { page_size: 200, sort: ['name'] } })).results ?? []
+  }
+  catch {
+    // фильтр останется с одним «все проекты» — список дагов всё равно виден
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([load(), loadPools()])
+  await Promise.all([load(), loadProjects()])
   await loadRegistrations()
   if (activeRegistrations.value.length > 0)
     ensureRegPolling()
@@ -146,102 +133,10 @@ onMounted(async () => {
 
 onUnmounted(stopRegPolling)
 
-// регистрация дагов по образам (асинхронная: describe выполняется в фоне);
-// образов можно ввести сразу несколько — по строке, через запятую и т.п.
-const registerOpen = ref(false)
-const registerImages = ref('')
-const registerBusy = ref(false)
-const registerAutoUpdate = ref(false)
-const registerSchedule = ref('')
-const registerCatchup = ref(false)
-const registerStartScheduled = ref(true)
-
-// пул дага: действует на все его таски (в коде дага пула нет).
-// reka-ui Select не принимает '' как value — «не задан» через sentinel.
-const NO_POOL = '__none__'
-const registerPool = ref(NO_POOL)
-const pools = ref<Pool[]>([])
-
-const poolItems = computed(() => [
-  { label: 'default (общий пул)', value: NO_POOL },
-  ...pools.value.map(p => ({ label: `${p.name} · ${p.slots} слотов`, value: p.name })),
-])
-
-const registerImageList = computed(() => parseImageList(registerImages.value))
-
-async function loadPools() {
-  try {
-    pools.value = (await listPools()).results ?? []
-  }
-  catch {
-    // селект останется с одним «не задан» — регистрация всё равно возможна
-  }
-}
-
-async function submitRegister() {
-  const images = registerImageList.value
-  if (images.length === 0)
-    return
-
-  const schedule = registerSchedule.value.trim()
-  const settings = {
-    auto_update: registerAutoUpdate.value,
-    schedule: schedule || undefined,
-    catchup: schedule ? registerCatchup.value : undefined,
-    paused: schedule ? !registerStartScheduled.value : undefined,
-    pool: registerPool.value === NO_POOL ? undefined : registerPool.value,
-  }
-
-  // RegisterDag принимает один образ — ставим в очередь по одному, но
-  // частичный успех не теряем: упавшие остаются в поле для повтора
-  const failed: { image: string, error: string }[] = []
-  registerBusy.value = true
-  try {
-    for (const image of images) {
-      try {
-        await registerDag({ image, ...settings })
-      }
-      catch (error) {
-        failed.push({ image, error: apiErrorMessage(error) })
-      }
-    }
-  }
-  finally {
-    registerBusy.value = false
-  }
-
-  const queued = images.length - failed.length
-  if (queued > 0) {
-    toast.add({
-      title: queued === 1 ? 'Регистрация поставлена в очередь' : `Регистраций поставлено в очередь: ${queued}`,
-      color: 'success',
-    })
-    await loadRegistrations()
-    ensureRegPolling()
-  }
-  for (const f of failed)
-    toast.add({ title: `Не удалось поставить в очередь ${f.image}`, description: f.error, color: 'error' })
-
-  if (failed.length > 0) {
-    registerImages.value = failed.map(f => f.image).join('\n')
-    return
-  }
-
-  registerOpen.value = false
-  registerImages.value = ''
-  registerAutoUpdate.value = false
-  registerSchedule.value = ''
-  registerCatchup.value = false
-  registerStartScheduled.value = true
-  registerPool.value = NO_POOL
-}
-
 // модалки над дагом — общие компоненты (используются и карточкой дага)
 const triggerTarget = ref<Dag | null>(null)
 const backfillTarget = ref<Dag | null>(null)
 const deleteTarget = ref<Dag | null>(null)
-
-const toast = useToast()
 
 async function onDeleted() {
   deleteTarget.value = null
@@ -258,68 +153,37 @@ async function onScheduleSaved() {
 
 async function togglePaused(dag: Dag) {
   const ok = await action.run(
-    () => setDagPaused(dag.name, !dag.paused),
+    () => setDagPaused(dag, !dag.paused),
     { success: dag.paused ? 'Даг снят с паузы' : 'Даг поставлен на паузу' },
   )
   if (ok !== undefined)
     await load()
 }
 
-async function toggleAutoUpdate(dag: Dag) {
-  const ok = await action.run(
-    () => setDagAutoUpdate(dag.name, !dag.auto_update),
-    { success: dag.auto_update ? 'Авто-обновление выключено' : 'Авто-обновление включено' },
-  )
-  if (ok !== undefined)
-    await load()
-}
-
-// принудительное обновление дага из registry: перерегистрация текущего
-// образа в общей очереди — статус доезжает тем же поллингом регистраций
-async function sync(dag: Dag) {
-  const ok = await action.run(
-    () => syncDag(dag.name),
-    { success: `Обновление дага ${dag.name} поставлено в очередь` },
-  )
-  if (ok !== undefined) {
-    await loadRegistrations()
-    ensureRegPolling()
-  }
-}
-
 // редкие действия — в «⋯»-меню строки; состав по правам (design/05:
 // недоступные действия не рендерятся)
 function menuItems(dag: Dag): DropdownMenuItem[][] {
   const main: DropdownMenuItem[] = []
-  if (canManageDag(dag.name)) {
+  if (canManageDag(dag)) {
     main.push({ label: 'Расписание…', icon: 'i-lucide-alarm-clock', onSelect: () => { scheduleTarget.value = dag } })
     if (dag.schedule)
       main.push({ label: 'Backfill за период…', icon: 'i-lucide-calendar-clock', onSelect: () => { backfillTarget.value = dag } })
   }
-  if (isAdmin.value) {
-    main.push({
-      label: 'Обновить из registry',
-      icon: 'i-lucide-cloud-download',
-      disabled: isUpdating(dag),
-      onSelect: () => sync(dag),
-    })
-    main.push({
-      label: dag.auto_update ? 'Выключить авто-обновление' : 'Включить авто-обновление',
-      icon: 'i-lucide-refresh-ccw-dot',
-      onSelect: () => toggleAutoUpdate(dag),
-    })
-  }
+  // образ и его обновление — свойства проекта, они на его странице
+  main.push({
+    label: 'Проект дага',
+    icon: 'i-lucide-package',
+    onSelect: () => navigateTo(`/projects/${encodeURIComponent(dag.project)}`),
+  })
 
-  const groups: DropdownMenuItem[][] = []
-  if (main.length > 0)
-    groups.push(main)
+  const groups: DropdownMenuItem[][] = [main]
   if (isAdmin.value)
     groups.push([{ label: 'Удалить…', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => { deleteTarget.value = dag } }])
   return groups
 }
 
 function openDag(_e: Event, row: TableRow<Dag>) {
-  navigateTo(`/dags/${encodeURIComponent(row.original.name)}`)
+  navigateTo(dagLink(row.original))
 }
 
 // статус-стрип: цвет квадратика последнего рана
@@ -334,6 +198,7 @@ function lastRunClass(status: string): string {
 
 const columns: TableColumn<Dag>[] = [
   { accessorKey: 'name', header: 'Даг' },
+  { id: 'project', header: 'Проект' },
   { id: 'last_runs', header: 'Последние раны' },
   { accessorKey: 'schedule', header: 'Расписание' },
   { id: 'tasks', header: 'Тасков' },
@@ -347,6 +212,13 @@ const columns: TableColumn<Dag>[] = [
     <template #header>
       <UDashboardNavbar title="Даги">
         <template #right>
+          <USelectMenu
+            v-model="projectFilter"
+            :items="projectItems"
+            value-key="value"
+            class="w-48"
+            size="sm"
+          />
           <UButton
             icon="i-lucide-refresh-cw"
             color="neutral"
@@ -355,7 +227,14 @@ const columns: TableColumn<Dag>[] = [
             aria-label="Обновить список"
             @click="load"
           />
-          <UButton v-if="isAdmin" icon="i-lucide-plus" label="Зарегистрировать" @click="registerOpen = true" />
+          <UButton
+            v-if="isAdmin"
+            icon="i-lucide-package"
+            color="neutral"
+            variant="subtle"
+            label="Проекты"
+            to="/projects"
+          />
         </template>
       </UDashboardNavbar>
     </template>
@@ -370,14 +249,6 @@ const columns: TableColumn<Dag>[] = [
         :actions="[{ label: 'Повторить', color: 'error', variant: 'soft', onClick: () => load() }]"
       />
 
-      <!-- активные и недавно провалившиеся регистрации: пачка сворачивается
-           в одну строку, иначе список дагов уезжает за экран -->
-      <DagRegistrationQueue
-        :active="activeRegistrations"
-        :failed="failedRegistrations"
-        @dismiss-failed="dismissFailed"
-      />
-
       <UTable
         :data="dags"
         :columns="columns"
@@ -388,10 +259,10 @@ const columns: TableColumn<Dag>[] = [
         <template #name-cell="{ row }">
           <div class="flex items-center gap-2">
             <span class="font-medium text-highlighted">{{ row.original.name }}</span>
-            <UTooltip v-if="envGaps.missing(row.original.name)" text="Не заполнены переменные или секреты — запуск таска упадёт launch_failed">
+            <UTooltip v-if="envGaps.missing(row.original)" text="Не заполнены переменные или секреты — запуск таска упадёт launch_failed">
               <UBadge color="error" variant="subtle" size="sm">
                 <UIcon name="i-lucide-triangle-alert" class="size-3" />
-                env: {{ envGaps.missing(row.original.name) }}
+                env: {{ envGaps.missing(row.original) }}
               </UBadge>
             </UTooltip>
             <UBadge v-if="row.original.paused" color="warning" variant="subtle" size="sm">
@@ -401,9 +272,29 @@ const columns: TableColumn<Dag>[] = [
               <UIcon name="i-lucide-loader-circle" class="animate-spin" />
               обновляется
             </UBadge>
-            <UTooltip v-if="row.original.auto_update" text="Авто-обновление: digest тега отслеживается в registry">
+            <UTooltip v-if="row.original.auto_update" text="Авто-обновление проекта: digest тега отслеживается в registry">
               <UBadge color="info" variant="subtle" size="sm">auto</UBadge>
             </UTooltip>
+            <UTooltip v-if="row.original.template_orphaned" text="Шаблон пропал из образа при последней регистрации — даг работает на последнем известном манифесте">
+              <UBadge color="warning" variant="subtle" size="sm">шаблон исчез</UBadge>
+            </UTooltip>
+          </div>
+        </template>
+
+        <template #project-cell="{ row }">
+          <div class="min-w-0">
+            <NuxtLink
+              :to="`/projects/${encodeURIComponent(row.original.project)}`"
+              class="font-medium text-highlighted hover:text-primary hover:underline"
+              @click.stop
+            >
+              {{ row.original.project }}
+            </NuxtLink>
+            <!-- имя дага в образе: у нескольких инстансов одного шаблона
+                 различаются только имена, шаблон общий -->
+            <div class="font-mono text-[11px]/4 text-dimmed">
+              {{ row.original.template }}
+            </div>
           </div>
         </template>
 
@@ -449,7 +340,7 @@ const columns: TableColumn<Dag>[] = [
 
         <template #actions-cell="{ row }">
           <div class="flex justify-end gap-1">
-            <UTooltip v-if="canManageDag(row.original.name)" text="Запустить ран">
+            <UTooltip v-if="canManageDag(row.original)" text="Запустить ран">
               <UButton
                 icon="i-lucide-play"
                 size="sm"
@@ -459,7 +350,7 @@ const columns: TableColumn<Dag>[] = [
                 @click="triggerTarget = row.original"
               />
             </UTooltip>
-            <UTooltip v-if="canManageDag(row.original.name)" :text="row.original.paused ? 'Снять с паузы' : 'Поставить на паузу'">
+            <UTooltip v-if="canManageDag(row.original)" :text="row.original.paused ? 'Снять с паузы' : 'Поставить на паузу'">
               <UButton
                 :icon="row.original.paused ? 'i-lucide-play-circle' : 'i-lucide-pause-circle'"
                 size="sm"
@@ -480,9 +371,9 @@ const columns: TableColumn<Dag>[] = [
             v-else
             icon="i-lucide-workflow"
             title="Дагов пока нет"
-            description="Зарегистрируйте docker-образ дага — схема и таски появятся сразу после describe."
+            description="Даги заводятся от дагов образа: зарегистрируйте проект — его даги появятся сразу после describe."
           >
-            <UButton v-if="isAdmin" size="sm" icon="i-lucide-plus" label="Зарегистрировать" @click="registerOpen = true" />
+            <UButton v-if="isAdmin" size="sm" icon="i-lucide-package" label="К проектам" to="/projects" />
           </EmptyState>
         </template>
       </UTable>
@@ -490,81 +381,6 @@ const columns: TableColumn<Dag>[] = [
       <div v-if="totalCount > PAGE_SIZE" class="flex justify-end border-t border-default p-2">
         <UPagination v-model:page="page" :total="totalCount" :items-per-page="PAGE_SIZE" size="sm" />
       </div>
-
-      <!-- регистрация дага -->
-      <UModal v-model:open="registerOpen" title="Регистрация дагов" description="Pull образов и describe выполняются в фоне — статус появится в панели над таблицей.">
-        <template #body>
-          <div class="space-y-4">
-            <UFormField label="Docker-образы" hint="можно списком: перенос строки, запятая, ; или пробел">
-              <UTextarea
-                v-model="registerImages"
-                class="w-full font-mono"
-                :rows="3"
-                autoresize
-                :maxrows="12"
-                placeholder="registry/my-dag:latest&#10;registry/other-dag:v2"
-                autofocus
-              />
-            </UFormField>
-            <!-- разбор списка виден до отправки: настройки ниже уедут в каждый образ -->
-            <div v-if="registerImageList.length > 1" class="space-y-1.5">
-              <p class="text-xs text-muted">
-                Образов: {{ registerImageList.length }} — настройки ниже применятся к каждому.
-              </p>
-              <div class="flex flex-wrap gap-1">
-                <UBadge
-                  v-for="image in registerImageList"
-                  :key="image"
-                  color="neutral"
-                  variant="subtle"
-                  size="sm"
-                  class="font-mono"
-                >
-                  {{ image }}
-                </UBadge>
-              </div>
-            </div>
-            <UCheckbox
-              v-model="registerAutoUpdate"
-              label="Авто-обновление образа"
-              description="Server будет следить за digest'ом тега в registry и перерегистрировать даг при изменении."
-            />
-            <UFormField label="Пул слотов" description="Действует на все таски дага.">
-              <USelectMenu v-model="registerPool" :items="poolItems" value-key="value" class="w-full" />
-            </UFormField>
-            <UFormField label="Cron-расписание (опционально)" hint="пусто — запуск вручную">
-              <UInput
-                v-model="registerSchedule"
-                class="w-full font-mono"
-                placeholder="0 3 * * *"
-              />
-            </UFormField>
-            <template v-if="registerSchedule.trim()">
-              <UCheckbox
-                v-model="registerStartScheduled"
-                label="Включить расписание сразу"
-                description="Выключено — даг создаётся на паузе: расписание сохранится, но запуски только вручную до снятия паузы."
-              />
-              <UCheckbox
-                v-model="registerCatchup"
-                label="Catchup"
-                description="Наверстывать пропущенные тики расписания (ран на каждый тик, logical_date = тик)."
-              />
-            </template>
-          </div>
-        </template>
-        <template #footer>
-          <div class="flex w-full justify-end gap-2">
-            <UButton color="neutral" variant="ghost" label="Отмена" @click="registerOpen = false" />
-            <UButton
-              :label="registerImageList.length > 1 ? `Зарегистрировать (${registerImageList.length})` : 'Зарегистрировать'"
-              :disabled="registerImageList.length === 0"
-              :loading="registerBusy"
-              @click="submitRegister"
-            />
-          </div>
-        </template>
-      </UModal>
 
       <DagTriggerModal :dag="triggerTarget" @close="triggerTarget = null" />
       <DagBackfillModal :dag="backfillTarget" @close="backfillTarget = null" />

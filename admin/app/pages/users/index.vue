@@ -3,6 +3,8 @@ import type { TableColumn } from '@nuxt/ui'
 import { createUser, deleteUser, listUsers, updateUser } from '~/api/auth.api'
 import { apiErrorMessage } from '~/api/client'
 import { listDags } from '~/api/dag.api'
+import { listProjects } from '~/api/project.api'
+import type { DagRef } from '~/types/common'
 import type { User, UserRole } from '~/types/user'
 
 // Пользователи админки (только для admin): роли, пароли и назначение дагов.
@@ -11,6 +13,7 @@ const { me, isAdmin } = useAuth()
 
 const users = ref<User[]>([])
 const dagNames = ref<string[]>([])
+const projectNames = ref<string[]>([])
 const loading = ref(false)
 const loadError = ref('')
 const action = useApiAction()
@@ -33,17 +36,31 @@ async function load() {
 
 async function loadDagNames() {
   try {
-    const rep = await listDags({ list_params: { page_size: 500, sort: ['name'] } })
-    dagNames.value = rep.results.map(d => d.name)
+    const [dags, projects] = await Promise.all([
+      listDags({ list_params: { page_size: 500, sort: ['project_name', 'name'] } }),
+      listProjects({ list_params: { page_size: 200, sort: ['name'] } }),
+    ])
+    // даги выбираются по полной метке «проект/даг»: имена инстансов
+    // уникальны только внутри проекта
+    dagNames.value = (dags.results ?? []).map(d => dagRefLabel(d))
+    projectNames.value = (projects.results ?? []).map(p => p.name)
   }
   catch {
-    // список дагов не критичен — селект просто будет пустым
+    // списки не критичны — селекты просто будут пустыми
   }
 }
 
 onMounted(async () => {
   await Promise.all([load(), loadDagNames()])
 })
+
+// назначения пользователя одним списком: проекты — целиком, даги — точечно
+function assignments(user: User): { kind: 'project' | 'dag', label: string }[] {
+  return [
+    ...(user.projects ?? []).map(p => ({ kind: 'project' as const, label: p })),
+    ...(user.dags ?? []).map(d => ({ kind: 'dag' as const, label: dagRefLabel(d) })),
+  ]
+}
 
 // создание / редактирование
 const editOpen = ref(false)
@@ -52,6 +69,7 @@ const editUsername = ref('')
 const editPassword = ref('')
 const editRole = ref<UserRole>('user')
 const editDags = ref<string[]>([])
+const editProjects = ref<string[]>([])
 
 const roleItems = [
   { label: 'Администратор', value: 'admin' },
@@ -64,6 +82,7 @@ function openCreate() {
   editPassword.value = ''
   editRole.value = 'user'
   editDags.value = []
+  editProjects.value = []
   editOpen.value = true
 }
 
@@ -72,8 +91,17 @@ function openEdit(user: User) {
   editUsername.value = user.username
   editPassword.value = ''
   editRole.value = user.role
-  editDags.value = [...user.dag_names]
+  editDags.value = (user.dags ?? []).map(d => dagRefLabel(d))
+  editProjects.value = [...(user.projects ?? [])]
   editOpen.value = true
+}
+
+// метки «проект/даг» из селекта → ссылки на даги
+function selectedDagRefs(): DagRef[] {
+  return editDags.value.map((label) => {
+    const scope = parseScopeLabel(label)
+    return { project: scope.project, name: scope.dag }
+  })
 }
 
 async function submitEdit() {
@@ -87,7 +115,8 @@ async function submitEdit() {
       username,
       password: editPassword.value,
       role: editRole.value,
-      dag_names: editRole.value === 'admin' ? [] : editDags.value,
+      dags: editRole.value === 'admin' ? [] : selectedDagRefs(),
+      projects: editRole.value === 'admin' ? [] : editProjects.value,
     }), { success: 'Пользователь создан' })
     if (ok !== undefined) {
       editOpen.value = false
@@ -99,8 +128,10 @@ async function submitEdit() {
   const ok = await action.run(() => updateUser(target.id, {
     password: editPassword.value || undefined,
     role: editRole.value,
-    dag_names: editRole.value === 'admin' ? [] : editDags.value,
-    set_dag_names: true,
+    dags: editRole.value === 'admin' ? [] : selectedDagRefs(),
+    set_dags: true,
+    projects: editRole.value === 'admin' ? [] : editProjects.value,
+    set_projects: true,
   }), { success: 'Пользователь обновлён' })
   if (ok !== undefined) {
     editOpen.value = false
@@ -178,15 +209,21 @@ const columns: TableColumn<User>[] = [
 
         <template #dags-cell="{ row }">
           <span v-if="row.original.role === 'admin'" class="text-muted">все</span>
-          <div v-else-if="row.original.dag_names.length" class="flex flex-wrap gap-1">
-            <UBadge v-for="name in row.original.dag_names.slice(0, 5)" :key="name" color="info" variant="subtle" size="sm">
-              {{ name }}
+          <div v-else-if="assignments(row.original).length" class="flex flex-wrap gap-1">
+            <UBadge
+              v-for="a in assignments(row.original).slice(0, 5)"
+              :key="`${a.kind}:${a.label}`"
+              :color="a.kind === 'project' ? 'primary' : 'info'"
+              variant="subtle"
+              size="sm"
+            >
+              {{ a.kind === 'project' ? `проект ${a.label}` : a.label }}
             </UBadge>
             <UTooltip
-              v-if="row.original.dag_names.length > 5"
-              :text="row.original.dag_names.slice(5).join(', ')"
+              v-if="assignments(row.original).length > 5"
+              :text="assignments(row.original).slice(5).map(a => a.label).join(', ')"
             >
-              <UBadge color="neutral" variant="subtle" size="sm">+{{ row.original.dag_names.length - 5 }}</UBadge>
+              <UBadge color="neutral" variant="subtle" size="sm">+{{ assignments(row.original).length - 5 }}</UBadge>
             </UTooltip>
           </div>
           <span v-else class="text-muted">— (только чтение)</span>
@@ -230,8 +267,15 @@ const columns: TableColumn<User>[] = [
             </UFormField>
             <UFormField
               v-if="editRole === 'user'"
+              label="Назначенные проекты"
+              hint="все даги проекта, включая заведённые позже"
+            >
+              <USelectMenu v-model="editProjects" :items="projectNames" multiple class="w-full" />
+            </UFormField>
+            <UFormField
+              v-if="editRole === 'user'"
               label="Назначенные даги"
-              hint="их пользователь сможет менять"
+              hint="точечно, сверх проектов"
             >
               <USelectMenu v-model="editDags" :items="dagNames" multiple class="w-full" />
             </UFormField>

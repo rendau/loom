@@ -1,31 +1,32 @@
 import { apiFetch } from '~/api/client'
+import type { Scope } from '~/types/common'
 import type { SecretMeta } from '~/types/secret'
 
-// dagName undefined — все скоупы; '' — только глобальные; имя дага — его.
-export function listSecrets(dagName?: string) {
+// scope undefined — все скоупы; иначе — только указанный.
+export function listSecrets(scope?: Scope) {
   return apiFetch<{ results: SecretMeta[] }>('/secret', {
-    query: dagName === undefined ? {} : { dag_name: dagName },
+    query: scope === undefined ? {} : { scope: { ...scope } },
   })
 }
 
 // Создание секрета или перезапись значения существующего.
-export function setSecret(dagName: string, name: string, value: string) {
+export function setSecret(scope: Scope, name: string, value: string) {
   return apiFetch<object>(`/secret/${encodeURIComponent(name)}`, {
     method: 'PUT',
-    body: { value, dag_name: dagName },
+    body: { value, scope },
   })
 }
 
-export function deleteSecret(dagName: string, name: string) {
+export function deleteSecret(scope: Scope, name: string) {
   return apiFetch<object>(`/secret/${encodeURIComponent(name)}`, {
     method: 'DELETE',
-    query: { dag_name: dagName },
+    query: { scope: { ...scope } },
   })
 }
 
 // Значение секрета («посмотреть по кнопке»); доступ ограничен ролями.
-export function getSecretValue(dagName: string, name: string) {
+export function getSecretValue(scope: Scope, name: string) {
   return apiFetch<{ value: string }>(`/secret/${encodeURIComponent(name)}/value`, {
-    query: { dag_name: dagName },
+    query: { scope: { ...scope } },
   })
 }

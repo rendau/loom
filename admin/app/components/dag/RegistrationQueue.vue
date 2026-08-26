@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import type { DagRegistration } from '~/types/dag'
+import type { ProjectRegistration } from '~/types/project'
 
 // Панель регистраций над списком дагов. Регистрируют обычно пачкой образов,
 // поэтому по алерту на образ нельзя: список дагов уезжает за экран. Пачка
 // сворачивается в одну строку-сводку с раскрывающимся (и скроллящимся)
 // списком; одиночная регистрация показывается целиком — раскрывать нечего.
 const props = defineProps<{
-  active: DagRegistration[]
-  failed: DagRegistration[]
+  active: ProjectRegistration[]
+  failed: ProjectRegistration[]
 }>()
 
 // провалы висят сутки — прочитанную причину надо уметь убрать с глаз
@@ -30,7 +30,7 @@ const activeDescription = computed(() => {
 
 const failedTitle = computed(() =>
   props.failed.length === 1
-    ? `Регистрация ${props.failed[0]!.dag_name || props.failed[0]!.image} не удалась (${formatDateTime(props.failed[0]!.finished_at)})`
+    ? `Регистрация ${props.failed[0]!.project_name || props.failed[0]!.image} не удалась (${formatDateTime(props.failed[0]!.finished_at)})`
     : `Регистрации не удались: ${props.failed.length} (за последние сутки)`)
 </script>
 
@@ -96,7 +96,7 @@ const failedTitle = computed(() =>
           <template #content>
             <ul class="mt-1 max-h-48 space-y-1.5 overflow-y-auto pr-1 text-xs">
               <li v-for="reg in failed" :key="reg.id">
-                <div class="font-mono">{{ reg.dag_name || reg.image }}</div>
+                <div class="font-mono">{{ reg.project_name || reg.image }}</div>
                 <div class="text-dimmed">
                   {{ formatDateTime(reg.finished_at) }} — {{ reg.error }}
                 </div>

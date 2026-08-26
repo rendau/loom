@@ -29,7 +29,7 @@ func (h *Run) TriggerRun(ctx context.Context, req *pb.RunTriggerReq) (*pb.RunTri
 		return nil, encodeErr(err)
 	}
 
-	runId, err := h.usecase.Trigger(ctx, req.GetDagName(), params)
+	runId, err := h.usecase.Trigger(ctx, dto.DecodeDagRef(req.GetProject(), req.GetDagName()), params)
 	if err != nil {
 		return nil, encodeErr(err)
 	}
@@ -71,7 +71,7 @@ func (h *Run) BackfillRun(ctx context.Context, req *pb.RunBackfillReq) (*pb.RunB
 		to = req.GetTo().AsTime()
 	}
 
-	runIds, err := h.usecase.Backfill(ctx, req.GetDagName(), from, to, params)
+	runIds, err := h.usecase.Backfill(ctx, dto.DecodeDagRef(req.GetProject(), req.GetDagName()), from, to, params)
 	if err != nil {
 		return nil, encodeErr(err)
 	}
@@ -108,7 +108,7 @@ func (h *Run) GetRun(ctx context.Context, req *pb.RunGetReq) (*pb.RunGetRep, err
 }
 
 func (h *Run) CountRun(ctx context.Context, req *pb.RunCountReq) (*pb.RunCountRep, error) {
-	counts, err := h.usecase.Count(ctx, req.DagName)
+	counts, err := h.usecase.Count(ctx, dto.DecodeDagRefFilter(req.Project, req.DagName))
 	if err != nil {
 		return nil, encodeErr(err)
 	}

@@ -7,6 +7,7 @@ option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
 import "google/api/annotations.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
+import "server_v1/dag.proto";
 
 // AuthService — вход в админку. Сессия — opaque-токен в заголовке
 // `Authorization: Bearer <token>`; в БД хранится только его хэш.
@@ -60,7 +61,10 @@ message UserMain {
   // Назначенные даги: их пользователь может менять (расписание, пауза,
   // переменные/секреты дага, триггер/ретрай/backfill). У admin — пусто:
   // ему доступны все.
-  repeated string dag_names = 4;
+  repeated DagRef dags = 7;
+  // Назначенные проекты: права на все их даги, включая заведённые позже.
+  repeated string projects = 8;
+  reserved 4; // были dag_names: даг идентифицируется парой (проект, имя)
   google.protobuf.Timestamp created_at = 5;
   optional google.protobuf.Timestamp modified_at = 6;
 }

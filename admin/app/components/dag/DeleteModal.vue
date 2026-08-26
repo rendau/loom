@@ -17,7 +17,7 @@ async function confirm() {
   const dag = props.dag
   if (!dag)
     return
-  const ok = await action.run(() => deleteDag(dag.name), { success: 'Даг удалён' })
+  const ok = await action.run(() => deleteDag(dag), { success: 'Даг удалён' })
   if (ok !== undefined)
     emit('deleted')
 }
@@ -27,7 +27,7 @@ async function confirm() {
   <UModal :open="dag !== null" title="Удалить даг?" @update:open="emit('close')">
     <template #body>
       <p>
-        Даг <span class="font-mono font-medium">{{ dag?.name }}</span> будет удалён.
+        Даг <span class="font-mono font-medium">{{ dag ? dagRefLabel(dag) : '' }}</span> будет удалён.
         История его ранов останется.
       </p>
     </template>

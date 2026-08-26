@@ -67,8 +67,8 @@ var pullFailReasons = map[string]bool{
 // pushResult — доставленный Job'ом ответ describe: манифест или ошибка
 // валидации дага.
 type pushResult struct {
-	manifest []byte
-	errMsg   string
+	catalog []byte
+	errMsg  string
 }
 
 type Service struct {
@@ -137,13 +137,13 @@ func (s *Service) Inspect(ctx context.Context, image string) (string, []byte, er
 		slog.Warn("describe pod has no image digest, run will not be pinned", "image", image)
 		digest = image
 	}
-	return digest, result.manifest, nil
+	return digest, result.catalog, nil
 }
 
 // Deliver передаёт манифест от describe-Job'а ожидающей регистрации
 // (вызывается из PushDagManifest). describe_id одноразовый: повторная или
 // опоздавшая доставка — false.
-func (s *Service) Deliver(id string, manifest []byte, errMsg string) bool {
+func (s *Service) Deliver(id string, catalog []byte, errMsg string) bool {
 	s.mu.Lock()
 	ch, ok := s.waiters[id]
 	if ok {
@@ -154,7 +154,7 @@ func (s *Service) Deliver(id string, manifest []byte, errMsg string) bool {
 	if !ok {
 		return false
 	}
-	ch <- pushResult{manifest: manifest, errMsg: errMsg} // буфер 1, доставка одна
+	ch <- pushResult{catalog: catalog, errMsg: errMsg} // буфер 1, доставка одна
 	return true
 }
 
@@ -256,7 +256,7 @@ func (s *Service) waitResult(ctx context.Context, name string, ch chan pushResul
 				exitedAt = time.Now()
 			} else if time.Since(exitedAt) > s.exitGrace {
 				return pushResult{}, fmt.Errorf(
-					"describe pod finished without pushing manifest (image SDK does not support %s?)",
+					"describe pod finished without pushing catalog (image SDK does not support %s?)",
 					loom.EnvDescribeID)
 			}
 

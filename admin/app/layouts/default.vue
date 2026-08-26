@@ -3,20 +3,34 @@ import type { DropdownMenuItem, NavigationMenuItem } from '@nuxt/ui'
 
 const { me, isAdmin, logout } = useAuth()
 
+const route = useRoute()
+
+// Раздел остаётся выделенным на всех его страницах, а не только на
+// списке: карточка дага, проекта, шаблона и рана лежат глубже по пути, и
+// без этого сайдбар «теряет» текущее место.
+function inSection(to: string): boolean {
+  return to === '/' ? route.path === '/' : route.path === to || route.path.startsWith(`${to}/`)
+}
+
+function navItem(label: string, icon: string, to: string): NavigationMenuItem {
+  return { label, icon, to, active: inSection(to) }
+}
+
 const navItems = computed<NavigationMenuItem[][]>(() => {
   const items: NavigationMenuItem[] = [
-    { label: 'Обзор', icon: 'i-lucide-layout-dashboard', to: '/' },
-    { label: 'Даги', icon: 'i-lucide-workflow', to: '/dags' },
-    { label: 'Раны', icon: 'i-lucide-list', to: '/runs' },
-    { label: 'Переменные и секреты', icon: 'i-lucide-key-round', to: '/env' },
+    navItem('Обзор', 'i-lucide-layout-dashboard', '/'),
+    navItem('Проекты', 'i-lucide-package', '/projects'),
+    navItem('Даги', 'i-lucide-workflow', '/dags'),
+    navItem('Раны', 'i-lucide-list', '/runs'),
+    navItem('Переменные и секреты', 'i-lucide-key-round', '/env'),
   ]
   // администрирование — отдельной группой в конце (design/03)
   const adminItems: NavigationMenuItem[] = [
-    { label: 'Пулы', icon: 'i-lucide-layers', to: '/pools' },
+    navItem('Пулы', 'i-lucide-layers', '/pools'),
   ]
   if (isAdmin.value) {
-    adminItems.push({ label: 'Настройки', icon: 'i-lucide-settings', to: '/settings' })
-    adminItems.push({ label: 'Пользователи', icon: 'i-lucide-users', to: '/users' })
+    adminItems.push(navItem('Настройки', 'i-lucide-settings', '/settings'))
+    adminItems.push(navItem('Пользователи', 'i-lucide-users', '/users'))
   }
   return [items, adminItems]
 })

@@ -2,7 +2,7 @@
 import type { TableColumn, TableRow, TabsItem } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
 import { listDags } from '~/api/dag.api'
-import { cancelRun, countRuns, listRuns } from '~/api/run.api'
+import { cancelRun, countRuns, listRuns, runDagQuery } from '~/api/run.api'
 import type { Run, RunCount } from '~/types/run'
 
 // Живой список ранов: авто-поллинг, фильтры (даг — селект, статус — чипы)
@@ -17,7 +17,7 @@ const page = ref(1) // UPagination — 1-based, API — 0-based
 const loading = ref(false)
 const loadError = ref('')
 
-// фильтры инициализируются из query (?dag_name=…&status=…) — так сюда
+// фильтры инициализируются из query (?dag=проект/даг&status=…) — так сюда
 // ведут ссылки с карточки дага и дашборда
 const route = useRoute()
 const router = useRouter()
@@ -27,7 +27,7 @@ const ALL_DAGS = '__all__'
 const ALL_STATUSES = 'all'
 
 const dagFilter = ref<string>(
-  typeof route.query.dag_name === 'string' && route.query.dag_name ? route.query.dag_name : ALL_DAGS,
+  typeof route.query.dag === 'string' && route.query.dag ? route.query.dag : ALL_DAGS,
 )
 const statusFilter = ref<string>(
   typeof route.query.status === 'string' && route.query.status ? route.query.status : ALL_STATUSES,
@@ -38,7 +38,7 @@ const counts = ref<RunCount | null>(null)
 
 async function loadCounts() {
   try {
-    counts.value = await countRuns(dagFilter.value === ALL_DAGS ? undefined : dagFilter.value)
+    counts.value = await countRuns(dagFilter.value === ALL_DAGS ? undefined : parseDagLabel(dagFilter.value))
   }
   catch {
     counts.value = null // чипы просто останутся без счётчиков
@@ -66,7 +66,8 @@ const dagItems = computed(() => [
 async function loadDagNames() {
   try {
     const rep = await listDags({ list_params: { page_size: 500, sort: ['name'] } })
-    dagNames.value = rep.results.map(d => d.name)
+    // даг выбирается полной меткой «проект/даг»
+    dagNames.value = (rep.results ?? []).map(d => dagRefLabel(d))
   }
   catch {
     // селект просто останется без вариантов — фильтр по URL всё ещё работает
@@ -84,7 +85,7 @@ async function load(background = false) {
         with_total_count: true,
         sort: ['-created_at'],
       },
-      dag_name: dagFilter.value === ALL_DAGS ? undefined : dagFilter.value,
+      ...runDagQuery(dagFilter.value === ALL_DAGS ? undefined : parseDagLabel(dagFilter.value)),
       status: statusFilter.value === ALL_STATUSES ? undefined : statusFilter.value,
     })
     runs.value = rep.results
@@ -114,7 +115,7 @@ watch(dagFilter, loadCounts)
 watch([dagFilter, statusFilter], () => {
   const query: Record<string, string> = {}
   if (dagFilter.value !== ALL_DAGS)
-    query.dag_name = dagFilter.value
+    query.dag = dagFilter.value
   if (statusFilter.value !== ALL_STATUSES)
     query.status = statusFilter.value
   router.replace({ query })
@@ -154,7 +155,7 @@ const action = useApiAction()
 const cancelTarget = ref<Run | null>(null)
 
 function canCancel(run: Run): boolean {
-  return run.status === 'running' && canManageDag(run.dag_name)
+  return run.status === 'running' && canManageDag(runDagRef(run))
 }
 
 async function confirmCancel() {
@@ -230,9 +231,13 @@ async function confirmCancel() {
         </template>
 
         <template #dag_name-cell="{ row }">
-          <!-- имя дага — только контекст строки: клик по строке ведёт в ран,
-               отдельной ссылки на даг здесь нет -->
-          <span class="font-medium text-highlighted">{{ row.original.dag_name }}</span>
+          <!-- даг — только контекст строки: клик по строке ведёт в ран,
+               отдельной ссылки на даг здесь нет. Проект под именем: имена
+               инстансов уникальны только внутри него -->
+          <div class="min-w-0">
+            <div class="truncate font-medium text-highlighted">{{ row.original.dag_name }}</div>
+            <div class="truncate text-xs text-dimmed">{{ row.original.project }}</div>
+          </div>
         </template>
 
         <template #logical_date-cell="{ row }">

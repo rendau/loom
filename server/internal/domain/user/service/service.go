@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	"github.com/rendau/loom/server/internal/domain/user/model"
 	"github.com/rendau/loom/server/internal/errs"
 )
@@ -109,18 +110,27 @@ func (s *Service) create(ctx context.Context, spec model.CreateSpec) (*model.Mai
 	if err = s.repoDb.Create(ctx, m, string(hash)); err != nil {
 		return nil, fmt.Errorf("repoDb.Create: %w", err)
 	}
-	if len(spec.DagNames) > 0 && spec.Role != model.RoleAdmin {
-		if err = s.repoDb.SetUserDags(ctx, m.Id, spec.DagNames); err != nil {
-			return nil, fmt.Errorf("repoDb.SetUserDags: %w", err)
+	if spec.Role != model.RoleAdmin {
+		if len(spec.Dags) > 0 {
+			if err = s.repoDb.SetUserDags(ctx, m.Id, spec.Dags); err != nil {
+				return nil, fmt.Errorf("repoDb.SetUserDags: %w", err)
+			}
+			m.Dags = spec.Dags
 		}
-		m.DagNames = spec.DagNames
+		if len(spec.Projects) > 0 {
+			if err = s.repoDb.SetUserProjects(ctx, m.Id, spec.Projects); err != nil {
+				return nil, fmt.Errorf("repoDb.SetUserProjects: %w", err)
+			}
+			m.Projects = spec.Projects
+		}
 	}
 
 	created, _, err := s.repoDb.Get(ctx, m.Id)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.Get: %w", err)
 	}
-	created.DagNames = m.DagNames
+	created.Dags = m.Dags
+	created.Projects = m.Projects
 	return created, nil
 }
 
@@ -158,13 +168,22 @@ func (s *Service) Update(ctx context.Context, id string, spec model.UpdateSpec) 
 		if spec.Role != nil {
 			role = *spec.Role
 		}
-		if spec.SetDagNames || role == model.RoleAdmin {
-			dagNames := spec.DagNames
+		if spec.SetDags || role == model.RoleAdmin {
+			dags := spec.Dags
 			if role == model.RoleAdmin {
-				dagNames = nil
+				dags = nil
 			}
-			if err = s.repoDb.SetUserDags(ctx, id, dagNames); err != nil {
+			if err = s.repoDb.SetUserDags(ctx, id, dags); err != nil {
 				return fmt.Errorf("repoDb.SetUserDags: %w", err)
+			}
+		}
+		if spec.SetProjects || role == model.RoleAdmin {
+			projects := spec.Projects
+			if role == model.RoleAdmin {
+				projects = nil
+			}
+			if err = s.repoDb.SetUserProjects(ctx, id, projects); err != nil {
+				return fmt.Errorf("repoDb.SetUserProjects: %w", err)
 			}
 		}
 		return nil
@@ -191,8 +210,11 @@ func (s *Service) List(ctx context.Context) ([]*model.Main, error) {
 		if u.Role == model.RoleAdmin {
 			continue
 		}
-		if u.DagNames, err = s.repoDb.ListUserDags(ctx, u.Id); err != nil {
+		if u.Dags, err = s.repoDb.ListUserDags(ctx, u.Id); err != nil {
 			return nil, fmt.Errorf("repoDb.ListUserDags: %w", err)
+		}
+		if u.Projects, err = s.repoDb.ListUserProjects(ctx, u.Id); err != nil {
+			return nil, fmt.Errorf("repoDb.ListUserProjects: %w", err)
 		}
 	}
 	return users, nil
@@ -207,8 +229,11 @@ func (s *Service) Get(ctx context.Context, id string) (*model.Main, error) {
 		return nil, errs.UserNotFound
 	}
 	if user.Role != model.RoleAdmin {
-		if user.DagNames, err = s.repoDb.ListUserDags(ctx, user.Id); err != nil {
+		if user.Dags, err = s.repoDb.ListUserDags(ctx, user.Id); err != nil {
 			return nil, fmt.Errorf("repoDb.ListUserDags: %w", err)
+		}
+		if user.Projects, err = s.repoDb.ListUserProjects(ctx, user.Id); err != nil {
+			return nil, fmt.Errorf("repoDb.ListUserProjects: %w", err)
 		}
 	}
 	return user, nil
@@ -243,8 +268,11 @@ func (s *Service) Login(ctx context.Context, username, password string) (string,
 	}
 
 	if user.Role != model.RoleAdmin {
-		if user.DagNames, err = s.repoDb.ListUserDags(ctx, user.Id); err != nil {
+		if user.Dags, err = s.repoDb.ListUserDags(ctx, user.Id); err != nil {
 			return "", nil, time.Time{}, fmt.Errorf("repoDb.ListUserDags: %w", err)
+		}
+		if user.Projects, err = s.repoDb.ListUserProjects(ctx, user.Id); err != nil {
+			return "", nil, time.Time{}, fmt.Errorf("repoDb.ListUserProjects: %w", err)
 		}
 	}
 	return token, user, expiresAt, nil
@@ -282,17 +310,43 @@ func (s *Service) CleanupSessions(ctx context.Context) (int64, error) {
 // ── права на даг ────────────────────────────────────────
 
 // CanManageDag — может ли вызывающий менять этот даг: admin (и внутренние
-// вызовы без auth) — любой, обычный пользователь — только назначенный.
-func (s *Service) CanManageDag(ctx context.Context, info model.AuthInfo, dagName string) (bool, error) {
+// вызовы без auth) — любой, обычный пользователь — назначенный ему лично
+// либо любой даг назначенного ему проекта.
+func (s *Service) CanManageDag(ctx context.Context, info model.AuthInfo, ref dagModel.Ref) (bool, error) {
 	if info.IsAdmin() {
 		return true, nil
 	}
-	if dagName == "" {
+	if ref.Empty() {
 		return false, nil // глобальный скоуп — только admin
 	}
-	ok, err := s.repoDb.HasUserDag(ctx, info.UserId, dagName)
+
+	ok, err := s.repoDb.HasUserProject(ctx, info.UserId, ref.Project)
 	if err != nil {
+		return false, fmt.Errorf("repoDb.HasUserProject: %w", err)
+	}
+	if ok {
+		return true, nil
+	}
+
+	if ok, err = s.repoDb.HasUserDag(ctx, info.UserId, ref); err != nil {
 		return false, fmt.Errorf("repoDb.HasUserDag: %w", err)
+	}
+	return ok, nil
+}
+
+// CanManageProject — права на весь проект (скоуп проекта у переменных и
+// секретов, настройки проекта): admin или назначенный проект.
+func (s *Service) CanManageProject(ctx context.Context, info model.AuthInfo, project string) (bool, error) {
+	if info.IsAdmin() {
+		return true, nil
+	}
+	if project == "" {
+		return false, nil
+	}
+
+	ok, err := s.repoDb.HasUserProject(ctx, info.UserId, project)
+	if err != nil {
+		return false, fmt.Errorf("repoDb.HasUserProject: %w", err)
 	}
 	return ok, nil
 }

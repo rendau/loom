@@ -1,6 +1,7 @@
 import { listDags } from '~/api/dag.api'
 import { listSecrets } from '~/api/secret.api'
 import { listVariables } from '~/api/variable.api'
+import type { DagRef } from '~/types/common'
 import type { Dag } from '~/types/dag'
 
 // Незаполненные переменные и секреты по дагам — для бейджа в списке дагов
@@ -22,7 +23,7 @@ export function useDagEnvGaps() {
       const [dagList, variables, secrets] = await Promise.all([
         dags
           ? Promise.resolve(dags)
-          : listDags({ list_params: { page_size: 200, sort: ['name'] } }).then(r => r.results),
+          : listDags({ list_params: { page_size: 200, sort: ['project_name', 'name'] } }).then(r => r.results),
         listVariables().then(r => r.results),
         listSecrets().then(r => r.results),
       ])
@@ -33,8 +34,8 @@ export function useDagEnvGaps() {
     }
   }
 
-  function missing(dagName: string): number {
-    return gaps.value.get(dagName) ?? 0
+  function missing(ref: DagRef): number {
+    return gaps.value.get(dagRefLabel(ref)) ?? 0
   }
 
   return { gaps, totalMissing, missing, load }

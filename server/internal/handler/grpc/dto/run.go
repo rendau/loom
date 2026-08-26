@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/rendau/loom/api/server_v1"
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	domainModel "github.com/rendau/loom/server/internal/domain/run/model"
 )
 
@@ -20,7 +21,9 @@ func EncodeRunMain(v *domainModel.Main, _ int) *pb.RunMain {
 
 	result := &pb.RunMain{
 		Id:          v.Id,
-		DagName:     v.DagName,
+		Project:     v.Dag.Project,
+		DagName:     v.Dag.Name,
+		Template:    v.Template,
 		Image:       v.Image,
 		ImageDigest: v.ImageDigest,
 		Trigger:     v.Trigger,
@@ -109,11 +112,17 @@ func DecodeRunListReq(v *pb.RunListReq) *domainModel.ListReq {
 	if v == nil {
 		return &domainModel.ListReq{}
 	}
-	return &domainModel.ListReq{
+	req := &domainModel.ListReq{
 		ListParams: DecodeListParams(v.ListParams),
-		DagName:    v.DagName,
 		Status:     v.Status,
+		Project:    v.Project,
 	}
+	// точный даг задаётся парой: имя без проекта фильтром не является
+	if v.DagName != nil && v.Project != nil {
+		req.Dag = new(dagModel.NewRef(v.GetProject(), v.GetDagName()))
+		req.Project = nil
+	}
+	return req
 }
 
 func EncodeRunEnvMain(v domainModel.RunEnv, _ int) *pb.RunEnvMain {
@@ -121,7 +130,7 @@ func EncodeRunEnvMain(v domainModel.RunEnv, _ int) *pb.RunEnvMain {
 		Env:        v.Env,
 		Kind:       v.Kind,
 		Name:       v.Name,
-		Scope:      v.Scope,
+		Scope:      EncodeScope(v.Scope),
 		Value:      v.Value,
 		ResolvedAt: timestamppb.New(v.ResolvedAt),
 	}

@@ -9,35 +9,20 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "common/common.proto";
 
-// DagService — управление дагами на control plane.
+// DagService — даги-инстансы на control plane.
 //
-// Даг регистрируется по docker-образу: server запускает контейнер в режиме
-// `describe`, валидирует полученный JSON-манифест и сохраняет даг, пиннуя
-// его к digest образа на момент регистрации.
+// Даг заводится от шаблона проекта (даг, объявленный в образе), поэтому
+// идентификатор составной: проект + имя инстанса. От одного шаблона можно
+// завести сколько угодно дагов — различаются они настройками: расписанием,
+// пулом, переменными и секретами. Сам образ регистрируется через
+// ProjectService.
 service DagService {
-  // RegisterDag ставит регистрацию (или перерегистрацию — новая версия
-  // образа) дага в очередь и сразу возвращает id записи регистрации:
-  // pull + describe выполняются асинхронно, статус — через
-  // Get/ListDagRegistration. Имя дага берётся из манифеста.
-  rpc RegisterDag(DagRegisterReq) returns (DagRegisterRep) {
+  // CreateDag заводит даг от шаблона образа. Имя инстанса уникально в
+  // пределах проекта; пустое — берётся имя шаблона.
+  rpc CreateDag(DagCreateReq) returns (DagMain) {
     option (google.api.http) = {
       post: "/dag"
       body: "*"
-    };
-  }
-
-  // ListDagRegistration — записи очереди регистраций, новые первыми:
-  // активные (pending|running) и недавно завершённые (старые чистятся по
-  // TTL). source=auto — перерегистрация авто-обновления по digest.
-  rpc ListDagRegistration(DagRegistrationListReq) returns (DagRegistrationListRep) {
-    option (google.api.http) = {
-      get: "/dag-registration"
-    };
-  }
-
-  rpc GetDagRegistration(DagRegistrationGetReq) returns (DagRegistrationMain) {
-    option (google.api.http) = {
-      get: "/dag-registration/{id}"
     };
   }
 
@@ -49,7 +34,7 @@ service DagService {
 
   rpc GetDag(DagGetReq) returns (DagMain) {
     option (google.api.http) = {
-      get: "/dag/{name}"
+      get: "/dag/{project}/{name}"
     };
   }
 
@@ -57,7 +42,7 @@ service DagService {
   // ранов: длительности и пики памяти («жирные таски» в админке).
   rpc GetDagStats(DagStatsReq) returns (DagStatsRep) {
     option (google.api.http) = {
-      get: "/dag/{name}/stats"
+      get: "/dag/{project}/{name}/stats"
     };
   }
 
@@ -66,7 +51,7 @@ service DagService {
   // снимает расписание.
   rpc SetDagSchedule(DagSetScheduleReq) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-      put: "/dag/{name}/schedule"
+      put: "/dag/{project}/{name}/schedule"
       body: "*"
     };
   }
@@ -75,7 +60,7 @@ service DagService {
   // только запуски по расписанию; ручной триггер работает.
   rpc SetDagPaused(DagSetPausedReq) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-      put: "/dag/{name}/paused"
+      put: "/dag/{project}/{name}/paused"
       body: "*"
     };
   }
@@ -86,35 +71,14 @@ service DagService {
   // следующего рана, уже созданные таски не переезжают.
   rpc SetDagPool(DagSetPoolReq) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-      put: "/dag/{name}/pool"
-      body: "*"
-    };
-  }
-
-  // SyncDag — принудительное обновление дага из registry: перерегистрация
-  // текущего образа дага (pull + describe) прямо сейчас, не дожидаясь тика
-  // авто-обновления. Кладётся в ту же очередь, что и RegisterDag, — статус
-  // виден через Get/ListDagRegistration (source=manual).
-  rpc SyncDag(DagSyncReq) returns (DagSyncRep) {
-    option (google.api.http) = {
-      post: "/dag/{name}/sync"
-      body: "*"
-    };
-  }
-
-  // SetDagAutoUpdate включает/выключает авто-обновление дага:
-  // control plane периодически сверяет digest тега образа с registry и при
-  // изменении перерегистрирует даг автоматически.
-  rpc SetDagAutoUpdate(DagSetAutoUpdateReq) returns (google.protobuf.Empty) {
-    option (google.api.http) = {
-      put: "/dag/{name}/auto_update"
+      put: "/dag/{project}/{name}/pool"
       body: "*"
     };
   }
 
   rpc DeleteDag(DagDeleteReq) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-      delete: "/dag/{name}"
+      delete: "/dag/{project}/{name}"
     };
   }
 
@@ -124,7 +88,7 @@ service DagService {
   // ретраями без перерегистрации).
   rpc ListTaskResources(TaskResourcesListReq) returns (TaskResourcesListRep) {
     option (google.api.http) = {
-      get: "/dag/{name}/task-resources"
+      get: "/dag/{project}/{name}/task-resources"
     };
   }
 
@@ -132,7 +96,7 @@ service DagService {
   // манифеста. Все поля пустые — оверрайд удаляется.
   rpc SetTaskResources(TaskResourcesSetReq) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-      put: "/dag/{name}/task-resources/{task}"
+      put: "/dag/{project}/{name}/task-resources/{task}"
       body: "*"
     };
   }
@@ -140,48 +104,49 @@ service DagService {
   // DeleteTaskResources снимает оверрайд таска (возврат к манифесту).
   rpc DeleteTaskResources(TaskResourcesDeleteReq) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-      delete: "/dag/{name}/task-resources/{task}"
-    };
-  }
-
-  // PushDagManifest — внутренний вызов describe-Job'а: при
-  // регистрации через k8s Job сам отправляет манифест (или ошибку валидации
-  // дага) на control plane, вместо передачи через логи пода. describe_id —
-  // одноразовый секрет, выданный Job'у в env при создании; ожидающая
-  // регистрация забирает манифест по нему.
-  rpc PushDagManifest(DagPushManifestReq) returns (google.protobuf.Empty) {
-    option (google.api.http) = {
-      post: "/dag/manifest"
-      body: "*"
+      delete: "/dag/{project}/{name}/task-resources/{task}"
     };
   }
 }
 
 // ── Messages ────────────────────────────────────────────
 
+// DagRef — составной идентификатор дага.
+message DagRef {
+  string project = 1;
+  string name = 2;
+}
+
 message DagMain {
-  string name = 1;
-  string image = 2;
-  string image_digest = 3;
-  string schedule = 4;
-  bool paused = 5;
-  string sdk_version = 6;
-  repeated DagTaskMain tasks = 7;
-  google.protobuf.Timestamp created_at = 8;
-  optional google.protobuf.Timestamp modified_at = 9;
-  // Ближайший запуск по cron-расписанию; отсутствует у дагов без расписания.
-  optional google.protobuf.Timestamp next_run_at = 10;
+  string project = 1;
+  string name = 2;
+  // Имя дага в образе, от которого заведён инстанс.
+  string template = 3;
+  // Шаблон пропал из образа при последней регистрации: даг работает на
+  // последнем известном манифесте.
+  bool template_orphaned = 4;
+  // Образ проекта и его закреплённый digest.
+  string image = 5;
+  string image_digest = 6;
+  // Авто-обновление образа — свойство проекта, общее для всех его дагов.
+  bool auto_update = 7;
+  string schedule = 8;
+  bool paused = 9;
   // Наверстывать пропущенные тики расписания.
-  bool catchup = 11;
+  bool catchup = 10;
+  string sdk_version = 11;
+  repeated DagTaskMain tasks = 12;
   // Лимит одновременно выполняющихся ранов; 0 — без лимита.
-  int32 max_active_runs = 12;
-  // Авто-обновление: poll-синк digest'а тега образа.
-  bool auto_update = 13;
-  // Последние раны (новые первыми, до 5) — статус-стрип в списке дагов.
-  repeated DagLastRun last_runs = 14;
+  int32 max_active_runs = 13;
   // Пул слотов дага (задаётся только из админки): действует на все его
   // таски. Пусто — таски уходят в общий пул default.
-  string pool = 15;
+  string pool = 14;
+  // Ближайший запуск по cron-расписанию; отсутствует у дагов без расписания.
+  optional google.protobuf.Timestamp next_run_at = 15;
+  google.protobuf.Timestamp created_at = 16;
+  optional google.protobuf.Timestamp modified_at = 17;
+  // Последние раны (новые первыми, до 5) — статус-стрип в списке дагов.
+  repeated DagLastRun last_runs = 18;
 }
 
 message DagLastRun {
@@ -233,59 +198,19 @@ message DagTaskResources {
   string memory_limit = 4;
 }
 
-// Register
+// Create
 
-message DagRegisterReq {
-  string image = 1;
-  // Авто-обновление; отсутствует — сохранить текущее значение
-  // (перерегистрация не сбрасывает флаг), у нового дага — false.
-  optional bool auto_update = 2;
-  // Желаемые настройки нового дага; к уже существующему (перерегистрация)
-  // не применяются — его настройками управляют отдельные ручки.
-  optional string schedule = 3; // cron; пусто/отсутствует — без расписания
-  optional bool catchup = 4;
-  optional bool paused = 5; // true — оставить на ручном запуске
-  optional string pool = 6; // пул слотов дага; пусто/отсутствует — не задан
-}
-
-message DagRegisterRep {
-  // Id записи очереди регистраций — для поллинга статуса.
-  string registration_id = 1;
-}
-
-// Registrations
-
-message DagRegistrationMain {
-  string id = 1;
-  string image = 2;
-  string source = 3; // manual | auto (авто-обновление по digest)
-  string status = 4; // pending | running | success | failed
-  string error = 5;  // причина failed
-  // Имя дага: у manual пусто до успешного describe, у auto известно сразу.
-  string dag_name = 6;
-  optional string schedule = 7;
-  optional bool catchup = 8;
-  optional bool paused = 9;
-  optional bool auto_update = 10;
-  optional string pool = 14;
-  google.protobuf.Timestamp created_at = 11;
-  optional google.protobuf.Timestamp started_at = 12;
-  optional google.protobuf.Timestamp finished_at = 13;
-}
-
-message DagRegistrationListReq {
-  optional string dag_name = 1;
-  // true — только незавершённые (pending | running).
-  optional bool active = 2;
-  int64 limit = 3; // 0 — дефолт сервера (50)
-}
-
-message DagRegistrationListRep {
-  repeated DagRegistrationMain results = 1;
-}
-
-message DagRegistrationGetReq {
-  string id = 1;
+message DagCreateReq {
+  string project = 1;
+  // Имя дага в образе (шаблон), от которого заводится инстанс.
+  string template = 2;
+  // Имя инстанса; пусто — совпадает с именем шаблона.
+  string name = 3;
+  // Желаемые настройки нового дага.
+  optional string schedule = 4; // cron; пусто/отсутствует — без расписания
+  optional bool catchup = 5;
+  optional bool paused = 6; // true — оставить на ручном запуске
+  optional string pool = 7; // пул слотов дага; пусто/отсутствует — не задан
 }
 
 // List
@@ -293,6 +218,9 @@ message DagRegistrationGetReq {
 message DagListReq {
   common.ListParamsSt list_params = 1;
   optional bool paused = 2;
+  // Фильтры: даги проекта / заведённые от конкретного шаблона.
+  optional string project = 3;
+  optional string template = 4;
 }
 
 message DagListRep {
@@ -303,15 +231,17 @@ message DagListRep {
 // Get
 
 message DagGetReq {
-  string name = 1;
+  string project = 1;
+  string name = 2;
 }
 
 // Stats
 
 message DagStatsReq {
-  string name = 1;
+  string project = 1;
+  string name = 2;
   // Сколько последних завершённых ранов агрегировать; 0 — дефолт (20).
-  int32 last_runs = 2;
+  int32 last_runs = 3;
 }
 
 // DagTaskStat — агрегат по таску: длительность текущих попыток и пик
@@ -334,49 +264,35 @@ message DagStatsRep {
 // SetSchedule
 
 message DagSetScheduleReq {
-  string name = 1;
+  string project = 1;
+  string name = 2;
   // Cron-расписание (5 полей или @daily и т.п.); пустая строка — снять.
-  string schedule = 2;
+  string schedule = 3;
   // Наверстывать пропущенные тики расписания.
-  bool catchup = 3;
+  bool catchup = 4;
 }
 
 // SetPaused
 
 message DagSetPausedReq {
-  string name = 1;
-  bool paused = 2;
+  string project = 1;
+  string name = 2;
+  bool paused = 3;
 }
 
 // Pool
 
 message DagSetPoolReq {
-  string name = 1;
-  string pool = 2; // пусто — снять пул дага
-}
-
-// Sync
-
-message DagSyncReq {
-  string name = 1;
-}
-
-message DagSyncRep {
-  // Id записи очереди регистраций — для поллинга статуса.
-  string registration_id = 1;
-}
-
-// SetAutoUpdate
-
-message DagSetAutoUpdateReq {
-  string name = 1;
-  bool auto_update = 2;
+  string project = 1;
+  string name = 2;
+  string pool = 3; // пусто — снять пул дага
 }
 
 // Delete
 
 message DagDeleteReq {
-  string name = 1;
+  string project = 1;
+  string name = 2;
 }
 
 // TaskResources (оверрайды из админки)
@@ -391,7 +307,8 @@ message TaskResourcesMain {
 }
 
 message TaskResourcesListReq {
-  string name = 1; // имя дага
+  string project = 1;
+  string name = 2; // имя дага
 }
 
 message TaskResourcesListRep {
@@ -399,23 +316,17 @@ message TaskResourcesListRep {
 }
 
 message TaskResourcesSetReq {
-  string name = 1; // имя дага
-  string task = 2;
-  string cpu_request = 3;
-  string cpu_limit = 4;
-  string memory_request = 5;
-  string memory_limit = 6;
+  string project = 1;
+  string name = 2; // имя дага
+  string task = 3;
+  string cpu_request = 4;
+  string cpu_limit = 5;
+  string memory_request = 6;
+  string memory_limit = 7;
 }
 
 message TaskResourcesDeleteReq {
-  string name = 1; // имя дага
-  string task = 2;
-}
-
-// PushManifest
-
-message DagPushManifestReq {
-  string describe_id = 1;
-  bytes manifest = 2; // JSON-манифест дага
-  string error = 3;   // непустая — describe упал (например, невалидный даг)
+  string project = 1;
+  string name = 2; // имя дага
+  string task = 3;
 }

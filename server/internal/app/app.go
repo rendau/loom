@@ -23,11 +23,13 @@ import (
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
 	dagDb "github.com/rendau/loom/server/internal/domain/dag/repo/db"
 	dagService "github.com/rendau/loom/server/internal/domain/dag/service"
-	dagregDb "github.com/rendau/loom/server/internal/domain/dagreg/repo/db"
-	dagregService "github.com/rendau/loom/server/internal/domain/dagreg/service"
 	domainDagSync "github.com/rendau/loom/server/internal/domain/dagsync"
 	poolDb "github.com/rendau/loom/server/internal/domain/pool/repo/db"
 	poolService "github.com/rendau/loom/server/internal/domain/pool/service"
+	projectDb "github.com/rendau/loom/server/internal/domain/project/repo/db"
+	projectService "github.com/rendau/loom/server/internal/domain/project/service"
+	projectregDb "github.com/rendau/loom/server/internal/domain/projectreg/repo/db"
+	projectregService "github.com/rendau/loom/server/internal/domain/projectreg/service"
 	domainRetention "github.com/rendau/loom/server/internal/domain/retention"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
 	runDb "github.com/rendau/loom/server/internal/domain/run/repo/db"
@@ -54,6 +56,7 @@ import (
 	artifactUsc "github.com/rendau/loom/server/internal/usecase/artifact"
 	dagUsc "github.com/rendau/loom/server/internal/usecase/dag"
 	poolUsc "github.com/rendau/loom/server/internal/usecase/pool"
+	projectUsc "github.com/rendau/loom/server/internal/usecase/project"
 	runUsc "github.com/rendau/loom/server/internal/usecase/run"
 	secretUsc "github.com/rendau/loom/server/internal/usecase/secret"
 	settingUsc "github.com/rendau/loom/server/internal/usecase/setting"
@@ -72,15 +75,15 @@ type executorI interface {
 }
 
 type App struct {
-	pgpool      *pgxpool.Pool
-	artifactCli *artifactcli.Service
-	executor    executorI
-	scheduler   *domainScheduler.Scheduler
-	retention   *domainRetention.Service
-	dagSync     *domainDagSync.Service
-	userSvc     *userService.Service
-	dagReg      *dagregService.Service
-	dagUsecase  *dagUsc.Usecase // обработчик очереди регистраций (dagReg.Start)
+	pgpool         *pgxpool.Pool
+	artifactCli    *artifactcli.Service
+	executor       executorI
+	scheduler      *domainScheduler.Scheduler
+	retention      *domainRetention.Service
+	dagSync        *domainDagSync.Service
+	userSvc        *userService.Service
+	projectReg     *projectregService.Service
+	projectUsecase *projectUsc.Usecase // обработчик очереди регистраций (projectReg.Start)
 
 	grpcServer       *GrpcServer
 	httpServer       *http.Server
@@ -111,6 +114,7 @@ func (a *App) Init() {
 
 	// domain
 	dagSvc := dagService.New(dagDb.New(repoBase))
+	projectSvc := projectService.New(projectDb.New(repoBase))
 	runSvc := runService.New(runDb.New(repoBase), txm)
 	poolSvc := poolService.New(poolDb.New(repoBase))
 
@@ -134,8 +138,8 @@ func (a *App) Init() {
 	// describe-Job, который push'ит манифест на control plane,
 	// иначе — docker-CLI (без sink'а)
 	var (
-		imageInspector dagUsc.ImageInspectorI = dockercli.New(config.Conf.DockerBin)
-		manifestSink   dagUsc.ManifestSinkI
+		imageInspector projectUsc.ImageInspectorI = dockercli.New(config.Conf.DockerBin)
+		catalogSink    projectUsc.CatalogSinkI
 	)
 
 	// executor + scheduler
@@ -150,7 +154,7 @@ func (a *App) Init() {
 		describer := k8sdescriber.New(clientset, config.Conf.K8sNamespace,
 			config.Conf.TaskServerAddr, config.Conf.K8sDescribeTimeout, config.Conf.K8sImagePullSecret)
 		imageInspector = describer
-		manifestSink = describer
+		catalogSink = describer
 	case "docker":
 		a.executor = dockerexecutor.New(config.Conf.DockerBin, config.Conf.DockerNetwork, config.Conf.DockerPollTick)
 	case "none":
@@ -181,19 +185,24 @@ func (a *App) Init() {
 	a.retention = domainRetention.New(runSvc, a.artifactCli, a.artifactCli, a.userSvc,
 		settingSvc, config.Conf.RetentionTick)
 
-	// очередь асинхронных регистраций дагов; обработчик (usecase) задаётся
-	// при Start — он же клиент очереди
-	a.dagReg = dagregService.New(dagregDb.New(repoBase), settingSvc,
+	// очередь асинхронных регистраций проектов; обработчик (usecase)
+	// задаётся при Start — он же клиент очереди
+	a.projectReg = projectregService.New(projectregDb.New(repoBase), settingSvc,
 		config.Conf.DagRegTick, config.Conf.DagRegStale)
 
-	// usecases
-	dagUsecase := dagUsc.New(dagSvc, imageInspector, poolSvc, manifestSink, a.dagReg, statsSvc, authzChecker)
-	a.dagUsecase = dagUsecase
+	// registry-клиент общий: авто-обновление сверяет по нему digest, а
+	// регистрация — размер образа
+	registryCli := registrycli.New(config.Conf.RegistryAuthFile)
 
-	// авто-обновление дагов: digest-чек registry + постановка
-	// перерегистрации в очередь dagreg
-	a.dagSync = domainDagSync.New(dagSvc, registrycli.New(config.Conf.RegistryAuthFile),
-		a.dagReg, config.Conf.DagSyncTick)
+	// usecases
+	projectUsecase := projectUsc.New(projectSvc, dagSvc, imageInspector, registryCli, catalogSink,
+		a.projectReg, authzChecker)
+	a.projectUsecase = projectUsecase
+	dagUsecase := dagUsc.New(dagSvc, projectSvc, poolSvc, statsSvc, authzChecker)
+
+	// авто-обновление образов: digest-чек registry + постановка
+	// перерегистрации в очередь projectreg
+	a.dagSync = domainDagSync.New(projectSvc, registryCli, a.projectReg, config.Conf.DagSyncTick)
 
 	runUsecase := runUsc.New(runSvc, dagSvc, schedulerNudger, authzChecker)
 	tasklogUsecase := tasklogUsc.New(a.artifactCli, runSvc)
@@ -208,6 +217,7 @@ func (a *App) Init() {
 	// grpc server
 	{
 		dagHandler := grpcHandler.NewDag(dagUsecase)
+		projectHandler := grpcHandler.NewProject(projectUsecase)
 		runHandler := grpcHandler.NewRun(runUsecase)
 		tasklogHandler := grpcHandler.NewTaskLog(tasklogUsecase)
 		taskValueHandler := grpcHandler.NewTaskValue(runUsecase)
@@ -222,6 +232,7 @@ func (a *App) Init() {
 
 		a.grpcServer = NewGrpcServer("main", a.userSvc, func(server *grpc.Server) {
 			pb.RegisterDagServiceServer(server, dagHandler)
+			pb.RegisterProjectServiceServer(server, projectHandler)
 			pb.RegisterRunServiceServer(server, runHandler)
 			pb.RegisterTaskLogServiceServer(server, tasklogHandler)
 			pb.RegisterTaskValueServiceServer(server, taskValueHandler)
@@ -250,6 +261,7 @@ func (a *App) Init() {
 
 			handlers := []func(context.Context, *runtime.ServeMux, *grpc.ClientConn) error{
 				pb.RegisterDagServiceHandler,
+				pb.RegisterProjectServiceHandler,
 				pb.RegisterRunServiceHandler,
 				pb.RegisterTaskLogServiceHandler,
 				pb.RegisterTaskValueServiceHandler,
@@ -357,7 +369,7 @@ func (a *App) Start() {
 
 	a.retention.Start()
 	a.dagSync.Start()
-	a.dagReg.Start(a.dagUsecase)
+	a.projectReg.Start(a.projectUsecase)
 }
 
 func (a *App) Listen() {
@@ -380,7 +392,7 @@ func (a *App) Stop() {
 	}
 	a.retention.Stop()
 	a.dagSync.Stop()
-	a.dagReg.Stop()
+	a.projectReg.Stop()
 
 	// http-gw server
 	{

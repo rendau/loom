@@ -31,8 +31,8 @@ const (
 //
 // VariableService — переменные для env-инъекции в поды тасков: как секреты,
 // но значения хранятся открыто и видны в админке.
-// Скоуп: dag_name = "" — глобальный, иначе локальный для дага; локальный
-// перекрывает глобальный с тем же именем при запуске попытки.
+// Скоупы трёхуровневые: глобальный → проект → даг; более узкий перекрывает
+// более широкий с тем же именем при запуске попытки.
 type VariableServiceClient interface {
 	// ListVariable возвращает переменные со значениями.
 	ListVariable(ctx context.Context, in *VariableListReq, opts ...grpc.CallOption) (*VariableListRep, error)
@@ -85,8 +85,8 @@ func (c *variableServiceClient) DeleteVariable(ctx context.Context, in *Variable
 //
 // VariableService — переменные для env-инъекции в поды тасков: как секреты,
 // но значения хранятся открыто и видны в админке.
-// Скоуп: dag_name = "" — глобальный, иначе локальный для дага; локальный
-// перекрывает глобальный с тем же именем при запуске попытки.
+// Скоупы трёхуровневые: глобальный → проект → даг; более узкий перекрывает
+// более широкий с тем же именем при запуске попытки.
 type VariableServiceServer interface {
 	// ListVariable возвращает переменные со значениями.
 	ListVariable(context.Context, *VariableListReq) (*VariableListRep, error)

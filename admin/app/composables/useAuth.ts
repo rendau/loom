@@ -1,4 +1,5 @@
 import * as authApi from '~/api/auth.api'
+import type { DagRef } from '~/types/common'
 import type { User } from '~/types/user'
 
 // Состояние сессии админки: текущий пользователь и его права. Токен живёт
@@ -12,13 +13,28 @@ export function useAuth() {
   const isAdmin = computed(() => me.value?.role === 'admin')
 
   // canManageDag — право менять даг: расписание, пауза, его переменные и
-  // секреты, триггер/ретрай/backfill.
-  function canManageDag(dagName?: string): boolean {
+  // секреты, триггер/ретрай/backfill. Назначенный проект открывает все
+  // свои даги, включая заведённые позже.
+  function canManageDag(ref?: DagRef): boolean {
     if (!me.value)
       return false
     if (me.value.role === 'admin')
       return true
-    return !!dagName && me.value.dag_names.includes(dagName)
+    if (!ref)
+      return false
+    if (canManageProject(ref.project))
+      return true
+    return (me.value.dags ?? []).some(d => d.project === ref.project && d.name === ref.name)
+  }
+
+  // canManageProject — право на проект целиком: регистрация образа, его
+  // переменные и секреты, заведение новых дагов.
+  function canManageProject(project?: string): boolean {
+    if (!me.value)
+      return false
+    if (me.value.role === 'admin')
+      return true
+    return !!project && (me.value.projects ?? []).includes(project)
   }
 
   async function fetchStatus() {
@@ -71,5 +87,6 @@ export function useAuth() {
     await navigateTo('/login')
   }
 
-  return { me, usersExist, isAuthenticated, isAdmin, canManageDag, fetchStatus, restore, login, setupFirstAdmin, logout }
+  return { me, usersExist, isAuthenticated, isAdmin, canManageDag,
+    canManageProject, fetchStatus, restore, login, setupFirstAdmin, logout }
 }

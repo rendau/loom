@@ -56,7 +56,13 @@ export interface DagLastRun {
 }
 
 export interface Dag {
+  // Даг-инстанс: заведён от шаблона образа (template) в проекте.
+  project: string
   name: string
+  template: string
+  // Шаблон пропал из образа при последней регистрации: даг работает на
+  // последнем известном манифесте.
+  template_orphaned: boolean
   image: string
   image_digest: string
   schedule: string
@@ -68,7 +74,7 @@ export interface Dag {
   next_run_at?: string
   catchup: boolean
   max_active_runs: number // 0 — без лимита
-  auto_update: boolean // poll-синк новой версии образа (решение №30)
+  auto_update: boolean // poll-синк новой версии образа — свойство проекта
   // Пул слотов дага (задаётся только в админке): действует на все его
   // таски. Пусто — таски уходят в общий пул default.
   pool: string
@@ -89,24 +95,4 @@ export interface DagTaskStat {
 export interface DagStats {
   runs: string // сколько завершённых ранов попало в агрегат
   tasks?: DagTaskStat[]
-}
-
-export type DagRegistrationStatus = 'pending' | 'running' | 'success' | 'failed'
-
-// Запись очереди асинхронных регистраций дагов.
-export interface DagRegistration {
-  id: string
-  image: string
-  source: 'manual' | 'auto' // auto — перерегистрация по digest (авто-обновление)
-  status: DagRegistrationStatus
-  error: string
-  dag_name: string // у manual пусто до успешного describe
-  schedule?: string
-  catchup?: boolean
-  paused?: boolean
-  auto_update?: boolean
-  pool?: string
-  created_at: string
-  started_at?: string
-  finished_at?: string
 }

@@ -37,7 +37,7 @@ async function confirm() {
   }
 
   const rep = await action.run(() => backfillRuns(
-    dag.name,
+    dag,
     new Date(from.value).toISOString(),
     new Date(to.value).toISOString(),
     parsed,

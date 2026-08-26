@@ -36,7 +36,8 @@ func (h *Dashboard) GetDashboard(ctx context.Context, _ *emptypb.Empty) (*pb.Das
 		Last_7D:        encodeWindow(d.Last7d),
 		Upcoming: lo.Map(d.Upcoming, func(v statsModel.Upcoming, _ int) *pb.DashboardUpcoming {
 			return &pb.DashboardUpcoming{
-				DagName:   v.DagName,
+				Project:   v.Dag.Project,
+				DagName:   v.Dag.Name,
 				NextRunAt: timestamppb.New(v.NextRunAt),
 				Schedule:  v.Schedule,
 			}
@@ -47,10 +48,19 @@ func (h *Dashboard) GetDashboard(ctx context.Context, _ *emptypb.Empty) (*pb.Das
 		RecentFailures: lo.Map(d.RecentFailures, func(v statsModel.Failure, _ int) *pb.DashboardFailure {
 			return &pb.DashboardFailure{
 				RunId:      v.RunId,
-				DagName:    v.DagName,
+				Project:    v.Dag.Project,
+				DagName:    v.Dag.Name,
 				FinishedAt: timestamppb.New(v.FinishedAt),
 				Task:       v.Task,
 				ExitReason: v.ExitReason,
+			}
+		}),
+		ActivityHours: lo.Map(d.ActivityHours, func(v statsModel.Hour, _ int) *pb.DashboardHour {
+			return &pb.DashboardHour{
+				Hour:    timestamppb.New(v.Hour),
+				Success: v.Success,
+				Failed:  v.Failed,
+				Running: v.Running,
 			}
 		}),
 		Activity: lo.Map(d.Activity, func(v statsModel.Day, _ int) *pb.DashboardDay {
@@ -58,7 +68,8 @@ func (h *Dashboard) GetDashboard(ctx context.Context, _ *emptypb.Empty) (*pb.Das
 		}),
 		DagDurations: lo.Map(d.DagDurations, func(v statsModel.DagDuration, _ int) *pb.DashboardDagDuration {
 			return &pb.DashboardDagDuration{
-				DagName: v.DagName, AvgSec: v.AvgSec, MaxSec: v.MaxSec, Runs: v.Runs,
+				Project: v.Dag.Project, DagName: v.Dag.Name,
+				AvgSec: v.AvgSec, MaxSec: v.MaxSec, Runs: v.Runs,
 			}
 		}),
 	}, nil

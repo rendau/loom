@@ -31,7 +31,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // SecretService — секреты для env-инъекции в поды тасков.
-// Скоуп: dag_name = "" — глобальный, иначе локальный для дага; локальный
+// Скоупы трёхуровневые: глобальный → проект → даг; более узкий
 // перекрывает глобальный с тем же именем при запуске попытки.
 // Списки отдают только метаданные; значение — через GetSecretValue (RBAC).
 type SecretServiceClient interface {
@@ -98,7 +98,7 @@ func (c *secretServiceClient) GetSecretValue(ctx context.Context, in *SecretGetV
 // for forward compatibility.
 //
 // SecretService — секреты для env-инъекции в поды тасков.
-// Скоуп: dag_name = "" — глобальный, иначе локальный для дага; локальный
+// Скоупы трёхуровневые: глобальный → проект → даг; более узкий
 // перекрывает глобальный с тем же именем при запуске попытки.
 // Списки отдают только метаданные; значение — через GetSecretValue (RBAC).
 type SecretServiceServer interface {

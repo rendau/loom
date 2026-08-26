@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import type { DropdownMenuItem, TableColumn, TabsItem } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
+import type { Scope } from '~/types/common'
 import { listDags } from '~/api/dag.api'
+import { listProjects } from '~/api/project.api'
 import { deleteSecret, getSecretValue, listSecrets, setSecret } from '~/api/secret.api'
 import { deleteVariable, listVariables, setVariable } from '~/api/variable.api'
 
 // Переменные и секреты — одно env-пространство таска (и те, и другие
 // инжектятся в под переменными окружения), поэтому показываем их единым
-// списком: тип — колонка и фильтр, а не отдельный раздел меню. Скоупы:
-// глобальный ('') и локальный для дага; локальный перекрывает глобальный
-// при запуске. Значение переменной видно в списке, значение секрета — по
+// списком: тип — колонка и фильтр, а не отдельный раздел меню. Скоупы
+// трёхуровневые: глобальный, проекта и дага — более узкий перекрывает
+// более широкий при запуске. Значение переменной видно в списке, значение секрета — по
 // кнопке (getSecretValue, RBAC).
 
 type EnvKind = 'variable' | 'secret'
@@ -17,7 +19,7 @@ type EnvKind = 'variable' | 'secret'
 interface EnvEntry {
   kind: EnvKind
   name: string
-  dag_name: string
+  scope: Scope
   value?: string // только у переменных; у секретов значение тянется по кнопке
   created_at: string
   modified_at?: string
@@ -42,11 +44,19 @@ const kindMeta = {
 
 const route = useRoute()
 const router = useRouter()
-const { canManageDag } = useAuth()
+const { isAdmin, canManageDag, canManageProject } = useAuth()
 
-// право менять запись: глобальные — только admin, локальные — владелец дага
-function canManageScope(dagName: string): boolean {
-  return canManageDag(dagName || undefined)
+// право менять запись: глобальные — только admin, проектные — владелец
+// проекта, записи дага — владелец дага
+function canManageScope(scope: Scope): boolean {
+  switch (scopeKind(scope)) {
+    case 'dag':
+      return canManageDag({ project: scope.project, name: scope.dag })
+    case 'project':
+      return canManageProject(scope.project)
+    default:
+      return isAdmin.value
+  }
 }
 
 const entries = ref<EnvEntry[]>([])
@@ -54,44 +64,48 @@ const loading = ref(false)
 const action = useApiAction()
 const toast = useToast()
 
-// фильтр скоупа: ALL_SCOPES — все, GLOBAL_SCOPE — глобальные, иначе имя дага
+// фильтр скоупа: ALL_SCOPES — все, GLOBAL_SCOPE — глобальные, иначе метка
+// скоупа — «проект» или «проект/даг» (она же уезжает в query)
 const ALL_SCOPES = '__all__'
 // reka-ui Select не принимает '' как value опции — глобальный скоуп через sentinel
 const GLOBAL_SCOPE = '__global__'
 const ALL_KINDS = 'all'
 
 const scopeFilter = ref<string>(
-  typeof route.query.dag_name === 'string' ? (route.query.dag_name || GLOBAL_SCOPE) : ALL_SCOPES,
+  typeof route.query.scope === 'string' ? (route.query.scope || GLOBAL_SCOPE) : ALL_SCOPES,
 )
 const kindFilter = ref<EnvKind | typeof ALL_KINDS>(
   route.query.kind === 'variable' || route.query.kind === 'secret' ? route.query.kind : ALL_KINDS,
 )
 const search = ref(typeof route.query.q === 'string' ? route.query.q : '')
-const dagNames = ref<string[]>([])
+// метки скоупов для селектов: проекты и их даги
+const projectNames = ref<string[]>([])
+const dagLabels = ref<string[]>([])
 
 const scopeItems = computed(() => [
   { label: 'Все скоупы', value: ALL_SCOPES },
   { label: 'Глобальные', value: GLOBAL_SCOPE },
-  ...dagNames.value.map(n => ({ label: `Даг: ${n}`, value: n })),
+  ...projectNames.value.map(n => ({ label: `Проект: ${n}`, value: n })),
+  ...dagLabels.value.map(n => ({ label: `Даг: ${n}`, value: n })),
 ])
 
-// скоуп фильтруется на сервере (dag_name), тип и поиск — на клиенте
-function scopeParam(): string | undefined {
+// скоуп фильтруется на сервере, тип и поиск — на клиенте
+function scopeParam(): Scope | undefined {
   if (scopeFilter.value === ALL_SCOPES)
     return undefined
-  return scopeFilter.value === GLOBAL_SCOPE ? '' : scopeFilter.value
+  return scopeFilter.value === GLOBAL_SCOPE ? globalScope : parseScopeLabel(scopeFilter.value)
 }
 
 async function load() {
   loading.value = true
-  const dagName = scopeParam()
+  const scope = scopeParam()
   try {
     const [variables, secrets] = await Promise.all([
-      listVariables(dagName).catch((error) => {
+      listVariables(scope).catch((error) => {
         toast.add({ title: 'Ошибка загрузки переменных', description: apiErrorMessage(error), color: 'error' })
         return null
       }),
-      listSecrets(dagName).catch((error) => {
+      listSecrets(scope).catch((error) => {
         toast.add({ title: 'Ошибка загрузки секретов', description: apiErrorMessage(error), color: 'error' })
         return null
       }),
@@ -102,7 +116,7 @@ async function load() {
       ...(secrets?.results ?? []).map<EnvEntry>(s => ({ kind: 'secret', ...s })),
     ].sort((a, b) =>
       a.name.localeCompare(b.name)
-      || a.dag_name.localeCompare(b.dag_name)
+      || scopeLabel(a.scope).localeCompare(scopeLabel(b.scope))
       || a.kind.localeCompare(b.kind),
     )
   }
@@ -111,18 +125,22 @@ async function load() {
   }
 }
 
-async function loadDagNames() {
+async function loadScopeNames() {
   try {
-    const rep = await listDags({ list_params: { page_size: 500, sort: ['name'] } })
-    dagNames.value = rep.results.map(d => d.name)
+    const [dags, projects] = await Promise.all([
+      listDags({ list_params: { page_size: 500, sort: ['project_name', 'name'] } }),
+      listProjects({ list_params: { page_size: 200, sort: ['name'] } }),
+    ])
+    dagLabels.value = (dags.results ?? []).map(d => dagRefLabel(d))
+    projectNames.value = (projects.results ?? []).map(p => p.name)
   }
   catch {
-    // фильтр по дагам просто останется без вариантов
+    // фильтр по проектам и дагам просто останется без вариантов
   }
 }
 
 onMounted(async () => {
-  await Promise.all([load(), loadDagNames()])
+  await Promise.all([load(), loadScopeNames()])
 })
 watch(scopeFilter, load)
 
@@ -131,9 +149,9 @@ watch([kindFilter, scopeFilter, search], () => {
   const query: Record<string, string> = {}
   if (kindFilter.value !== ALL_KINDS)
     query.kind = kindFilter.value
-  const dagName = scopeParam()
-  if (dagName !== undefined)
-    query.dag_name = dagName
+  const scope = scopeParam()
+  if (scope !== undefined)
+    query.scope = scopeLabel(scope)
   if (search.value)
     query.q = search.value
   router.replace({ query })
@@ -146,7 +164,7 @@ const searched = computed(() => {
   if (!q)
     return entries.value
   return entries.value.filter(e =>
-    e.name.toLowerCase().includes(q) || e.dag_name.toLowerCase().includes(q),
+    e.name.toLowerCase().includes(q) || scopeLabel(e.scope).toLowerCase().includes(q),
   )
 })
 
@@ -190,12 +208,8 @@ const editIsNew = ref(true)
 
 const editScopeItems = computed(() => [
   { label: 'Глобальный', value: GLOBAL_SCOPE },
-  ...dagNames.value.map(n => ({ label: `Даг: ${n}`, value: n })),
-])
-
-const editKindItems = computed<TabsItem[]>(() => [
-  { label: kindMeta.variable.label, value: 'variable', icon: kindMeta.variable.icon },
-  { label: kindMeta.secret.label, value: 'secret', icon: kindMeta.secret.icon },
+  ...projectNames.value.map(n => ({ label: `Проект: ${n}`, value: n })),
+  ...dagLabels.value.map(n => ({ label: `Даг: ${n}`, value: n })),
 ])
 
 const createItems = computed<DropdownMenuItem[][]>(() => [[
@@ -224,7 +238,7 @@ function openCreate(kind: EnvKind) {
 function openEdit(entry: EnvEntry) {
   editIsNew.value = false
   editKind.value = entry.kind
-  editScope.value = entry.dag_name || GLOBAL_SCOPE
+  editScope.value = scopeKind(entry.scope) === 'global' ? GLOBAL_SCOPE : scopeLabel(entry.scope)
   editName.value = entry.name
   editValue.value = entry.kind === 'variable' ? (entry.value ?? '') : ''
   editOpen.value = true
@@ -246,10 +260,10 @@ async function submitEdit() {
   if (!canSubmitEdit.value)
     return
   const name = editName.value.trim()
-  const dagName = editScope.value === GLOBAL_SCOPE ? '' : editScope.value
+  const scope = editScope.value === GLOBAL_SCOPE ? globalScope : parseScopeLabel(editScope.value)
   const isVariable = editKind.value === 'variable'
   const ok = await action.run(
-    () => isVariable ? setVariable(dagName, name, editValue.value) : setSecret(dagName, name, editValue.value),
+    () => isVariable ? setVariable(scope, name, editValue.value) : setSecret(scope, name, editValue.value),
     { success: isVariable ? 'Переменная сохранена' : 'Секрет сохранён' },
   )
   if (ok !== undefined) {
@@ -263,7 +277,7 @@ async function submitEdit() {
 const shownValues = ref<Record<string, string>>({})
 
 function entryKey(e: EnvEntry): string {
-  return `${e.kind} ${e.dag_name} ${e.name}`
+  return `${e.kind} ${scopeLabel(e.scope)} ${e.name}`
 }
 
 function visibleValue(e: EnvEntry): string | undefined {
@@ -279,7 +293,7 @@ async function toggleValue(e: EnvEntry) {
   }
   // ошибка (нет прав, секрет не расшифровался) — обычным тостом, иначе
   // клик по глазу молча ничего не делает
-  const rep = await action.run(() => getSecretValue(e.dag_name, e.name))
+  const rep = await action.run(() => getSecretValue(e.scope, e.name))
   if (rep)
     shownValues.value = { ...shownValues.value, [key]: rep.value }
 }
@@ -312,7 +326,7 @@ async function confirmDelete() {
     return
   const isVariable = entry.kind === 'variable'
   const ok = await action.run(
-    () => isVariable ? deleteVariable(entry.dag_name, entry.name) : deleteSecret(entry.dag_name, entry.name),
+    () => isVariable ? deleteVariable(entry.scope, entry.name) : deleteSecret(entry.scope, entry.name),
     { success: isVariable ? 'Переменная удалена' : 'Секрет удалён' },
   )
   if (ok !== undefined) {
@@ -326,7 +340,7 @@ async function confirmDelete() {
 const columns: TableColumn<EnvEntry>[] = [
   { accessorKey: 'name', header: 'Имя' },
   { id: 'value', header: 'Значение' },
-  { accessorKey: 'dag_name', header: 'Скоуп' },
+  { id: 'scope', header: 'Скоуп' },
   { id: 'updated', header: 'Обновлено' },
   { id: 'actions', header: '' },
 ]
@@ -391,9 +405,14 @@ const columns: TableColumn<EnvEntry>[] = [
           </div>
         </template>
 
-        <template #dag_name-cell="{ row }">
-          <UBadge v-if="row.original.dag_name" color="info" variant="subtle" size="sm">
-            {{ row.original.dag_name }}
+        <template #scope-cell="{ row }">
+          <UBadge
+            v-if="scopeKind(row.original.scope) !== 'global'"
+            :color="scopeKind(row.original.scope) === 'dag' ? 'info' : 'primary'"
+            variant="subtle"
+            size="sm"
+          >
+            {{ scopeLabel(row.original.scope) }}
           </UBadge>
           <UBadge v-else color="neutral" variant="subtle" size="sm">глобальный</UBadge>
         </template>
@@ -433,7 +452,7 @@ const columns: TableColumn<EnvEntry>[] = [
         <template #actions-cell="{ row }">
           <div class="flex justify-end gap-1">
             <UTooltip
-              v-if="canManageScope(row.original.dag_name)"
+              v-if="canManageScope(row.original.scope)"
               :text="row.original.kind === 'variable' ? 'Изменить значение' : 'Заменить значение'"
             >
               <UButton
@@ -445,7 +464,7 @@ const columns: TableColumn<EnvEntry>[] = [
                 @click="openEdit(row.original)"
               />
             </UTooltip>
-            <UTooltip v-if="canManageScope(row.original.dag_name)" text="Удалить">
+            <UTooltip v-if="canManageScope(row.original.scope)" text="Удалить">
               <UButton icon="i-lucide-trash-2" size="sm" color="error" variant="ghost" aria-label="Удалить" @click="deleteTarget = row.original" />
             </UTooltip>
           </div>
@@ -470,18 +489,7 @@ const columns: TableColumn<EnvEntry>[] = [
       <UModal v-model:open="editOpen" :title="editTitle" :description="kindMeta[editKind].hint">
         <template #body>
           <div class="space-y-4">
-            <UFormField v-if="editIsNew" label="Тип">
-              <UTabs
-                v-model="editKind"
-                :items="editKindItems"
-                :content="false"
-                color="neutral"
-                variant="pill"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
-            <UFormField v-if="editIsNew" label="Скоуп" hint="локальный перекрывает глобальный с тем же именем">
+            <UFormField v-if="editIsNew" label="Скоуп" hint="более узкий перекрывает более широкий с тем же именем">
               <USelect v-model="editScope" :items="editScopeItems" value-key="value" class="w-full" />
             </UFormField>
             <UFormField v-if="editIsNew" :label="editKind === 'variable' ? 'Имя переменной' : 'Имя секрета'">
@@ -518,8 +526,9 @@ const columns: TableColumn<EnvEntry>[] = [
           <p>
             {{ deleteText.noun }}
             <span class="font-mono font-medium">{{ deleteTarget?.name }}</span>
-            <template v-if="deleteTarget?.dag_name">
-              (даг <span class="font-mono">{{ deleteTarget?.dag_name }}</span>)
+            <template v-if="deleteTarget && scopeKind(deleteTarget.scope) !== 'global'">
+              ({{ scopeKind(deleteTarget.scope) === 'dag' ? 'даг' : 'проект' }}
+              <span class="font-mono">{{ scopeLabel(deleteTarget.scope) }}</span>)
             </template>
             {{ deleteText.verb }}. Таски, ссылающиеся на {{ deleteText.pronoun }}, перестанут
             запускаться (launch_failed).

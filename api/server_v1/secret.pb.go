@@ -7,6 +7,7 @@
 package server_v1
 
 import (
+	common "github.com/rendau/loom/api/common"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -25,12 +26,11 @@ const (
 )
 
 type SecretMetaMain struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	Name       string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	CreatedAt  *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	ModifiedAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=modified_at,json=modifiedAt,proto3,oneof" json:"modified_at,omitempty"`
-	// Скоуп: пусто — глобальный, иначе имя дага.
-	DagName       string `protobuf:"bytes,4,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ModifiedAt    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=modified_at,json=modifiedAt,proto3,oneof" json:"modified_at,omitempty"`
+	Scope         *common.ScopeSt        `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -86,17 +86,17 @@ func (x *SecretMetaMain) GetModifiedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *SecretMetaMain) GetDagName() string {
+func (x *SecretMetaMain) GetScope() *common.ScopeSt {
 	if x != nil {
-		return x.DagName
+		return x.Scope
 	}
-	return ""
+	return nil
 }
 
 type SecretListReq struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Отсутствует — все скоупы; "" — только глобальные; имя дага — только его.
-	DagName       *string `protobuf:"bytes,1,opt,name=dag_name,json=dagName,proto3,oneof" json:"dag_name,omitempty"`
+	// Отсутствует — все скоупы; иначе — только указанный.
+	Scope         *common.ScopeSt `protobuf:"bytes,1,opt,name=scope,proto3,oneof" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -131,11 +131,11 @@ func (*SecretListReq) Descriptor() ([]byte, []int) {
 	return file_server_v1_secret_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *SecretListReq) GetDagName() string {
-	if x != nil && x.DagName != nil {
-		return *x.DagName
+func (x *SecretListReq) GetScope() *common.ScopeSt {
+	if x != nil {
+		return x.Scope
 	}
-	return ""
+	return nil
 }
 
 type SecretListRep struct {
@@ -186,7 +186,7 @@ type SecretSetReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	DagName       string                 `protobuf:"bytes,3,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"` // пусто — глобальный скоуп
+	Scope         *common.ScopeSt        `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"` // пустой — глобальный скоуп
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -235,17 +235,17 @@ func (x *SecretSetReq) GetValue() string {
 	return ""
 }
 
-func (x *SecretSetReq) GetDagName() string {
+func (x *SecretSetReq) GetScope() *common.ScopeSt {
 	if x != nil {
-		return x.DagName
+		return x.Scope
 	}
-	return ""
+	return nil
 }
 
 type SecretDeleteReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	DagName       string                 `protobuf:"bytes,2,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"` // пусто — глобальный скоуп
+	Scope         *common.ScopeSt        `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"` // пустой — глобальный скоуп
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -287,17 +287,17 @@ func (x *SecretDeleteReq) GetName() string {
 	return ""
 }
 
-func (x *SecretDeleteReq) GetDagName() string {
+func (x *SecretDeleteReq) GetScope() *common.ScopeSt {
 	if x != nil {
-		return x.DagName
+		return x.Scope
 	}
-	return ""
+	return nil
 }
 
 type SecretGetValueReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	DagName       string                 `protobuf:"bytes,2,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"` // пусто — глобальный скоуп
+	Scope         *common.ScopeSt        `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"` // пустой — глобальный скоуп
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -339,11 +339,11 @@ func (x *SecretGetValueReq) GetName() string {
 	return ""
 }
 
-func (x *SecretGetValueReq) GetDagName() string {
+func (x *SecretGetValueReq) GetScope() *common.ScopeSt {
 	if x != nil {
-		return x.DagName
+		return x.Scope
 	}
-	return ""
+	return nil
 }
 
 type SecretValueRep struct {
@@ -394,30 +394,30 @@ var File_server_v1_secret_proto protoreflect.FileDescriptor
 
 const file_server_v1_secret_proto_rawDesc = "" +
 	"\n" +
-	"\x16server_v1/secret.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xcc\x01\n" +
+	"\x16server_v1/secret.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x13common/common.proto\"\xd8\x01\n" +
 	"\x0eSecretMetaMain\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x129\n" +
 	"\n" +
 	"created_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12@\n" +
 	"\vmodified_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampH\x00R\n" +
-	"modifiedAt\x88\x01\x01\x12\x19\n" +
-	"\bdag_name\x18\x04 \x01(\tR\adagNameB\x0e\n" +
-	"\f_modified_at\"<\n" +
-	"\rSecretListReq\x12\x1e\n" +
-	"\bdag_name\x18\x01 \x01(\tH\x00R\adagName\x88\x01\x01B\v\n" +
-	"\t_dag_name\"D\n" +
+	"modifiedAt\x88\x01\x01\x12%\n" +
+	"\x05scope\x18\x04 \x01(\v2\x0f.common.ScopeStR\x05scopeB\x0e\n" +
+	"\f_modified_at\"E\n" +
+	"\rSecretListReq\x12*\n" +
+	"\x05scope\x18\x01 \x01(\v2\x0f.common.ScopeStH\x00R\x05scope\x88\x01\x01B\b\n" +
+	"\x06_scope\"D\n" +
 	"\rSecretListRep\x123\n" +
-	"\aresults\x18\x01 \x03(\v2\x19.server_v1.SecretMetaMainR\aresults\"S\n" +
+	"\aresults\x18\x01 \x03(\v2\x19.server_v1.SecretMetaMainR\aresults\"_\n" +
 	"\fSecretSetReq\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\x12\x19\n" +
-	"\bdag_name\x18\x03 \x01(\tR\adagName\"@\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\x12%\n" +
+	"\x05scope\x18\x03 \x01(\v2\x0f.common.ScopeStR\x05scope\"L\n" +
 	"\x0fSecretDeleteReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
-	"\bdag_name\x18\x02 \x01(\tR\adagName\"B\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
+	"\x05scope\x18\x02 \x01(\v2\x0f.common.ScopeStR\x05scope\"N\n" +
 	"\x11SecretGetValueReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
-	"\bdag_name\x18\x02 \x01(\tR\adagName\"&\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
+	"\x05scope\x18\x02 \x01(\v2\x0f.common.ScopeStR\x05scope\"&\n" +
 	"\x0eSecretValueRep\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\tR\x05value2\x80\x03\n" +
 	"\rSecretService\x12Q\n" +
@@ -449,25 +449,31 @@ var file_server_v1_secret_proto_goTypes = []any{
 	(*SecretGetValueReq)(nil),     // 5: server_v1.SecretGetValueReq
 	(*SecretValueRep)(nil),        // 6: server_v1.SecretValueRep
 	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
-	(*emptypb.Empty)(nil),         // 8: google.protobuf.Empty
+	(*common.ScopeSt)(nil),        // 8: common.ScopeSt
+	(*emptypb.Empty)(nil),         // 9: google.protobuf.Empty
 }
 var file_server_v1_secret_proto_depIdxs = []int32{
-	7, // 0: server_v1.SecretMetaMain.created_at:type_name -> google.protobuf.Timestamp
-	7, // 1: server_v1.SecretMetaMain.modified_at:type_name -> google.protobuf.Timestamp
-	0, // 2: server_v1.SecretListRep.results:type_name -> server_v1.SecretMetaMain
-	1, // 3: server_v1.SecretService.ListSecret:input_type -> server_v1.SecretListReq
-	3, // 4: server_v1.SecretService.SetSecret:input_type -> server_v1.SecretSetReq
-	4, // 5: server_v1.SecretService.DeleteSecret:input_type -> server_v1.SecretDeleteReq
-	5, // 6: server_v1.SecretService.GetSecretValue:input_type -> server_v1.SecretGetValueReq
-	2, // 7: server_v1.SecretService.ListSecret:output_type -> server_v1.SecretListRep
-	8, // 8: server_v1.SecretService.SetSecret:output_type -> google.protobuf.Empty
-	8, // 9: server_v1.SecretService.DeleteSecret:output_type -> google.protobuf.Empty
-	6, // 10: server_v1.SecretService.GetSecretValue:output_type -> server_v1.SecretValueRep
-	7, // [7:11] is the sub-list for method output_type
-	3, // [3:7] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	7,  // 0: server_v1.SecretMetaMain.created_at:type_name -> google.protobuf.Timestamp
+	7,  // 1: server_v1.SecretMetaMain.modified_at:type_name -> google.protobuf.Timestamp
+	8,  // 2: server_v1.SecretMetaMain.scope:type_name -> common.ScopeSt
+	8,  // 3: server_v1.SecretListReq.scope:type_name -> common.ScopeSt
+	0,  // 4: server_v1.SecretListRep.results:type_name -> server_v1.SecretMetaMain
+	8,  // 5: server_v1.SecretSetReq.scope:type_name -> common.ScopeSt
+	8,  // 6: server_v1.SecretDeleteReq.scope:type_name -> common.ScopeSt
+	8,  // 7: server_v1.SecretGetValueReq.scope:type_name -> common.ScopeSt
+	1,  // 8: server_v1.SecretService.ListSecret:input_type -> server_v1.SecretListReq
+	3,  // 9: server_v1.SecretService.SetSecret:input_type -> server_v1.SecretSetReq
+	4,  // 10: server_v1.SecretService.DeleteSecret:input_type -> server_v1.SecretDeleteReq
+	5,  // 11: server_v1.SecretService.GetSecretValue:input_type -> server_v1.SecretGetValueReq
+	2,  // 12: server_v1.SecretService.ListSecret:output_type -> server_v1.SecretListRep
+	9,  // 13: server_v1.SecretService.SetSecret:output_type -> google.protobuf.Empty
+	9,  // 14: server_v1.SecretService.DeleteSecret:output_type -> google.protobuf.Empty
+	6,  // 15: server_v1.SecretService.GetSecretValue:output_type -> server_v1.SecretValueRep
+	12, // [12:16] is the sub-list for method output_type
+	8,  // [8:12] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_secret_proto_init() }

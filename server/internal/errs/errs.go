@@ -21,6 +21,9 @@ const (
 // domain errors
 const (
 	DagNotFound          = Err("dag_not_found")
+	DagExists            = Err("dag_exists")
+	ProjectNotFound      = Err("project_not_found")
+	TemplateNotFound     = Err("template_not_found")
 	RegistrationNotFound = Err("registration_not_found")
 	RunNotFound          = Err("run_not_found")
 	RunNotFinished       = Err("run_not_finished")

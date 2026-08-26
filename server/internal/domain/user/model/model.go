@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
+)
 
 // Роли пользователей админки.
 const (
@@ -17,13 +21,14 @@ const (
 	MaxPasswordLen = 72
 )
 
-// Main — пользователь админки. DagNames заполняется отдельным запросом
+// Main — пользователь админки. Dags/Projects заполняются отдельным запросом
 // (назначенные даги); у admin всегда пусто — ему доступны все.
 type Main struct {
 	Id         string
 	Username   string
 	Role       string
-	DagNames   []string
+	Dags       []dagModel.Ref
+	Projects   []string
 	CreatedAt  time.Time
 	ModifiedAt time.Time // zero — не изменялся
 }
@@ -33,16 +38,19 @@ type CreateSpec struct {
 	Username string
 	Password string
 	Role     string
-	DagNames []string
+	Dags     []dagModel.Ref
+	Projects []string
 }
 
-// UpdateSpec — частичное изменение; nil-поля не трогаются, SetDagNames
+// UpdateSpec — частичное изменение; nil-поля не трогаются, SetDags/SetProjects
 // отличает «не менять» от «очистить набор».
 type UpdateSpec struct {
 	Password    *string
 	Role        *string
-	DagNames    []string
-	SetDagNames bool
+	Dags        []dagModel.Ref
+	SetDags     bool
+	Projects    []string
+	SetProjects bool
 }
 
 // AuthInfo — аутентифицированный вызывающий (кладётся в контекст).

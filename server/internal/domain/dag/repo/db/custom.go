@@ -7,24 +7,32 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/samber/lo"
 
 	"github.com/rendau/loom/server/internal/domain/dag/model"
 )
 
 var allowedSortFields = map[string]string{
-	"name":        "name",
-	"created_at":  "created_at",
-	"modified_at": "modified_at",
+	"name":         "name",
+	"project_name": "project_name",
+	"created_at":   "created_at",
+	"modified_at":  "modified_at",
 }
 
 func (r *Repo) getConditions(pars *model.ListReq) (map[string]any, map[string][]any) {
-	conditions := make(map[string]any, 3)
-	conditionExps := make(map[string][]any, 3)
+	conditions := make(map[string]any, 4)
+	conditionExps := make(map[string][]any, 4)
 
 	if pars == nil {
 		return conditions, conditionExps
 	}
 
+	if pars.Project != nil {
+		conditions["project_name"] = *pars.Project
+	}
+	if pars.Template != nil {
+		conditions["template"] = *pars.Template
+	}
 	if pars.Paused != nil {
 		conditions["paused"] = *pars.Paused
 	}
@@ -37,27 +45,33 @@ func (r *Repo) getConditions(pars *model.ListReq) (map[string]any, map[string][]
 
 // ListLastRuns — последние perDag ранов каждого из дагов (новые первыми):
 // статус-стрип списка дагов в админке.
-func (r *Repo) ListLastRuns(ctx context.Context, dagNames []string, perDag int) (map[string][]model.LastRun, error) {
+func (r *Repo) ListLastRuns(ctx context.Context, refs []model.Ref, perDag int) (map[model.Ref][]model.LastRun, error) {
+	projects := lo.Map(refs, func(v model.Ref, _ int) string { return v.Project })
+	names := lo.Map(refs, func(v model.Ref, _ int) string { return v.Name })
+
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT dag_name, id, status FROM (
-			SELECT dag_name, id, status, created_at,
-				row_number() OVER (PARTITION BY dag_name ORDER BY created_at DESC) AS rn
-			FROM run WHERE dag_name = ANY($1)
-		) t WHERE rn <= $2
-		ORDER BY dag_name, created_at DESC`, dagNames, perDag)
+		SELECT project_name, dag_name, id, status FROM (
+			SELECT project_name, dag_name, id, status, created_at,
+				row_number() OVER (PARTITION BY project_name, dag_name
+				                   ORDER BY created_at DESC) AS rn
+			FROM run
+			WHERE (project_name, dag_name) IN (
+				SELECT * FROM unnest($1::text[], $2::text[]))
+		) t WHERE rn <= $3
+		ORDER BY project_name, dag_name, created_at DESC`, projects, names, perDag)
 	if err != nil {
 		return nil, fmt.Errorf("ListLastRuns: %w", err)
 	}
 	defer rows.Close()
 
-	result := map[string][]model.LastRun{}
+	result := map[model.Ref][]model.LastRun{}
 	for rows.Next() {
-		var dagName string
+		var ref model.Ref
 		var lr model.LastRun
-		if err = rows.Scan(&dagName, &lr.RunId, &lr.Status); err != nil {
+		if err = rows.Scan(&ref.Project, &ref.Name, &lr.RunId, &lr.Status); err != nil {
 			return nil, fmt.Errorf("ListLastRuns scan: %w", err)
 		}
-		result[dagName] = append(result[dagName], lr)
+		result[ref] = append(result[ref], lr)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("ListLastRuns rows: %w", err)
@@ -67,38 +81,39 @@ func (r *Repo) ListLastRuns(ctx context.Context, dagNames []string, perDag int) 
 
 // SetNextRun выставляет next_run_at дага; nil сбрасывает в null (даг без
 // расписания).
-func (r *Repo) SetNextRun(ctx context.Context, name string, t *time.Time) error {
+func (r *Repo) SetNextRun(ctx context.Context, ref model.Ref, t *time.Time) error {
 	_, err := r.TxM.GetConnection(ctx).Exec(ctx,
-		`UPDATE dag SET next_run_at = $1 WHERE name = $2`, t, name)
+		`UPDATE dag SET next_run_at = $1 WHERE project_name = $2 AND name = $3`,
+		t, ref.Project, ref.Name)
 	if err != nil {
 		return fmt.Errorf("SetNextRun: %w", err)
 	}
 	return nil
 }
 
-// ListDueNames возвращает имена дагов с расписанием, чей next_run_at
-// наступил или ещё не инициализирован.
-func (r *Repo) ListDueNames(ctx context.Context) ([]string, error) {
+// ListDueRefs возвращает даги с расписанием, чей next_run_at наступил или
+// ещё не инициализирован.
+func (r *Repo) ListDueRefs(ctx context.Context) ([]model.Ref, error) {
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT name FROM dag
+		SELECT project_name, name FROM dag
 		WHERE schedule <> '' AND NOT paused
 		  AND (next_run_at IS NULL OR next_run_at <= now())
-		ORDER BY name`)
+		ORDER BY project_name, name`)
 	if err != nil {
-		return nil, fmt.Errorf("ListDueNames: %w", err)
+		return nil, fmt.Errorf("ListDueRefs: %w", err)
 	}
 	defer rows.Close()
 
-	var result []string
+	var result []model.Ref
 	for rows.Next() {
-		var name string
-		if err = rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("ListDueNames scan: %w", err)
+		var ref model.Ref
+		if err = rows.Scan(&ref.Project, &ref.Name); err != nil {
+			return nil, fmt.Errorf("ListDueRefs scan: %w", err)
 		}
-		result = append(result, name)
+		result = append(result, ref)
 	}
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("ListDueNames rows: %w", err)
+		return nil, fmt.Errorf("ListDueRefs rows: %w", err)
 	}
 	return result, nil
 }
@@ -107,7 +122,7 @@ func (r *Repo) ListDueNames(ctx context.Context) ([]string, error) {
 // значение не изменилось с момента выборки (гонка нескольких инстансов
 // control plane; IS NOT DISTINCT FROM корректно сравнивает и null). Пауза и
 // снятое расписание тоже отменяют сдвиг.
-func (r *Repo) AdvanceNextRun(ctx context.Context, name string, from, to time.Time) (bool, error) {
+func (r *Repo) AdvanceNextRun(ctx context.Context, ref model.Ref, from, to time.Time) (bool, error) {
 	var fromV *time.Time
 	if !from.IsZero() {
 		fromV = &from
@@ -115,9 +130,9 @@ func (r *Repo) AdvanceNextRun(ctx context.Context, name string, from, to time.Ti
 
 	tag, err := r.TxM.GetConnection(ctx).Exec(ctx, `
 		UPDATE dag SET next_run_at = $1
-		WHERE name = $2 AND schedule <> '' AND NOT paused
-		  AND next_run_at IS NOT DISTINCT FROM $3`,
-		to, name, fromV)
+		WHERE project_name = $2 AND name = $3 AND schedule <> '' AND NOT paused
+		  AND next_run_at IS NOT DISTINCT FROM $4`,
+		to, ref.Project, ref.Name, fromV)
 	if err != nil {
 		return false, fmt.Errorf("AdvanceNextRun: %w", err)
 	}
@@ -127,36 +142,39 @@ func (r *Repo) AdvanceNextRun(ctx context.Context, name string, from, to time.Ti
 // ── task_resources: оверрайды ресурсов тасков из админки ─────────────────
 
 // SetTaskResources создаёт или перезаписывает оверрайд ресурсов таска.
-func (r *Repo) SetTaskResources(ctx context.Context, dagName, task string, res model.TaskResources) error {
+func (r *Repo) SetTaskResources(ctx context.Context, ref model.Ref, task string, res model.TaskResources) error {
 	_, err := r.TxM.GetConnection(ctx).Exec(ctx, `
-		INSERT INTO task_resources (dag_name, task, cpu_request, cpu_limit, memory_request, memory_limit)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (dag_name, task) DO UPDATE SET
+		INSERT INTO task_resources (project_name, dag_name, task,
+		                            cpu_request, cpu_limit, memory_request, memory_limit)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (project_name, dag_name, task) DO UPDATE SET
 			cpu_request = excluded.cpu_request,
 			cpu_limit = excluded.cpu_limit,
 			memory_request = excluded.memory_request,
 			memory_limit = excluded.memory_limit,
 			modified_at = now()`,
-		dagName, task, res.CPURequest, res.CPULimit, res.MemoryRequest, res.MemoryLimit)
+		ref.Project, ref.Name, task, res.CPURequest, res.CPULimit, res.MemoryRequest, res.MemoryLimit)
 	if err != nil {
 		return fmt.Errorf("SetTaskResources: %w", err)
 	}
 	return nil
 }
 
-func (r *Repo) DeleteTaskResources(ctx context.Context, dagName, task string) (bool, error) {
-	tag, err := r.TxM.GetConnection(ctx).Exec(ctx,
-		`DELETE FROM task_resources WHERE dag_name = $1 AND task = $2`, dagName, task)
+func (r *Repo) DeleteTaskResources(ctx context.Context, ref model.Ref, task string) (bool, error) {
+	tag, err := r.TxM.GetConnection(ctx).Exec(ctx, `
+		DELETE FROM task_resources
+		WHERE project_name = $1 AND dag_name = $2 AND task = $3`, ref.Project, ref.Name, task)
 	if err != nil {
 		return false, fmt.Errorf("DeleteTaskResources: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
 }
 
-func (r *Repo) ListTaskResources(ctx context.Context, dagName string) ([]*model.TaskResourcesEntry, error) {
+func (r *Repo) ListTaskResources(ctx context.Context, ref model.Ref) ([]*model.TaskResourcesEntry, error) {
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
 		SELECT task, cpu_request, cpu_limit, memory_request, memory_limit, modified_at
-		FROM task_resources WHERE dag_name = $1 ORDER BY task`, dagName)
+		FROM task_resources
+		WHERE project_name = $1 AND dag_name = $2 ORDER BY task`, ref.Project, ref.Name)
 	if err != nil {
 		return nil, fmt.Errorf("ListTaskResources: %w", err)
 	}
@@ -178,11 +196,12 @@ func (r *Repo) ListTaskResources(ctx context.Context, dagName string) ([]*model.
 }
 
 // GetTaskResources — оверрайд одного таска; nil — оверрайда нет.
-func (r *Repo) GetTaskResources(ctx context.Context, dagName, task string) (*model.TaskResources, error) {
+func (r *Repo) GetTaskResources(ctx context.Context, ref model.Ref, task string) (*model.TaskResources, error) {
 	var res model.TaskResources
 	err := r.TxM.GetConnection(ctx).QueryRow(ctx, `
 		SELECT cpu_request, cpu_limit, memory_request, memory_limit
-		FROM task_resources WHERE dag_name = $1 AND task = $2`, dagName, task).
+		FROM task_resources
+		WHERE project_name = $1 AND dag_name = $2 AND task = $3`, ref.Project, ref.Name, task).
 		Scan(&res.CPURequest, &res.CPULimit, &res.MemoryRequest, &res.MemoryLimit)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

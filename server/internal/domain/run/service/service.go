@@ -36,8 +36,8 @@ func (s *Service) List(ctx context.Context, pars *model.ListReq) ([]*model.Main,
 }
 
 // CountByStatus — счётчики ранов по статусам (опционально одного дага).
-func (s *Service) CountByStatus(ctx context.Context, dagName *string) (map[string]int64, error) {
-	counts, err := s.repoDb.CountRunsByStatus(ctx, dagName)
+func (s *Service) CountByStatus(ctx context.Context, ref *dagModel.Ref) (map[string]int64, error) {
+	counts, err := s.repoDb.CountRunsByStatus(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.CountRunsByStatus: %w", err)
 	}
@@ -105,7 +105,8 @@ func (s *Service) Trigger(ctx context.Context, dag *dagModel.Main, spec model.Tr
 
 	run := &model.Main{
 		Id:          newRunId(dag.Name),
-		DagName:     dag.Name,
+		Dag:         dag.Ref,
+		Template:    dag.Template,
 		Image:       dag.Image,
 		ImageDigest: dag.ImageDigest,
 		Trigger:     spec.Trigger,
@@ -470,9 +471,9 @@ func (s *Service) ListStaleAttempts(ctx context.Context, olderThan time.Time) ([
 
 // ── retention ───────────────────────────────────────────
 
-// ListRetentionDags возвращает имена дагов с завершёнными ранами — скоупы
+// ListRetentionDags возвращает даги с завершёнными ранами — скоупы
 // retention-прохода.
-func (s *Service) ListRetentionDags(ctx context.Context) ([]string, error) {
+func (s *Service) ListRetentionDags(ctx context.Context) ([]dagModel.Ref, error) {
 	names, err := s.repoDb.ListRetentionDags(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.ListRetentionDags: %w", err)
@@ -483,10 +484,10 @@ func (s *Service) ListRetentionDags(ctx context.Context) ([]string, error) {
 // ListExpired возвращает id завершённых ранов дага, нарушающих любой из
 // retention-лимитов: старше before (nil — не чистить по времени) либо за
 // пределами keepLast последних (0 — без лимита по количеству).
-func (s *Service) ListExpired(ctx context.Context, dagName string, before *time.Time,
+func (s *Service) ListExpired(ctx context.Context, ref dagModel.Ref, before *time.Time,
 	keepLast, limit int64,
 ) ([]string, error) {
-	ids, err := s.repoDb.ListExpiredRuns(ctx, dagName, before, keepLast, limit)
+	ids, err := s.repoDb.ListExpiredRuns(ctx, ref, before, keepLast, limit)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.ListExpiredRuns: %w", err)
 	}

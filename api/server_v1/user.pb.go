@@ -72,7 +72,8 @@ type UserCreateReq struct {
 	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
 	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
 	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"` // admin | user
-	DagNames      []string               `protobuf:"bytes,4,rep,name=dag_names,json=dagNames,proto3" json:"dag_names,omitempty"`
+	Dags          []*DagRef              `protobuf:"bytes,5,rep,name=dags,proto3" json:"dags,omitempty"`
+	Projects      []string               `protobuf:"bytes,6,rep,name=projects,proto3" json:"projects,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -128,9 +129,16 @@ func (x *UserCreateReq) GetRole() string {
 	return ""
 }
 
-func (x *UserCreateReq) GetDagNames() []string {
+func (x *UserCreateReq) GetDags() []*DagRef {
 	if x != nil {
-		return x.DagNames
+		return x.Dags
+	}
+	return nil
+}
+
+func (x *UserCreateReq) GetProjects() []string {
+	if x != nil {
+		return x.Projects
 	}
 	return nil
 }
@@ -140,9 +148,11 @@ type UserUpdateReq struct {
 	Id       string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Password *string                `protobuf:"bytes,2,opt,name=password,proto3,oneof" json:"password,omitempty"`
 	Role     *string                `protobuf:"bytes,3,opt,name=role,proto3,oneof" json:"role,omitempty"`
-	// Отсутствует — набор дагов не меняется; пустой список очищает его.
-	DagNames      []string `protobuf:"bytes,4,rep,name=dag_names,json=dagNames,proto3" json:"dag_names,omitempty"`
-	SetDagNames   bool     `protobuf:"varint,5,opt,name=set_dag_names,json=setDagNames,proto3" json:"set_dag_names,omitempty"`
+	// set_* = false — набор не меняется; true с пустым списком очищает его.
+	Dags          []*DagRef `protobuf:"bytes,6,rep,name=dags,proto3" json:"dags,omitempty"`
+	SetDags       bool      `protobuf:"varint,7,opt,name=set_dags,json=setDags,proto3" json:"set_dags,omitempty"`
+	Projects      []string  `protobuf:"bytes,8,rep,name=projects,proto3" json:"projects,omitempty"`
+	SetProjects   bool      `protobuf:"varint,9,opt,name=set_projects,json=setProjects,proto3" json:"set_projects,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -198,16 +208,30 @@ func (x *UserUpdateReq) GetRole() string {
 	return ""
 }
 
-func (x *UserUpdateReq) GetDagNames() []string {
+func (x *UserUpdateReq) GetDags() []*DagRef {
 	if x != nil {
-		return x.DagNames
+		return x.Dags
 	}
 	return nil
 }
 
-func (x *UserUpdateReq) GetSetDagNames() bool {
+func (x *UserUpdateReq) GetSetDags() bool {
 	if x != nil {
-		return x.SetDagNames
+		return x.SetDags
+	}
+	return false
+}
+
+func (x *UserUpdateReq) GetProjects() []string {
+	if x != nil {
+		return x.Projects
+	}
+	return nil
+}
+
+func (x *UserUpdateReq) GetSetProjects() bool {
+	if x != nil {
+		return x.SetProjects
 	}
 	return false
 }
@@ -260,22 +284,25 @@ var File_server_v1_user_proto protoreflect.FileDescriptor
 
 const file_server_v1_user_proto_rawDesc = "" +
 	"\n" +
-	"\x14server_v1/user.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x14server_v1/auth.proto\"<\n" +
+	"\x14server_v1/user.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x14server_v1/auth.proto\x1a\x13server_v1/dag.proto\"<\n" +
 	"\vUserListRep\x12-\n" +
-	"\aresults\x18\x01 \x03(\v2\x13.server_v1.UserMainR\aresults\"x\n" +
+	"\aresults\x18\x01 \x03(\v2\x13.server_v1.UserMainR\aresults\"\xa4\x01\n" +
 	"\rUserCreateReq\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\x12\x1b\n" +
-	"\tdag_names\x18\x04 \x03(\tR\bdagNames\"\xb0\x01\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x12%\n" +
+	"\x04dags\x18\x05 \x03(\v2\x11.server_v1.DagRefR\x04dags\x12\x1a\n" +
+	"\bprojects\x18\x06 \x03(\tR\bprojectsJ\x04\b\x04\x10\x05\"\xfc\x01\n" +
 	"\rUserUpdateReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\bpassword\x18\x02 \x01(\tH\x00R\bpassword\x88\x01\x01\x12\x17\n" +
-	"\x04role\x18\x03 \x01(\tH\x01R\x04role\x88\x01\x01\x12\x1b\n" +
-	"\tdag_names\x18\x04 \x03(\tR\bdagNames\x12\"\n" +
-	"\rset_dag_names\x18\x05 \x01(\bR\vsetDagNamesB\v\n" +
+	"\x04role\x18\x03 \x01(\tH\x01R\x04role\x88\x01\x01\x12%\n" +
+	"\x04dags\x18\x06 \x03(\v2\x11.server_v1.DagRefR\x04dags\x12\x19\n" +
+	"\bset_dags\x18\a \x01(\bR\asetDags\x12\x1a\n" +
+	"\bprojects\x18\b \x03(\tR\bprojects\x12!\n" +
+	"\fset_projects\x18\t \x01(\bR\vsetProjectsB\v\n" +
 	"\t_passwordB\a\n" +
-	"\x05_role\"\x1f\n" +
+	"\x05_roleJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06\"\x1f\n" +
 	"\rUserDeleteReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id2\xd2\x02\n" +
 	"\vUserService\x12I\n" +
@@ -309,23 +336,26 @@ var file_server_v1_user_proto_goTypes = []any{
 	(*UserUpdateReq)(nil), // 2: server_v1.UserUpdateReq
 	(*UserDeleteReq)(nil), // 3: server_v1.UserDeleteReq
 	(*UserMain)(nil),      // 4: server_v1.UserMain
-	(*emptypb.Empty)(nil), // 5: google.protobuf.Empty
+	(*DagRef)(nil),        // 5: server_v1.DagRef
+	(*emptypb.Empty)(nil), // 6: google.protobuf.Empty
 }
 var file_server_v1_user_proto_depIdxs = []int32{
 	4, // 0: server_v1.UserListRep.results:type_name -> server_v1.UserMain
-	5, // 1: server_v1.UserService.ListUser:input_type -> google.protobuf.Empty
-	1, // 2: server_v1.UserService.CreateUser:input_type -> server_v1.UserCreateReq
-	2, // 3: server_v1.UserService.UpdateUser:input_type -> server_v1.UserUpdateReq
-	3, // 4: server_v1.UserService.DeleteUser:input_type -> server_v1.UserDeleteReq
-	0, // 5: server_v1.UserService.ListUser:output_type -> server_v1.UserListRep
-	4, // 6: server_v1.UserService.CreateUser:output_type -> server_v1.UserMain
-	5, // 7: server_v1.UserService.UpdateUser:output_type -> google.protobuf.Empty
-	5, // 8: server_v1.UserService.DeleteUser:output_type -> google.protobuf.Empty
-	5, // [5:9] is the sub-list for method output_type
-	1, // [1:5] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	5, // 1: server_v1.UserCreateReq.dags:type_name -> server_v1.DagRef
+	5, // 2: server_v1.UserUpdateReq.dags:type_name -> server_v1.DagRef
+	6, // 3: server_v1.UserService.ListUser:input_type -> google.protobuf.Empty
+	1, // 4: server_v1.UserService.CreateUser:input_type -> server_v1.UserCreateReq
+	2, // 5: server_v1.UserService.UpdateUser:input_type -> server_v1.UserUpdateReq
+	3, // 6: server_v1.UserService.DeleteUser:input_type -> server_v1.UserDeleteReq
+	0, // 7: server_v1.UserService.ListUser:output_type -> server_v1.UserListRep
+	4, // 8: server_v1.UserService.CreateUser:output_type -> server_v1.UserMain
+	6, // 9: server_v1.UserService.UpdateUser:output_type -> google.protobuf.Empty
+	6, // 10: server_v1.UserService.DeleteUser:output_type -> google.protobuf.Empty
+	7, // [7:11] is the sub-list for method output_type
+	3, // [3:7] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_user_proto_init() }
@@ -334,6 +364,7 @@ func file_server_v1_user_proto_init() {
 		return
 	}
 	file_server_v1_auth_proto_init()
+	file_server_v1_dag_proto_init()
 	file_server_v1_user_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

@@ -7,6 +7,7 @@
 package server_v1
 
 import (
+	common "github.com/rendau/loom/api/common"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -25,11 +26,10 @@ const (
 )
 
 type VariableMain struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Value string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	// Скоуп: пусто — глобальный, иначе имя дага.
-	DagName       string                 `protobuf:"bytes,3,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	Scope         *common.ScopeSt        `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	ModifiedAt    *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=modified_at,json=modifiedAt,proto3,oneof" json:"modified_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -80,11 +80,11 @@ func (x *VariableMain) GetValue() string {
 	return ""
 }
 
-func (x *VariableMain) GetDagName() string {
+func (x *VariableMain) GetScope() *common.ScopeSt {
 	if x != nil {
-		return x.DagName
+		return x.Scope
 	}
-	return ""
+	return nil
 }
 
 func (x *VariableMain) GetCreatedAt() *timestamppb.Timestamp {
@@ -103,8 +103,8 @@ func (x *VariableMain) GetModifiedAt() *timestamppb.Timestamp {
 
 type VariableListReq struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Отсутствует — все скоупы; "" — только глобальные; имя дага — только его.
-	DagName       *string `protobuf:"bytes,1,opt,name=dag_name,json=dagName,proto3,oneof" json:"dag_name,omitempty"`
+	// Отсутствует — все скоупы; иначе — только указанный.
+	Scope         *common.ScopeSt `protobuf:"bytes,1,opt,name=scope,proto3,oneof" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -139,11 +139,11 @@ func (*VariableListReq) Descriptor() ([]byte, []int) {
 	return file_server_v1_variable_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *VariableListReq) GetDagName() string {
-	if x != nil && x.DagName != nil {
-		return *x.DagName
+func (x *VariableListReq) GetScope() *common.ScopeSt {
+	if x != nil {
+		return x.Scope
 	}
-	return ""
+	return nil
 }
 
 type VariableListRep struct {
@@ -194,7 +194,7 @@ type VariableSetReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	DagName       string                 `protobuf:"bytes,3,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"` // пусто — глобальный скоуп
+	Scope         *common.ScopeSt        `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"` // пустой — глобальный скоуп
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -243,17 +243,17 @@ func (x *VariableSetReq) GetValue() string {
 	return ""
 }
 
-func (x *VariableSetReq) GetDagName() string {
+func (x *VariableSetReq) GetScope() *common.ScopeSt {
 	if x != nil {
-		return x.DagName
+		return x.Scope
 	}
-	return ""
+	return nil
 }
 
 type VariableDeleteReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	DagName       string                 `protobuf:"bytes,2,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"` // пусто — глобальный скоуп
+	Scope         *common.ScopeSt        `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"` // пустой — глобальный скоуп
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -295,39 +295,39 @@ func (x *VariableDeleteReq) GetName() string {
 	return ""
 }
 
-func (x *VariableDeleteReq) GetDagName() string {
+func (x *VariableDeleteReq) GetScope() *common.ScopeSt {
 	if x != nil {
-		return x.DagName
+		return x.Scope
 	}
-	return ""
+	return nil
 }
 
 var File_server_v1_variable_proto protoreflect.FileDescriptor
 
 const file_server_v1_variable_proto_rawDesc = "" +
 	"\n" +
-	"\x18server_v1/variable.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe0\x01\n" +
+	"\x18server_v1/variable.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x13common/common.proto\"\xec\x01\n" +
 	"\fVariableMain\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\x12\x19\n" +
-	"\bdag_name\x18\x03 \x01(\tR\adagName\x129\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\x12%\n" +
+	"\x05scope\x18\x03 \x01(\v2\x0f.common.ScopeStR\x05scope\x129\n" +
 	"\n" +
 	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12@\n" +
 	"\vmodified_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampH\x00R\n" +
 	"modifiedAt\x88\x01\x01B\x0e\n" +
-	"\f_modified_at\">\n" +
-	"\x0fVariableListReq\x12\x1e\n" +
-	"\bdag_name\x18\x01 \x01(\tH\x00R\adagName\x88\x01\x01B\v\n" +
-	"\t_dag_name\"D\n" +
+	"\f_modified_at\"G\n" +
+	"\x0fVariableListReq\x12*\n" +
+	"\x05scope\x18\x01 \x01(\v2\x0f.common.ScopeStH\x00R\x05scope\x88\x01\x01B\b\n" +
+	"\x06_scope\"D\n" +
 	"\x0fVariableListRep\x121\n" +
-	"\aresults\x18\x01 \x03(\v2\x17.server_v1.VariableMainR\aresults\"U\n" +
+	"\aresults\x18\x01 \x03(\v2\x17.server_v1.VariableMainR\aresults\"a\n" +
 	"\x0eVariableSetReq\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\x12\x19\n" +
-	"\bdag_name\x18\x03 \x01(\tR\adagName\"B\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\x12%\n" +
+	"\x05scope\x18\x03 \x01(\v2\x0f.common.ScopeStR\x05scope\"N\n" +
 	"\x11VariableDeleteReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
-	"\bdag_name\x18\x02 \x01(\tR\adagName2\xad\x02\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
+	"\x05scope\x18\x02 \x01(\v2\x0f.common.ScopeStR\x05scope2\xad\x02\n" +
 	"\x0fVariableService\x12Y\n" +
 	"\fListVariable\x12\x1a.server_v1.VariableListReq\x1a\x1a.server_v1.VariableListRep\"\x11\x82\xd3\xe4\x93\x02\v\x12\t/variable\x12]\n" +
 	"\vSetVariable\x12\x19.server_v1.VariableSetReq\x1a\x16.google.protobuf.Empty\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\x1a\x10/variable/{name}\x12`\n" +
@@ -352,24 +352,29 @@ var file_server_v1_variable_proto_goTypes = []any{
 	(*VariableListRep)(nil),       // 2: server_v1.VariableListRep
 	(*VariableSetReq)(nil),        // 3: server_v1.VariableSetReq
 	(*VariableDeleteReq)(nil),     // 4: server_v1.VariableDeleteReq
-	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
-	(*emptypb.Empty)(nil),         // 6: google.protobuf.Empty
+	(*common.ScopeSt)(nil),        // 5: common.ScopeSt
+	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
+	(*emptypb.Empty)(nil),         // 7: google.protobuf.Empty
 }
 var file_server_v1_variable_proto_depIdxs = []int32{
-	5, // 0: server_v1.VariableMain.created_at:type_name -> google.protobuf.Timestamp
-	5, // 1: server_v1.VariableMain.modified_at:type_name -> google.protobuf.Timestamp
-	0, // 2: server_v1.VariableListRep.results:type_name -> server_v1.VariableMain
-	1, // 3: server_v1.VariableService.ListVariable:input_type -> server_v1.VariableListReq
-	3, // 4: server_v1.VariableService.SetVariable:input_type -> server_v1.VariableSetReq
-	4, // 5: server_v1.VariableService.DeleteVariable:input_type -> server_v1.VariableDeleteReq
-	2, // 6: server_v1.VariableService.ListVariable:output_type -> server_v1.VariableListRep
-	6, // 7: server_v1.VariableService.SetVariable:output_type -> google.protobuf.Empty
-	6, // 8: server_v1.VariableService.DeleteVariable:output_type -> google.protobuf.Empty
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	5,  // 0: server_v1.VariableMain.scope:type_name -> common.ScopeSt
+	6,  // 1: server_v1.VariableMain.created_at:type_name -> google.protobuf.Timestamp
+	6,  // 2: server_v1.VariableMain.modified_at:type_name -> google.protobuf.Timestamp
+	5,  // 3: server_v1.VariableListReq.scope:type_name -> common.ScopeSt
+	0,  // 4: server_v1.VariableListRep.results:type_name -> server_v1.VariableMain
+	5,  // 5: server_v1.VariableSetReq.scope:type_name -> common.ScopeSt
+	5,  // 6: server_v1.VariableDeleteReq.scope:type_name -> common.ScopeSt
+	1,  // 7: server_v1.VariableService.ListVariable:input_type -> server_v1.VariableListReq
+	3,  // 8: server_v1.VariableService.SetVariable:input_type -> server_v1.VariableSetReq
+	4,  // 9: server_v1.VariableService.DeleteVariable:input_type -> server_v1.VariableDeleteReq
+	2,  // 10: server_v1.VariableService.ListVariable:output_type -> server_v1.VariableListRep
+	7,  // 11: server_v1.VariableService.SetVariable:output_type -> google.protobuf.Empty
+	7,  // 12: server_v1.VariableService.DeleteVariable:output_type -> google.protobuf.Empty
+	10, // [10:13] is the sub-list for method output_type
+	7,  // [7:10] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_variable_proto_init() }

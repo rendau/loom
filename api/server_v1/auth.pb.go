@@ -32,7 +32,9 @@ type UserMain struct {
 	// Назначенные даги: их пользователь может менять (расписание, пауза,
 	// переменные/секреты дага, триггер/ретрай/backfill). У admin — пусто:
 	// ему доступны все.
-	DagNames      []string               `protobuf:"bytes,4,rep,name=dag_names,json=dagNames,proto3" json:"dag_names,omitempty"`
+	Dags []*DagRef `protobuf:"bytes,7,rep,name=dags,proto3" json:"dags,omitempty"`
+	// Назначенные проекты: права на все их даги, включая заведённые позже.
+	Projects      []string               `protobuf:"bytes,8,rep,name=projects,proto3" json:"projects,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	ModifiedAt    *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=modified_at,json=modifiedAt,proto3,oneof" json:"modified_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -90,9 +92,16 @@ func (x *UserMain) GetRole() string {
 	return ""
 }
 
-func (x *UserMain) GetDagNames() []string {
+func (x *UserMain) GetDags() []*DagRef {
 	if x != nil {
-		return x.DagNames
+		return x.Dags
+	}
+	return nil
+}
+
+func (x *UserMain) GetProjects() []string {
+	if x != nil {
+		return x.Projects
 	}
 	return nil
 }
@@ -323,17 +332,18 @@ var File_server_v1_auth_proto protoreflect.FileDescriptor
 
 const file_server_v1_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x14server_v1/auth.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf4\x01\n" +
+	"\x14server_v1/auth.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x13server_v1/dag.proto\"\xa0\x02\n" +
 	"\bUserMain\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\x12\x1b\n" +
-	"\tdag_names\x18\x04 \x03(\tR\bdagNames\x129\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x12%\n" +
+	"\x04dags\x18\a \x03(\v2\x11.server_v1.DagRefR\x04dags\x12\x1a\n" +
+	"\bprojects\x18\b \x03(\tR\bprojects\x129\n" +
 	"\n" +
 	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12@\n" +
 	"\vmodified_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampH\x00R\n" +
 	"modifiedAt\x88\x01\x01B\x0e\n" +
-	"\f_modified_at\"0\n" +
+	"\f_modified_atJ\x04\b\x04\x10\x05\"0\n" +
 	"\rAuthStatusRep\x12\x1f\n" +
 	"\vusers_exist\x18\x01 \x01(\bR\n" +
 	"usersExist\"Q\n" +
@@ -375,29 +385,31 @@ var file_server_v1_auth_proto_goTypes = []any{
 	(*AuthCreateFirstAdminReq)(nil), // 2: server_v1.AuthCreateFirstAdminReq
 	(*AuthLoginReq)(nil),            // 3: server_v1.AuthLoginReq
 	(*AuthLoginRep)(nil),            // 4: server_v1.AuthLoginRep
-	(*timestamppb.Timestamp)(nil),   // 5: google.protobuf.Timestamp
-	(*emptypb.Empty)(nil),           // 6: google.protobuf.Empty
+	(*DagRef)(nil),                  // 5: server_v1.DagRef
+	(*timestamppb.Timestamp)(nil),   // 6: google.protobuf.Timestamp
+	(*emptypb.Empty)(nil),           // 7: google.protobuf.Empty
 }
 var file_server_v1_auth_proto_depIdxs = []int32{
-	5, // 0: server_v1.UserMain.created_at:type_name -> google.protobuf.Timestamp
-	5, // 1: server_v1.UserMain.modified_at:type_name -> google.protobuf.Timestamp
-	0, // 2: server_v1.AuthLoginRep.user:type_name -> server_v1.UserMain
-	5, // 3: server_v1.AuthLoginRep.expires_at:type_name -> google.protobuf.Timestamp
-	6, // 4: server_v1.AuthService.GetAuthStatus:input_type -> google.protobuf.Empty
-	2, // 5: server_v1.AuthService.CreateFirstAdmin:input_type -> server_v1.AuthCreateFirstAdminReq
-	3, // 6: server_v1.AuthService.Login:input_type -> server_v1.AuthLoginReq
-	6, // 7: server_v1.AuthService.Logout:input_type -> google.protobuf.Empty
-	6, // 8: server_v1.AuthService.GetMe:input_type -> google.protobuf.Empty
-	1, // 9: server_v1.AuthService.GetAuthStatus:output_type -> server_v1.AuthStatusRep
-	4, // 10: server_v1.AuthService.CreateFirstAdmin:output_type -> server_v1.AuthLoginRep
-	4, // 11: server_v1.AuthService.Login:output_type -> server_v1.AuthLoginRep
-	6, // 12: server_v1.AuthService.Logout:output_type -> google.protobuf.Empty
-	0, // 13: server_v1.AuthService.GetMe:output_type -> server_v1.UserMain
-	9, // [9:14] is the sub-list for method output_type
-	4, // [4:9] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5,  // 0: server_v1.UserMain.dags:type_name -> server_v1.DagRef
+	6,  // 1: server_v1.UserMain.created_at:type_name -> google.protobuf.Timestamp
+	6,  // 2: server_v1.UserMain.modified_at:type_name -> google.protobuf.Timestamp
+	0,  // 3: server_v1.AuthLoginRep.user:type_name -> server_v1.UserMain
+	6,  // 4: server_v1.AuthLoginRep.expires_at:type_name -> google.protobuf.Timestamp
+	7,  // 5: server_v1.AuthService.GetAuthStatus:input_type -> google.protobuf.Empty
+	2,  // 6: server_v1.AuthService.CreateFirstAdmin:input_type -> server_v1.AuthCreateFirstAdminReq
+	3,  // 7: server_v1.AuthService.Login:input_type -> server_v1.AuthLoginReq
+	7,  // 8: server_v1.AuthService.Logout:input_type -> google.protobuf.Empty
+	7,  // 9: server_v1.AuthService.GetMe:input_type -> google.protobuf.Empty
+	1,  // 10: server_v1.AuthService.GetAuthStatus:output_type -> server_v1.AuthStatusRep
+	4,  // 11: server_v1.AuthService.CreateFirstAdmin:output_type -> server_v1.AuthLoginRep
+	4,  // 12: server_v1.AuthService.Login:output_type -> server_v1.AuthLoginRep
+	7,  // 13: server_v1.AuthService.Logout:output_type -> google.protobuf.Empty
+	0,  // 14: server_v1.AuthService.GetMe:output_type -> server_v1.UserMain
+	10, // [10:15] is the sub-list for method output_type
+	5,  // [5:10] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_auth_proto_init() }
@@ -405,6 +417,7 @@ func file_server_v1_auth_proto_init() {
 	if File_server_v1_auth_proto != nil {
 		return
 	}
+	file_server_v1_dag_proto_init()
 	file_server_v1_auth_proto_msgTypes[0].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

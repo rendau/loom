@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { DropdownMenuItem, TableColumn, TableRow, TabsItem } from '@nuxt/ui'
 import { apiErrorMessage } from '~/api/client'
-import { getDag, getDagStats, listDagRegistrations, listTaskResources, setDagAutoUpdate, setDagPaused, syncDag } from '~/api/dag.api'
-import { listRuns } from '~/api/run.api'
-import type { Dag, DagRegistration, DagTask, DagTaskStat, TaskResourcesOverride } from '~/types/dag'
+import { getDag, getDagStats, listTaskResources, setDagPaused } from '~/api/dag.api'
+import { listProjectRegistrations } from '~/api/project.api'
+import { listRuns, runDagQuery } from '~/api/run.api'
+import type { Dag, DagTask, DagTaskStat, TaskResourcesOverride } from '~/types/dag'
+import type { ProjectRegistration } from '~/types/project'
 import type { Run } from '~/types/run'
 
 // Карточка дага — два лица (design/02): таба «Обзор» — как даг себя ведёт
@@ -13,13 +15,22 @@ import type { Run } from '~/types/run'
 
 const route = useRoute()
 const router = useRouter()
-const dagName = String(route.params.name)
+// идентификатор дага составной: проект (образ) + имя инстанса
+const dagRef = { project: String(route.params.project), name: String(route.params.name) }
 
 const { isAdmin, canManageDag } = useAuth()
-const canManage = computed(() => canManageDag(dagName))
+const canManage = computed(() => canManageDag(dagRef))
+
+// проект в пути — ссылка на его карточку: имя дага уникально только
+// внутри проекта, и «из какого он образа» — первое, что спрашивают
+const crumbs = [
+  { label: 'Даги', icon: 'i-lucide-workflow', to: '/dags' },
+  { label: dagRef.project, to: `/projects/${encodeURIComponent(dagRef.project)}` },
+  { label: dagRef.name },
+]
 
 const dag = ref<Dag | null>(null)
-const registrations = ref<DagRegistration[]>([])
+const registrations = ref<ProjectRegistration[]>([])
 const loading = ref(false)
 const loadError = ref('')
 const action = useApiAction()
@@ -31,8 +42,12 @@ async function load(background = false) {
   if (!background)
     loading.value = true
   try {
-    dag.value = await getDag(dagName)
-    registrations.value = (await listDagRegistrations({ dag_name: dagName, limit: 20 })).results
+    dag.value = await getDag(dagRef)
+    // регистрации ведутся на проект: его образ несёт манифест этого дага
+    registrations.value = (await listProjectRegistrations({
+      project_name: dagRef.project,
+      limit: 20,
+    })).results ?? []
     loadError.value = ''
   }
   catch (error) {
@@ -50,7 +65,7 @@ async function load(background = false) {
 // «не заполнено» нужен на бейдже табы до её открытия, поэтому грузим
 // здесь, а не в самой карточке
 const dagTasks = computed(() => dag.value?.tasks ?? [])
-const dagEnv = useDagEnvRequirements(computed(() => dagName), dagTasks)
+const dagEnv = useDagEnvRequirements(computed(() => dagRef), dagTasks)
 
 // ── табы (?tab=): overview — дефолт ─────────────────────
 
@@ -90,7 +105,7 @@ async function loadRuns() {
   try {
     const rep = await listRuns({
       list_params: { page_size: 20, sort: ['-created_at'] },
-      dag_name: dagName,
+      ...runDagQuery(dagRef),
     })
     runs.value = rep.results
     runsError.value = ''
@@ -106,7 +121,7 @@ const statsRuns = ref(0)
 
 async function loadStats() {
   try {
-    const rep = await getDagStats(dagName)
+    const rep = await getDagStats(dagRef)
     statsRuns.value = Number(rep.runs)
     taskStats.value = [...(rep.tasks ?? [])].sort((a, b) =>
       Number(b.max_peak_memory_bytes ?? -1) - Number(a.max_peak_memory_bytes ?? -1)
@@ -123,7 +138,7 @@ const resourceOverrides = ref<TaskResourcesOverride[]>([])
 
 async function loadOverrides() {
   try {
-    resourceOverrides.value = (await listTaskResources(dagName)).results ?? []
+    resourceOverrides.value = (await listTaskResources(dagRef)).results ?? []
   }
   catch {
     // секция останется на значениях манифеста — не критично
@@ -203,35 +218,8 @@ async function togglePaused() {
   if (!d)
     return
   const ok = await action.run(
-    () => setDagPaused(d.name, !d.paused),
+    () => setDagPaused(d, !d.paused),
     { success: d.paused ? 'Даг снят с паузы' : 'Даг поставлен на паузу' },
-  )
-  if (ok !== undefined)
-    await load()
-}
-
-// принудительное обновление дага из registry: перерегистрация его текущего
-// образа сейчас, не дожидаясь тика авто-обновления; статус видно в истории
-// регистраций (и бейджем «обновляется»)
-async function sync() {
-  const d = dag.value
-  if (!d)
-    return
-  const ok = await action.run(
-    () => syncDag(d.name),
-    { success: 'Обновление дага поставлено в очередь' },
-  )
-  if (ok !== undefined)
-    await load(true)
-}
-
-async function toggleAutoUpdate() {
-  const d = dag.value
-  if (!d)
-    return
-  const ok = await action.run(
-    () => setDagAutoUpdate(d.name, !d.auto_update),
-    { success: d.auto_update ? 'Авто-обновление выключено' : 'Авто-обновление включено' },
   )
   if (ok !== undefined)
     await load()
@@ -249,19 +237,12 @@ const menuItems = computed<DropdownMenuItem[][]>(() => {
     if (d.schedule)
       main.push({ label: 'Backfill за период…', icon: 'i-lucide-calendar-clock', onSelect: () => { backfillTarget.value = d } })
   }
-  if (isAdmin.value) {
-    main.push({
-      label: 'Обновить из registry',
-      icon: 'i-lucide-cloud-download',
-      disabled: isUpdating.value,
-      onSelect: () => sync(),
-    })
-    main.push({
-      label: d.auto_update ? 'Выключить авто-обновление' : 'Включить авто-обновление',
-      icon: 'i-lucide-refresh-ccw-dot',
-      onSelect: () => toggleAutoUpdate(),
-    })
-  }
+  // образ и его обновление — свойства проекта: они на его странице
+  main.push({
+    label: 'Проект дага',
+    icon: 'i-lucide-package',
+    onSelect: () => navigateTo(`/projects/${encodeURIComponent(d.project)}`),
+  })
 
   const groups: DropdownMenuItem[][] = []
   if (main.length > 0)
@@ -298,28 +279,6 @@ function effectiveResources(t: DagTask) {
   }
 }
 
-function formatResources(t: DagTask): string {
-  const r = effectiveResources(t)
-  if (!r)
-    return '—'
-  const parts: string[] = []
-  if (r.cpu_request || r.cpu_limit)
-    parts.push(`cpu ${r.cpu_request || '—'}/${r.cpu_limit || '—'}`)
-  if (r.memory_request || r.memory_limit)
-    parts.push(`mem ${r.memory_request || '—'}/${r.memory_limit || '—'}`)
-  return parts.length ? parts.join(' · ') : '—'
-}
-
-const taskColumns: TableColumn<DagTask>[] = [
-  { accessorKey: 'name', header: 'Таск' },
-  { id: 'depends_on', header: 'Зависимости' },
-  { accessorKey: 'retries', header: 'Ретраи' },
-  { id: 'timeout', header: 'Таймаут' },
-  { id: 'resources', header: 'Ресурсы (req/lim)' },
-  { accessorKey: 'priority', header: 'Приоритет' },
-  { id: 'injections', header: 'Инъекции' },
-]
-
 // таба «Настройки»: эффективные ресурсы тасков + источник
 const resourceColumns: TableColumn<DagTask>[] = [
   { accessorKey: 'name', header: 'Таск' },
@@ -329,7 +288,7 @@ const resourceColumns: TableColumn<DagTask>[] = [
   { id: 'actions', header: '' },
 ]
 
-const regColumns: TableColumn<DagRegistration>[] = [
+const regColumns: TableColumn<ProjectRegistration>[] = [
   { accessorKey: 'status', header: 'Статус' },
   { accessorKey: 'source', header: 'Источник' },
   { accessorKey: 'image', header: 'Образ' },
@@ -341,9 +300,13 @@ const regColumns: TableColumn<DagRegistration>[] = [
 <template>
   <UDashboardPanel id="dag-details">
     <template #header>
-      <UDashboardNavbar :title="dagName">
+      <UDashboardNavbar :title="dagRef.name">
         <template #leading>
           <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/dags" aria-label="К списку дагов" />
+        </template>
+
+        <template #title>
+          <PageCrumbs :items="crumbs" kind="даг" />
         </template>
         <template #right>
           <UBadge v-if="dag?.paused" color="warning" variant="subtle" size="lg">пауза</UBadge>
@@ -419,6 +382,25 @@ const regColumns: TableColumn<DagRegistration>[] = [
         <!-- ── Обзор: как даг себя ведёт ── -->
         <template v-if="tab === 'overview'">
           <MetaGrid>
+            <MetaItem label="Проект">
+              <!-- откуда даг: образ и его каталог живут в карточке проекта -->
+              <NuxtLink
+                :to="`/projects/${encodeURIComponent(dagRef.project)}`"
+                class="font-mono text-primary hover:underline"
+              >
+                {{ dagRef.project }}
+              </NuxtLink>
+            </MetaItem>
+            <MetaItem label="Шаблон">
+              <!-- манифест живёт на шаблоне: граф, таски и требования к
+                   окружению — на его странице -->
+              <NuxtLink :to="templateLink(dagRef.project, dag.template)" class="font-mono text-primary hover:underline">
+                {{ dag.template }}
+              </NuxtLink>
+              <UBadge v-if="dag.template_orphaned" color="warning" variant="subtle" size="sm" class="ml-1.5">
+                исчез из образа
+              </UBadge>
+            </MetaItem>
             <MetaItem label="Расписание">
               <template v-if="dag.schedule">
                 <span class="font-mono">{{ dag.schedule }}</span>
@@ -436,7 +418,7 @@ const regColumns: TableColumn<DagRegistration>[] = [
               <span class="font-mono">{{ dag.pool || 'default' }}</span>
             </MetaItem>
             <MetaItem label="Переменные и секреты">
-              <NuxtLink :to="`/env?dag_name=${encodeURIComponent(dag.name)}`" class="text-primary hover:underline">
+              <NuxtLink :to="`/env?scope=${encodeURIComponent(dagRefLabel(dag))}`" class="text-primary hover:underline">
                 env дага →
               </NuxtLink>
             </MetaItem>
@@ -450,7 +432,7 @@ const regColumns: TableColumn<DagRegistration>[] = [
               <div class="flex items-center gap-3">
                 <DagRunSpark v-if="runs.length > 1" :runs="runs" />
                 <UButton
-                  :to="`/runs?dag_name=${encodeURIComponent(dag.name)}`"
+                  :to="`/runs?dag=${encodeURIComponent(dagRefLabel(dag))}`"
                   label="Все раны"
                   trailing-icon="i-lucide-arrow-right"
                   color="neutral"
@@ -545,71 +527,12 @@ const regColumns: TableColumn<DagRegistration>[] = [
 
           <section>
             <SectionHeader title="Таски" :count="dag.tasks.length" />
-            <UTable :data="dag.tasks" :columns="taskColumns" :ui="denseTableUi">
-              <template #name-cell="{ row }">
-                <span class="font-medium">{{ row.original.name }}</span>
-              </template>
-              <template #depends_on-cell="{ row }">
-                <div v-if="row.original.depends_on.length" class="flex flex-wrap gap-1">
-                  <UBadge
-                    v-for="dep in row.original.depends_on"
-                    :key="dep.task"
-                    color="neutral"
-                    variant="subtle"
-                    size="sm"
-                  >
-                    {{ dep.task }}{{ dep.streamed ? ' (stream)' : '' }}
-                  </UBadge>
-                </div>
-                <span v-else class="text-muted">—</span>
-              </template>
-              <template #retries-cell="{ row }">
-                <template v-if="row.original.retries">
-                  {{ row.original.retries }}
-                  <span v-if="row.original.retry_delay_sec" class="text-xs text-muted">
-                    · пауза {{ formatSeconds(row.original.retry_delay_sec) }}
-                  </span>
-                </template>
-                <span v-else class="text-muted">—</span>
-              </template>
-              <template #timeout-cell="{ row }">
-                {{ formatSeconds(row.original.timeout_sec) }}
-              </template>
-              <template #resources-cell="{ row }">
-                <div class="flex items-center gap-1.5">
-                  <span class="font-mono text-xs">{{ formatResources(row.original) }}</span>
-                  <UTooltip v-if="overrideByTask.has(row.original.name)" text="лимиты заданы в админке; значения из кода — рекомендуемые">
-                    <UBadge color="info" variant="subtle" size="sm">админка</UBadge>
-                  </UTooltip>
-                  <UTooltip v-if="canManage" text="Изменить лимиты таска">
-                    <UButton
-                      icon="i-lucide-pencil" size="xs" color="neutral" variant="ghost"
-                      aria-label="Изменить лимиты таска" @click="openResources(row.original.name)"
-                    />
-                  </UTooltip>
-                </div>
-              </template>
-              <template #priority-cell="{ row }">
-                {{ row.original.priority || '—' }}
-              </template>
-              <template #injections-cell="{ row }">
-                <div v-if="row.original.secrets?.length || row.original.variables?.length" class="flex flex-wrap gap-1">
-                  <UTooltip v-for="s in row.original.secrets" :key="`s-${s.env}`" :text="`env ${s.env}`">
-                    <UBadge color="warning" variant="subtle" size="sm" class="font-mono">
-                      <UIcon name="i-lucide-key-round" class="size-3" />
-                      {{ s.secret }}
-                    </UBadge>
-                  </UTooltip>
-                  <UTooltip v-for="v in row.original.variables" :key="`v-${v.env}`" :text="`env ${v.env}`">
-                    <UBadge color="neutral" variant="subtle" size="sm" class="font-mono">
-                      <UIcon name="i-lucide-variable" class="size-3" />
-                      {{ v.variable }}
-                    </UBadge>
-                  </UTooltip>
-                </div>
-                <span v-else class="text-muted">—</span>
-              </template>
-            </UTable>
+            <DagTaskTable
+              :tasks="dag.tasks"
+              :overrides="overrideByTask"
+              :can-manage="canManage"
+              @edit-resources="openResources"
+            />
           </section>
 
           <section v-if="registrations.length">
@@ -649,7 +572,7 @@ const regColumns: TableColumn<DagRegistration>[] = [
         <!-- ── Env: что даг требует от окружения ── -->
         <template v-else-if="tab === 'env'">
           <DagEnvCard
-            :dag-name="dagName"
+            :dag-ref="dagRef"
             :requirements="dagEnv.requirements.value"
             :loading="dagEnv.loading.value"
             :load-error="dagEnv.loadError.value"
@@ -660,13 +583,13 @@ const regColumns: TableColumn<DagRegistration>[] = [
         <!-- ── Настройки: хранение, лимиты, ресурсы тасков ── -->
         <template v-else>
           <DagPoolCard
-            :dag-name="dagName"
+            :dag-ref="dagRef"
             :pool="dag.pool"
             :can-manage="canManage"
             @saved="load()"
           />
 
-          <DagSettingsCard :dag-name="dagName" :can-manage="canManage" />
+          <DagSettingsCard :dag-ref="dagRef" :can-manage="canManage" />
 
           <section>
             <SectionHeader title="Ресурсы тасков" />
@@ -713,7 +636,7 @@ const regColumns: TableColumn<DagRegistration>[] = [
       </template>
 
       <DagTaskResourcesModal
-        :dag-name="dagName"
+        :dag-ref="dagRef"
         :task="resourcesTarget"
         :override="resourcesTarget ? (overrideByTask.get(resourcesTarget.name) ?? null) : null"
         @close="resourcesTarget = null"

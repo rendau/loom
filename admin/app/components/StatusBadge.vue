@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AttemptStatus, RunStatus, TaskStatus } from '~/types/run'
-import type { DagRegistrationStatus } from '~/types/dag'
+import type { ProjectRegistrationStatus } from '~/types/project'
 
 // Единый рендер статуса: иконка + подпись + цвет (design/06 §3). Цвет
 // никогда не остаётся единственным сигналом. Словарь — utils/status.ts.
@@ -26,7 +26,7 @@ const meta = computed(() => {
       return { color: attemptStatusColor(s), label: s, icon: attemptStatusIcon(s) }
     }
     case 'registration': {
-      const s = props.status as DagRegistrationStatus
+      const s = props.status as ProjectRegistrationStatus
       return { color: regStatusColor(s), label: regStatusLabel(s), icon: regStatusIcon(s) }
     }
     default:

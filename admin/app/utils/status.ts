@@ -1,5 +1,5 @@
 import type { AttemptStatus, RunStatus, TaskStatus } from '~/types/run'
-import type { DagRegistrationStatus } from '~/types/dag'
+import type { ProjectRegistrationStatus } from '~/types/project'
 import type { TaskLogSource } from '~/types/log'
 
 // Единый словарь статусов: цвет + подпись + иконка (рендер — компонент
@@ -124,7 +124,7 @@ export function attemptStatusIcon(status: AttemptStatus): string {
 
 // Статусы очереди регистраций дагов.
 
-export function regStatusColor(status: DagRegistrationStatus): BadgeColor {
+export function regStatusColor(status: ProjectRegistrationStatus): BadgeColor {
   switch (status) {
     case 'success': return 'success'
     case 'failed': return 'error'
@@ -133,7 +133,7 @@ export function regStatusColor(status: DagRegistrationStatus): BadgeColor {
   }
 }
 
-export function regStatusLabel(status: DagRegistrationStatus): string {
+export function regStatusLabel(status: ProjectRegistrationStatus): string {
   switch (status) {
     case 'pending': return 'в очереди'
     case 'running': return 'выполняется'
@@ -143,7 +143,7 @@ export function regStatusLabel(status: DagRegistrationStatus): string {
   }
 }
 
-export function regStatusIcon(status: DagRegistrationStatus): string {
+export function regStatusIcon(status: ProjectRegistrationStatus): string {
   switch (status) {
     case 'pending': return 'i-lucide-clock'
     case 'running': return 'i-lucide-loader-circle'

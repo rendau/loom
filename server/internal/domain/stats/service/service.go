@@ -9,11 +9,16 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	"github.com/rendau/loom/server/internal/domain/stats/model"
 )
 
-// activityDays — глубина графика активности.
-const activityDays = 14
+const (
+	// activityDays — потолок графика активности; activityHours — тот же
+	// график для инсталляции, у которой вся история моложе суток.
+	activityDays  = 14
+	activityHours = 24
+)
 
 type Service struct {
 	repoDb RepoDbI
@@ -25,8 +30,8 @@ func New(repoDb RepoDbI) *Service {
 
 // DagStats — агрегаты по таскам дага за последние lastRuns завершённых
 // ранов («жирные таски» админки).
-func (s *Service) DagStats(ctx context.Context, dagName string, lastRuns int64) (int64, []model.TaskStat, error) {
-	runs, stats, err := s.repoDb.DagTaskStats(ctx, dagName, lastRuns)
+func (s *Service) DagStats(ctx context.Context, ref dagModel.Ref, lastRuns int64) (int64, []model.TaskStat, error) {
+	runs, stats, err := s.repoDb.DagTaskStats(ctx, ref, lastRuns)
 	if err != nil {
 		return 0, nil, fmt.Errorf("repoDb.DagTaskStats: %w", err)
 	}
@@ -75,6 +80,11 @@ func (s *Service) Dashboard(ctx context.Context) (*model.Dashboard, error) {
 	g.Go(func() error {
 		items, err := s.repoDb.Activity(ctx, activityDays)
 		result.Activity = items
+		return err
+	})
+	g.Go(func() error {
+		items, err := s.repoDb.ActivityHours(ctx, activityHours)
+		result.ActivityHours = items
 		return err
 	})
 	g.Go(func() error {

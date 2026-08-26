@@ -46,8 +46,8 @@ func (u *Usecase) Get(ctx context.Context, id string) (*model.Main, []dagModel.T
 
 // Count — счётчики ранов по статусам (фильтры-чипы админки); читать может
 // любой аутентифицированный, как и список ранов.
-func (u *Usecase) Count(ctx context.Context, dagName *string) (map[string]int64, error) {
-	counts, err := u.svc.CountByStatus(ctx, dagName)
+func (u *Usecase) Count(ctx context.Context, ref *dagModel.Ref) (map[string]int64, error) {
+	counts, err := u.svc.CountByStatus(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("svc.CountByStatus: %w", err)
 	}
@@ -56,15 +56,15 @@ func (u *Usecase) Count(ctx context.Context, dagName *string) (map[string]int64,
 
 // Trigger — ручной запуск рана дага; params — опциональный JSON-объект
 // параметров (nil — без параметров).
-func (u *Usecase) Trigger(ctx context.Context, dagName string, params []byte) (string, error) {
-	if dagName == "" {
+func (u *Usecase) Trigger(ctx context.Context, ref dagModel.Ref, params []byte) (string, error) {
+	if ref.Empty() {
 		return "", errs.IdRequired
 	}
-	if err := u.authz.RequireDag(ctx, dagName); err != nil {
+	if err := u.authz.RequireDag(ctx, ref); err != nil {
 		return "", err
 	}
 
-	dag, _, err := u.dagSvc.Get(ctx, dagName, true)
+	dag, _, err := u.dagSvc.Get(ctx, ref, true)
 	if err != nil {
 		return "", fmt.Errorf("dagSvc.Get: %w", err)
 	}
@@ -85,18 +85,18 @@ const maxBackfillRuns = 100
 // Backfill создаёт раны за период [from, to): по рану на каждый тик
 // cron-расписания дага, trigger=backfill, logical_date=тик. Идемпотентности
 // нет: повторный вызов за тот же период создаст дубли ранов.
-func (u *Usecase) Backfill(ctx context.Context, dagName string, from, to time.Time, params []byte) ([]string, error) {
-	if dagName == "" {
+func (u *Usecase) Backfill(ctx context.Context, ref dagModel.Ref, from, to time.Time, params []byte) ([]string, error) {
+	if ref.Empty() {
 		return nil, errs.IdRequired
 	}
 	if from.IsZero() || to.IsZero() || !from.Before(to) {
 		return nil, errs.ErrFull{Err: errs.InvalidRequest, Desc: "требуется период from < to"}
 	}
-	if err := u.authz.RequireDag(ctx, dagName); err != nil {
+	if err := u.authz.RequireDag(ctx, ref); err != nil {
 		return nil, err
 	}
 
-	dag, _, err := u.dagSvc.Get(ctx, dagName, true)
+	dag, _, err := u.dagSvc.Get(ctx, ref, true)
 	if err != nil {
 		return nil, fmt.Errorf("dagSvc.Get: %w", err)
 	}
@@ -154,7 +154,7 @@ func (u *Usecase) Cancel(ctx context.Context, runId string) error {
 	if err != nil {
 		return fmt.Errorf("svc.Get: %w", err)
 	}
-	if err = u.authz.RequireDag(ctx, run.DagName); err != nil {
+	if err = u.authz.RequireDag(ctx, run.Dag); err != nil {
 		return err
 	}
 
@@ -211,7 +211,7 @@ func (u *Usecase) RetryTask(ctx context.Context, runId, task string) error {
 	if err != nil {
 		return fmt.Errorf("svc.Get: %w", err)
 	}
-	if err = u.authz.RequireDag(ctx, run.DagName); err != nil {
+	if err = u.authz.RequireDag(ctx, run.Dag); err != nil {
 		return err
 	}
 

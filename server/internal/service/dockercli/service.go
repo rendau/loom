@@ -19,8 +19,9 @@ const (
 	inspectTimeout  = 30 * time.Second
 	describeTimeout = 2 * time.Minute
 
-	// maxManifestSize — предохранитель на вывод `describe` чужого образа.
-	maxManifestSize = 1 << 20
+	// maxCatalogSize — предохранитель на вывод `describe` чужого образа
+	// (каталог: манифесты всех дагов образа).
+	maxCatalogSize = 4 << 20
 )
 
 type Service struct {
@@ -43,11 +44,11 @@ func (s *Service) Inspect(ctx context.Context, image string) (string, []byte, er
 		return "", nil, err
 	}
 
-	manifest, err := s.describe(ctx, digest)
+	catalog, err := s.describe(ctx, digest)
 	if err != nil {
 		return "", nil, err
 	}
-	return digest, manifest, nil
+	return digest, catalog, nil
 }
 
 func (s *Service) pull(ctx context.Context, image string) error {
@@ -90,8 +91,8 @@ func (s *Service) describe(ctx context.Context, image string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("docker run describe: %w", err)
 	}
-	if len(out) > maxManifestSize {
-		return nil, fmt.Errorf("manifest too large: %d bytes", len(out))
+	if len(out) > maxCatalogSize {
+		return nil, fmt.Errorf("catalog too large: %d bytes", len(out))
 	}
 	return out, nil
 }

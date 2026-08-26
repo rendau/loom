@@ -1,15 +1,33 @@
 package loom
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/samber/lo"
 )
 
-// Manifest — самоописание дага. Его печатает команда `describe`; по нему
-// server валидирует и регистрирует даг при регистрации docker-образа.
+// Catalog — самоописание docker-образа: все даги, объявленные в бинарнике
+// (один образ может нести несколько шаблонов дагов). Его печатает команда
+// `describe`; по нему server регистрирует проект и его шаблоны.
+type Catalog struct {
+	SDKVersion string       `json:"sdk_version"`
+	Dags       []CatalogDag `json:"dags"`
+}
+
+// CatalogDag — один даг образа: либо манифест, либо ошибка валидации
+// графа. Ошибка одного дага не отменяет регистрацию остальных — server
+// заводит шаблоны по валидным и показывает ошибки по остальным.
+type CatalogDag struct {
+	Name     string    `json:"name"`
+	Manifest *Manifest `json:"manifest,omitempty"`
+	Error    string    `json:"error,omitempty"`
+}
+
+// Manifest — самоописание дага: по нему server валидирует и регистрирует
+// шаблон дага. Версия SDK общая на образ и живёт в Catalog.
 type Manifest struct {
-	SDKVersion    string         `json:"sdk_version"`
 	Name          string         `json:"name"`
 	MaxActiveRuns int            `json:"max_active_runs,omitempty"`
 	Tasks         []TaskManifest `json:"tasks"`
@@ -57,9 +75,38 @@ type ResourcesManifest struct {
 	MemoryLimit   string `json:"memory_limit,omitempty"`
 }
 
+// buildCatalog собирает каталог образа. Ошибка возвращается только на
+// уровне каталога (пустой набор, дубли имён) — такой образ нельзя
+// зарегистрировать вообще; ошибка валидации отдельного дага уезжает в его
+// CatalogDag.Error, не мешая остальным.
+func buildCatalog(dags []*DAG) (Catalog, error) {
+	if len(dags) == 0 {
+		return Catalog{}, errors.New("no dags declared")
+	}
+
+	seen := make(map[string]bool, len(dags))
+	c := Catalog{SDKVersion: Version, Dags: make([]CatalogDag, 0, len(dags))}
+
+	for _, d := range dags {
+		if seen[d.name] {
+			return Catalog{}, fmt.Errorf("duplicate dag name %q", d.name)
+		}
+		seen[d.name] = true
+
+		item := CatalogDag{Name: d.name}
+		if err := d.Validate(); err != nil {
+			item.Error = err.Error()
+		} else {
+			item.Manifest = new(d.Manifest())
+		}
+		c.Dags = append(c.Dags, item)
+	}
+
+	return c, nil
+}
+
 func (d *DAG) Manifest() Manifest {
 	return Manifest{
-		SDKVersion:    Version,
 		Name:          d.name,
 		MaxActiveRuns: d.maxActiveRuns,
 		Tasks: lo.Map(d.order, func(name string, _ int) TaskManifest {

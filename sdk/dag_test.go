@@ -92,7 +92,6 @@ func TestManifest(t *testing.T) {
 
 	m := d.Manifest()
 
-	assert.Equal(t, Version, m.SDKVersion)
 	assert.Equal(t, "etl", m.Name)
 	require.Len(t, m.Tasks, 3)
 

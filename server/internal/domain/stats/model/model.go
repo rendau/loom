@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
+)
 
 // Dashboard — сводка главной страницы админки.
 type Dashboard struct {
@@ -13,6 +17,7 @@ type Dashboard struct {
 	Pools          []PoolUsage
 	RecentFailures []Failure
 	Activity       []Day
+	ActivityHours  []Hour
 	DagDurations   []DagDuration
 }
 
@@ -24,7 +29,7 @@ type Window struct {
 
 // Upcoming — ближайший запуск дага по расписанию.
 type Upcoming struct {
-	DagName   string
+	Dag       dagModel.Ref
 	NextRunAt time.Time
 	Schedule  string
 }
@@ -40,7 +45,7 @@ type PoolUsage struct {
 // таск и исход его последней попытки («что именно сломалось» на обзоре).
 type Failure struct {
 	RunId      string
-	DagName    string
+	Dag        dagModel.Ref
 	FinishedAt time.Time
 	Task       string
 	ExitReason string
@@ -58,6 +63,16 @@ type TaskStat struct {
 	MaxPeakMemoryBytes *int64
 }
 
+// Hour — раны за час. У молодой инсталляции вся история умещается в
+// сутки, и график по дням вырождается в один столбик — тогда админка
+// показывает этот ряд.
+type Hour struct {
+	Hour    time.Time
+	Success int64
+	Failed  int64
+	Running int64
+}
+
 // Day — раны за календарный день (UTC).
 type Day struct {
 	Date    string // YYYY-MM-DD
@@ -68,8 +83,8 @@ type Day struct {
 
 // DagDuration — длительности ранов дага за период.
 type DagDuration struct {
-	DagName string
-	AvgSec  float64
-	MaxSec  float64
-	Runs    int64
+	Dag    dagModel.Ref
+	AvgSec float64
+	MaxSec float64
+	Runs   int64
 }

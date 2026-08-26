@@ -1,3 +1,4 @@
+import type { DagRef, Scope } from '~/types/common'
 import type { Dag, DagTask } from '~/types/dag'
 import type { SecretMeta } from '~/types/secret'
 import type { Variable } from '~/types/variable'
@@ -12,8 +13,8 @@ import type { Variable } from '~/types/variable'
 // plane: заполняют именно его, а один и тот же секрет могут читать
 // несколько тасков под разными env-именами.
 //
-// Правило резолва — то же, что при launch: локальная запись дага
-// перекрывает глобальную с тем же именем.
+// Правило резолва — то же, что при launch: запись дага перекрывает
+// запись проекта, а та — глобальную с тем же именем.
 
 export type EnvKind = 'variable' | 'secret'
 
@@ -25,24 +26,39 @@ export interface DagEnvRequirement {
   description: string
   envs: string[] // env-имена в контейнерах тасков
   tasks: string[] // какие таски требуют
-  // '' — значение взято из глобального скоупа, имя дага — из локального,
-  // undefined — записи нет: запуск таска упадёт launch_failed
-  scope?: string
+  // Скоуп-источник значения; undefined — записи нет ни на одном уровне:
+  // запуск таска упадёт launch_failed
+  scope?: Scope
   value?: string // текущее значение переменной (у секретов — никогда)
 }
 
-function pickScope<T extends { name: string, dag_name: string }>(
+// Цепочка скоупов дага от самого узкого к глобальному — тот же порядок,
+// что у резолва на сервере.
+function scopeChain(ref: DagRef): Scope[] {
+  return [
+    { project: ref.project, dag: ref.name },
+    { project: ref.project, dag: '' },
+    { project: '', dag: '' },
+  ]
+}
+
+function pickScope<T extends { name: string, scope: Scope }>(
   list: T[],
   name: string,
-  dagName: string,
+  ref: DagRef,
 ): T | undefined {
-  return list.find(v => v.name === name && v.dag_name === dagName)
-    ?? list.find(v => v.name === name && v.dag_name === '')
+  for (const sc of scopeChain(ref)) {
+    const found = list.find(v => v.name === name
+      && v.scope.project === sc.project && v.scope.dag === sc.dag)
+    if (found)
+      return found
+  }
+  return undefined
 }
 
 export function resolveDagEnv(
   tasks: DagTask[],
-  dagName: string,
+  ref: DagRef,
   variables: Variable[],
   secrets: SecretMeta[],
 ): DagEnvRequirement[] {
@@ -54,12 +70,12 @@ export function resolveDagEnv(
     if (!req) {
       req = { kind, name, description: '', envs: [], tasks: [] }
       if (kind === 'variable') {
-        const v = pickScope(variables, name, dagName)
-        req.scope = v?.dag_name
+        const v = pickScope(variables, name, ref)
+        req.scope = v?.scope
         req.value = v?.value
       }
       else {
-        req.scope = pickScope(secrets, name, dagName)?.dag_name
+        req.scope = pickScope(secrets, name, ref)?.scope
       }
       out.set(key, req)
     }
@@ -94,6 +110,7 @@ export function countMissingEnv(reqs: DagEnvRequirement[]): number {
 }
 
 // Сколько незаполненных у каждого дага — для бейджей списка и обзора.
+// Ключ — «проект/даг»: имена инстансов уникальны только внутри проекта.
 export function missingEnvByDag(
   dags: Dag[],
   variables: Variable[],
@@ -101,9 +118,9 @@ export function missingEnvByDag(
 ): Map<string, number> {
   const out = new Map<string, number>()
   for (const d of dags) {
-    const missing = countMissingEnv(resolveDagEnv(d.tasks ?? [], d.name, variables, secrets))
+    const missing = countMissingEnv(resolveDagEnv(d.tasks ?? [], d, variables, secrets))
     if (missing > 0)
-      out.set(d.name, missing)
+      out.set(dagRefLabel(d), missing)
   }
   return out
 }

@@ -9,7 +9,9 @@ import (
 type RunUpsert struct {
 	PKId string
 
+	ProjectName *string
 	DagName     *string
+	Template    *string
 	Image       *string
 	ImageDigest *string
 	Trigger     *string
@@ -22,8 +24,14 @@ type RunUpsert struct {
 
 func (m *RunUpsert) CreateColumnMap() map[string]any {
 	result := map[string]any{"id": m.PKId}
+	if m.ProjectName != nil {
+		result["project_name"] = *m.ProjectName
+	}
 	if m.DagName != nil {
 		result["dag_name"] = *m.DagName
+	}
+	if m.Template != nil {
+		result["template"] = *m.Template
 	}
 	if m.Image != nil {
 		result["image"] = *m.Image
@@ -77,7 +85,9 @@ func (m *RunUpsert) ReturningColumnMap() map[string]any {
 func DecodeRunCreate(v *domainModel.Main) *RunUpsert {
 	return &RunUpsert{
 		PKId:        v.Id,
-		DagName:     &v.DagName,
+		ProjectName: &v.Dag.Project,
+		DagName:     &v.Dag.Name,
+		Template:    &v.Template,
 		Image:       &v.Image,
 		ImageDigest: &v.ImageDigest,
 		Trigger:     &v.Trigger,

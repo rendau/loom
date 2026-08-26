@@ -25,37 +25,97 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// DagRef — составной идентификатор дага.
+type DagRef struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DagRef) Reset() {
+	*x = DagRef{}
+	mi := &file_server_v1_dag_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DagRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DagRef) ProtoMessage() {}
+
+func (x *DagRef) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_dag_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DagRef.ProtoReflect.Descriptor instead.
+func (*DagRef) Descriptor() ([]byte, []int) {
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *DagRef) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
+}
+
+func (x *DagRef) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 type DagMain struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	Name        string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Image       string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`
-	ImageDigest string                 `protobuf:"bytes,3,opt,name=image_digest,json=imageDigest,proto3" json:"image_digest,omitempty"`
-	Schedule    string                 `protobuf:"bytes,4,opt,name=schedule,proto3" json:"schedule,omitempty"`
-	Paused      bool                   `protobuf:"varint,5,opt,name=paused,proto3" json:"paused,omitempty"`
-	SdkVersion  string                 `protobuf:"bytes,6,opt,name=sdk_version,json=sdkVersion,proto3" json:"sdk_version,omitempty"`
-	Tasks       []*DagTaskMain         `protobuf:"bytes,7,rep,name=tasks,proto3" json:"tasks,omitempty"`
-	CreatedAt   *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	ModifiedAt  *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=modified_at,json=modifiedAt,proto3,oneof" json:"modified_at,omitempty"`
-	// Ближайший запуск по cron-расписанию; отсутствует у дагов без расписания.
-	NextRunAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=next_run_at,json=nextRunAt,proto3,oneof" json:"next_run_at,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Project string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Name    string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Имя дага в образе, от которого заведён инстанс.
+	Template string `protobuf:"bytes,3,opt,name=template,proto3" json:"template,omitempty"`
+	// Шаблон пропал из образа при последней регистрации: даг работает на
+	// последнем известном манифесте.
+	TemplateOrphaned bool `protobuf:"varint,4,opt,name=template_orphaned,json=templateOrphaned,proto3" json:"template_orphaned,omitempty"`
+	// Образ проекта и его закреплённый digest.
+	Image       string `protobuf:"bytes,5,opt,name=image,proto3" json:"image,omitempty"`
+	ImageDigest string `protobuf:"bytes,6,opt,name=image_digest,json=imageDigest,proto3" json:"image_digest,omitempty"`
+	// Авто-обновление образа — свойство проекта, общее для всех его дагов.
+	AutoUpdate bool   `protobuf:"varint,7,opt,name=auto_update,json=autoUpdate,proto3" json:"auto_update,omitempty"`
+	Schedule   string `protobuf:"bytes,8,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	Paused     bool   `protobuf:"varint,9,opt,name=paused,proto3" json:"paused,omitempty"`
 	// Наверстывать пропущенные тики расписания.
-	Catchup bool `protobuf:"varint,11,opt,name=catchup,proto3" json:"catchup,omitempty"`
+	Catchup    bool           `protobuf:"varint,10,opt,name=catchup,proto3" json:"catchup,omitempty"`
+	SdkVersion string         `protobuf:"bytes,11,opt,name=sdk_version,json=sdkVersion,proto3" json:"sdk_version,omitempty"`
+	Tasks      []*DagTaskMain `protobuf:"bytes,12,rep,name=tasks,proto3" json:"tasks,omitempty"`
 	// Лимит одновременно выполняющихся ранов; 0 — без лимита.
-	MaxActiveRuns int32 `protobuf:"varint,12,opt,name=max_active_runs,json=maxActiveRuns,proto3" json:"max_active_runs,omitempty"`
-	// Авто-обновление: poll-синк digest'а тега образа.
-	AutoUpdate bool `protobuf:"varint,13,opt,name=auto_update,json=autoUpdate,proto3" json:"auto_update,omitempty"`
-	// Последние раны (новые первыми, до 5) — статус-стрип в списке дагов.
-	LastRuns []*DagLastRun `protobuf:"bytes,14,rep,name=last_runs,json=lastRuns,proto3" json:"last_runs,omitempty"`
+	MaxActiveRuns int32 `protobuf:"varint,13,opt,name=max_active_runs,json=maxActiveRuns,proto3" json:"max_active_runs,omitempty"`
 	// Пул слотов дага (задаётся только из админки): действует на все его
 	// таски. Пусто — таски уходят в общий пул default.
-	Pool          string `protobuf:"bytes,15,opt,name=pool,proto3" json:"pool,omitempty"`
+	Pool string `protobuf:"bytes,14,opt,name=pool,proto3" json:"pool,omitempty"`
+	// Ближайший запуск по cron-расписанию; отсутствует у дагов без расписания.
+	NextRunAt  *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=next_run_at,json=nextRunAt,proto3,oneof" json:"next_run_at,omitempty"`
+	CreatedAt  *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ModifiedAt *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=modified_at,json=modifiedAt,proto3,oneof" json:"modified_at,omitempty"`
+	// Последние раны (новые первыми, до 5) — статус-стрип в списке дагов.
+	LastRuns      []*DagLastRun `protobuf:"bytes,18,rep,name=last_runs,json=lastRuns,proto3" json:"last_runs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DagMain) Reset() {
 	*x = DagMain{}
-	mi := &file_server_v1_dag_proto_msgTypes[0]
+	mi := &file_server_v1_dag_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -67,7 +127,7 @@ func (x *DagMain) String() string {
 func (*DagMain) ProtoMessage() {}
 
 func (x *DagMain) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[0]
+	mi := &file_server_v1_dag_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -80,7 +140,14 @@ func (x *DagMain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagMain.ProtoReflect.Descriptor instead.
 func (*DagMain) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{0}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *DagMain) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *DagMain) GetName() string {
@@ -88,6 +155,20 @@ func (x *DagMain) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *DagMain) GetTemplate() string {
+	if x != nil {
+		return x.Template
+	}
+	return ""
+}
+
+func (x *DagMain) GetTemplateOrphaned() bool {
+	if x != nil {
+		return x.TemplateOrphaned
+	}
+	return false
 }
 
 func (x *DagMain) GetImage() string {
@@ -104,6 +185,13 @@ func (x *DagMain) GetImageDigest() string {
 	return ""
 }
 
+func (x *DagMain) GetAutoUpdate() bool {
+	if x != nil {
+		return x.AutoUpdate
+	}
+	return false
+}
+
 func (x *DagMain) GetSchedule() string {
 	if x != nil {
 		return x.Schedule
@@ -114,6 +202,13 @@ func (x *DagMain) GetSchedule() string {
 func (x *DagMain) GetPaused() bool {
 	if x != nil {
 		return x.Paused
+	}
+	return false
+}
+
+func (x *DagMain) GetCatchup() bool {
+	if x != nil {
+		return x.Catchup
 	}
 	return false
 }
@@ -132,6 +227,27 @@ func (x *DagMain) GetTasks() []*DagTaskMain {
 	return nil
 }
 
+func (x *DagMain) GetMaxActiveRuns() int32 {
+	if x != nil {
+		return x.MaxActiveRuns
+	}
+	return 0
+}
+
+func (x *DagMain) GetPool() string {
+	if x != nil {
+		return x.Pool
+	}
+	return ""
+}
+
+func (x *DagMain) GetNextRunAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.NextRunAt
+	}
+	return nil
+}
+
 func (x *DagMain) GetCreatedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CreatedAt
@@ -146,46 +262,11 @@ func (x *DagMain) GetModifiedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *DagMain) GetNextRunAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.NextRunAt
-	}
-	return nil
-}
-
-func (x *DagMain) GetCatchup() bool {
-	if x != nil {
-		return x.Catchup
-	}
-	return false
-}
-
-func (x *DagMain) GetMaxActiveRuns() int32 {
-	if x != nil {
-		return x.MaxActiveRuns
-	}
-	return 0
-}
-
-func (x *DagMain) GetAutoUpdate() bool {
-	if x != nil {
-		return x.AutoUpdate
-	}
-	return false
-}
-
 func (x *DagMain) GetLastRuns() []*DagLastRun {
 	if x != nil {
 		return x.LastRuns
 	}
 	return nil
-}
-
-func (x *DagMain) GetPool() string {
-	if x != nil {
-		return x.Pool
-	}
-	return ""
 }
 
 type DagLastRun struct {
@@ -198,7 +279,7 @@ type DagLastRun struct {
 
 func (x *DagLastRun) Reset() {
 	*x = DagLastRun{}
-	mi := &file_server_v1_dag_proto_msgTypes[1]
+	mi := &file_server_v1_dag_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -210,7 +291,7 @@ func (x *DagLastRun) String() string {
 func (*DagLastRun) ProtoMessage() {}
 
 func (x *DagLastRun) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[1]
+	mi := &file_server_v1_dag_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -223,7 +304,7 @@ func (x *DagLastRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagLastRun.ProtoReflect.Descriptor instead.
 func (*DagLastRun) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{1}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *DagLastRun) GetRunId() string {
@@ -259,7 +340,7 @@ type DagTaskMain struct {
 
 func (x *DagTaskMain) Reset() {
 	*x = DagTaskMain{}
-	mi := &file_server_v1_dag_proto_msgTypes[2]
+	mi := &file_server_v1_dag_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -271,7 +352,7 @@ func (x *DagTaskMain) String() string {
 func (*DagTaskMain) ProtoMessage() {}
 
 func (x *DagTaskMain) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[2]
+	mi := &file_server_v1_dag_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -284,7 +365,7 @@ func (x *DagTaskMain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagTaskMain.ProtoReflect.Descriptor instead.
 func (*DagTaskMain) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{2}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *DagTaskMain) GetName() string {
@@ -363,7 +444,7 @@ type DagTaskEnvSecret struct {
 
 func (x *DagTaskEnvSecret) Reset() {
 	*x = DagTaskEnvSecret{}
-	mi := &file_server_v1_dag_proto_msgTypes[3]
+	mi := &file_server_v1_dag_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -375,7 +456,7 @@ func (x *DagTaskEnvSecret) String() string {
 func (*DagTaskEnvSecret) ProtoMessage() {}
 
 func (x *DagTaskEnvSecret) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[3]
+	mi := &file_server_v1_dag_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -388,7 +469,7 @@ func (x *DagTaskEnvSecret) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagTaskEnvSecret.ProtoReflect.Descriptor instead.
 func (*DagTaskEnvSecret) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{3}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *DagTaskEnvSecret) GetEnv() string {
@@ -425,7 +506,7 @@ type DagTaskEnvVariable struct {
 
 func (x *DagTaskEnvVariable) Reset() {
 	*x = DagTaskEnvVariable{}
-	mi := &file_server_v1_dag_proto_msgTypes[4]
+	mi := &file_server_v1_dag_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -437,7 +518,7 @@ func (x *DagTaskEnvVariable) String() string {
 func (*DagTaskEnvVariable) ProtoMessage() {}
 
 func (x *DagTaskEnvVariable) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[4]
+	mi := &file_server_v1_dag_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -450,7 +531,7 @@ func (x *DagTaskEnvVariable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagTaskEnvVariable.ProtoReflect.Descriptor instead.
 func (*DagTaskEnvVariable) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{4}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DagTaskEnvVariable) GetEnv() string {
@@ -484,7 +565,7 @@ type DagTaskDepMain struct {
 
 func (x *DagTaskDepMain) Reset() {
 	*x = DagTaskDepMain{}
-	mi := &file_server_v1_dag_proto_msgTypes[5]
+	mi := &file_server_v1_dag_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -496,7 +577,7 @@ func (x *DagTaskDepMain) String() string {
 func (*DagTaskDepMain) ProtoMessage() {}
 
 func (x *DagTaskDepMain) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[5]
+	mi := &file_server_v1_dag_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -509,7 +590,7 @@ func (x *DagTaskDepMain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagTaskDepMain.ProtoReflect.Descriptor instead.
 func (*DagTaskDepMain) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{5}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DagTaskDepMain) GetTask() string {
@@ -539,7 +620,7 @@ type DagTaskResources struct {
 
 func (x *DagTaskResources) Reset() {
 	*x = DagTaskResources{}
-	mi := &file_server_v1_dag_proto_msgTypes[6]
+	mi := &file_server_v1_dag_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -551,7 +632,7 @@ func (x *DagTaskResources) String() string {
 func (*DagTaskResources) ProtoMessage() {}
 
 func (x *DagTaskResources) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[6]
+	mi := &file_server_v1_dag_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -564,7 +645,7 @@ func (x *DagTaskResources) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagTaskResources.ProtoReflect.Descriptor instead.
 func (*DagTaskResources) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{6}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DagTaskResources) GetCpuRequest() string {
@@ -595,116 +676,36 @@ func (x *DagTaskResources) GetMemoryLimit() string {
 	return ""
 }
 
-type DagRegisterReq struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	Image string                 `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
-	// Авто-обновление; отсутствует — сохранить текущее значение
-	// (перерегистрация не сбрасывает флаг), у нового дага — false.
-	AutoUpdate *bool `protobuf:"varint,2,opt,name=auto_update,json=autoUpdate,proto3,oneof" json:"auto_update,omitempty"`
-	// Желаемые настройки нового дага; к уже существующему (перерегистрация)
-	// не применяются — его настройками управляют отдельные ручки.
-	Schedule      *string `protobuf:"bytes,3,opt,name=schedule,proto3,oneof" json:"schedule,omitempty"` // cron; пусто/отсутствует — без расписания
-	Catchup       *bool   `protobuf:"varint,4,opt,name=catchup,proto3,oneof" json:"catchup,omitempty"`
-	Paused        *bool   `protobuf:"varint,5,opt,name=paused,proto3,oneof" json:"paused,omitempty"` // true — оставить на ручном запуске
-	Pool          *string `protobuf:"bytes,6,opt,name=pool,proto3,oneof" json:"pool,omitempty"`      // пул слотов дага; пусто/отсутствует — не задан
+type DagCreateReq struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Project string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	// Имя дага в образе (шаблон), от которого заводится инстанс.
+	Template string `protobuf:"bytes,2,opt,name=template,proto3" json:"template,omitempty"`
+	// Имя инстанса; пусто — совпадает с именем шаблона.
+	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	// Желаемые настройки нового дага.
+	Schedule      *string `protobuf:"bytes,4,opt,name=schedule,proto3,oneof" json:"schedule,omitempty"` // cron; пусто/отсутствует — без расписания
+	Catchup       *bool   `protobuf:"varint,5,opt,name=catchup,proto3,oneof" json:"catchup,omitempty"`
+	Paused        *bool   `protobuf:"varint,6,opt,name=paused,proto3,oneof" json:"paused,omitempty"` // true — оставить на ручном запуске
+	Pool          *string `protobuf:"bytes,7,opt,name=pool,proto3,oneof" json:"pool,omitempty"`      // пул слотов дага; пусто/отсутствует — не задан
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DagRegisterReq) Reset() {
-	*x = DagRegisterReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DagRegisterReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DagRegisterReq) ProtoMessage() {}
-
-func (x *DagRegisterReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DagRegisterReq.ProtoReflect.Descriptor instead.
-func (*DagRegisterReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *DagRegisterReq) GetImage() string {
-	if x != nil {
-		return x.Image
-	}
-	return ""
-}
-
-func (x *DagRegisterReq) GetAutoUpdate() bool {
-	if x != nil && x.AutoUpdate != nil {
-		return *x.AutoUpdate
-	}
-	return false
-}
-
-func (x *DagRegisterReq) GetSchedule() string {
-	if x != nil && x.Schedule != nil {
-		return *x.Schedule
-	}
-	return ""
-}
-
-func (x *DagRegisterReq) GetCatchup() bool {
-	if x != nil && x.Catchup != nil {
-		return *x.Catchup
-	}
-	return false
-}
-
-func (x *DagRegisterReq) GetPaused() bool {
-	if x != nil && x.Paused != nil {
-		return *x.Paused
-	}
-	return false
-}
-
-func (x *DagRegisterReq) GetPool() string {
-	if x != nil && x.Pool != nil {
-		return *x.Pool
-	}
-	return ""
-}
-
-type DagRegisterRep struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Id записи очереди регистраций — для поллинга статуса.
-	RegistrationId string `protobuf:"bytes,1,opt,name=registration_id,json=registrationId,proto3" json:"registration_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *DagRegisterRep) Reset() {
-	*x = DagRegisterRep{}
+func (x *DagCreateReq) Reset() {
+	*x = DagCreateReq{}
 	mi := &file_server_v1_dag_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DagRegisterRep) String() string {
+func (x *DagCreateReq) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DagRegisterRep) ProtoMessage() {}
+func (*DagCreateReq) ProtoMessage() {}
 
-func (x *DagRegisterRep) ProtoReflect() protoreflect.Message {
+func (x *DagCreateReq) ProtoReflect() protoreflect.Message {
 	mi := &file_server_v1_dag_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -716,327 +717,74 @@ func (x *DagRegisterRep) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DagRegisterRep.ProtoReflect.Descriptor instead.
-func (*DagRegisterRep) Descriptor() ([]byte, []int) {
+// Deprecated: Use DagCreateReq.ProtoReflect.Descriptor instead.
+func (*DagCreateReq) Descriptor() ([]byte, []int) {
 	return file_server_v1_dag_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *DagRegisterRep) GetRegistrationId() string {
+func (x *DagCreateReq) GetProject() string {
 	if x != nil {
-		return x.RegistrationId
+		return x.Project
 	}
 	return ""
 }
 
-type DagRegistrationMain struct {
-	state  protoimpl.MessageState `protogen:"open.v1"`
-	Id     string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Image  string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`
-	Source string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // manual | auto (авто-обновление по digest)
-	Status string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"` // pending | running | success | failed
-	Error  string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`   // причина failed
-	// Имя дага: у manual пусто до успешного describe, у auto известно сразу.
-	DagName       string                 `protobuf:"bytes,6,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"`
-	Schedule      *string                `protobuf:"bytes,7,opt,name=schedule,proto3,oneof" json:"schedule,omitempty"`
-	Catchup       *bool                  `protobuf:"varint,8,opt,name=catchup,proto3,oneof" json:"catchup,omitempty"`
-	Paused        *bool                  `protobuf:"varint,9,opt,name=paused,proto3,oneof" json:"paused,omitempty"`
-	AutoUpdate    *bool                  `protobuf:"varint,10,opt,name=auto_update,json=autoUpdate,proto3,oneof" json:"auto_update,omitempty"`
-	Pool          *string                `protobuf:"bytes,14,opt,name=pool,proto3,oneof" json:"pool,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
-	FinishedAt    *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=finished_at,json=finishedAt,proto3,oneof" json:"finished_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DagRegistrationMain) Reset() {
-	*x = DagRegistrationMain{}
-	mi := &file_server_v1_dag_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DagRegistrationMain) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DagRegistrationMain) ProtoMessage() {}
-
-func (x *DagRegistrationMain) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[9]
+func (x *DagCreateReq) GetTemplate() string {
 	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DagRegistrationMain.ProtoReflect.Descriptor instead.
-func (*DagRegistrationMain) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *DagRegistrationMain) GetId() string {
-	if x != nil {
-		return x.Id
+		return x.Template
 	}
 	return ""
 }
 
-func (x *DagRegistrationMain) GetImage() string {
+func (x *DagCreateReq) GetName() string {
 	if x != nil {
-		return x.Image
+		return x.Name
 	}
 	return ""
 }
 
-func (x *DagRegistrationMain) GetSource() string {
-	if x != nil {
-		return x.Source
-	}
-	return ""
-}
-
-func (x *DagRegistrationMain) GetStatus() string {
-	if x != nil {
-		return x.Status
-	}
-	return ""
-}
-
-func (x *DagRegistrationMain) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
-}
-
-func (x *DagRegistrationMain) GetDagName() string {
-	if x != nil {
-		return x.DagName
-	}
-	return ""
-}
-
-func (x *DagRegistrationMain) GetSchedule() string {
+func (x *DagCreateReq) GetSchedule() string {
 	if x != nil && x.Schedule != nil {
 		return *x.Schedule
 	}
 	return ""
 }
 
-func (x *DagRegistrationMain) GetCatchup() bool {
+func (x *DagCreateReq) GetCatchup() bool {
 	if x != nil && x.Catchup != nil {
 		return *x.Catchup
 	}
 	return false
 }
 
-func (x *DagRegistrationMain) GetPaused() bool {
+func (x *DagCreateReq) GetPaused() bool {
 	if x != nil && x.Paused != nil {
 		return *x.Paused
 	}
 	return false
 }
 
-func (x *DagRegistrationMain) GetAutoUpdate() bool {
-	if x != nil && x.AutoUpdate != nil {
-		return *x.AutoUpdate
-	}
-	return false
-}
-
-func (x *DagRegistrationMain) GetPool() string {
+func (x *DagCreateReq) GetPool() string {
 	if x != nil && x.Pool != nil {
 		return *x.Pool
-	}
-	return ""
-}
-
-func (x *DagRegistrationMain) GetCreatedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.CreatedAt
-	}
-	return nil
-}
-
-func (x *DagRegistrationMain) GetStartedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.StartedAt
-	}
-	return nil
-}
-
-func (x *DagRegistrationMain) GetFinishedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.FinishedAt
-	}
-	return nil
-}
-
-type DagRegistrationListReq struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	DagName *string                `protobuf:"bytes,1,opt,name=dag_name,json=dagName,proto3,oneof" json:"dag_name,omitempty"`
-	// true — только незавершённые (pending | running).
-	Active        *bool `protobuf:"varint,2,opt,name=active,proto3,oneof" json:"active,omitempty"`
-	Limit         int64 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"` // 0 — дефолт сервера (50)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DagRegistrationListReq) Reset() {
-	*x = DagRegistrationListReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DagRegistrationListReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DagRegistrationListReq) ProtoMessage() {}
-
-func (x *DagRegistrationListReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DagRegistrationListReq.ProtoReflect.Descriptor instead.
-func (*DagRegistrationListReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *DagRegistrationListReq) GetDagName() string {
-	if x != nil && x.DagName != nil {
-		return *x.DagName
-	}
-	return ""
-}
-
-func (x *DagRegistrationListReq) GetActive() bool {
-	if x != nil && x.Active != nil {
-		return *x.Active
-	}
-	return false
-}
-
-func (x *DagRegistrationListReq) GetLimit() int64 {
-	if x != nil {
-		return x.Limit
-	}
-	return 0
-}
-
-type DagRegistrationListRep struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Results       []*DagRegistrationMain `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DagRegistrationListRep) Reset() {
-	*x = DagRegistrationListRep{}
-	mi := &file_server_v1_dag_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DagRegistrationListRep) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DagRegistrationListRep) ProtoMessage() {}
-
-func (x *DagRegistrationListRep) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DagRegistrationListRep.ProtoReflect.Descriptor instead.
-func (*DagRegistrationListRep) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *DagRegistrationListRep) GetResults() []*DagRegistrationMain {
-	if x != nil {
-		return x.Results
-	}
-	return nil
-}
-
-type DagRegistrationGetReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DagRegistrationGetReq) Reset() {
-	*x = DagRegistrationGetReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DagRegistrationGetReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DagRegistrationGetReq) ProtoMessage() {}
-
-func (x *DagRegistrationGetReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DagRegistrationGetReq.ProtoReflect.Descriptor instead.
-func (*DagRegistrationGetReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *DagRegistrationGetReq) GetId() string {
-	if x != nil {
-		return x.Id
 	}
 	return ""
 }
 
 type DagListReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ListParams    *common.ListParamsSt   `protobuf:"bytes,1,opt,name=list_params,json=listParams,proto3" json:"list_params,omitempty"`
-	Paused        *bool                  `protobuf:"varint,2,opt,name=paused,proto3,oneof" json:"paused,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	ListParams *common.ListParamsSt   `protobuf:"bytes,1,opt,name=list_params,json=listParams,proto3" json:"list_params,omitempty"`
+	Paused     *bool                  `protobuf:"varint,2,opt,name=paused,proto3,oneof" json:"paused,omitempty"`
+	// Фильтры: даги проекта / заведённые от конкретного шаблона.
+	Project       *string `protobuf:"bytes,3,opt,name=project,proto3,oneof" json:"project,omitempty"`
+	Template      *string `protobuf:"bytes,4,opt,name=template,proto3,oneof" json:"template,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DagListReq) Reset() {
 	*x = DagListReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[13]
+	mi := &file_server_v1_dag_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1048,7 +796,7 @@ func (x *DagListReq) String() string {
 func (*DagListReq) ProtoMessage() {}
 
 func (x *DagListReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[13]
+	mi := &file_server_v1_dag_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1061,7 +809,7 @@ func (x *DagListReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagListReq.ProtoReflect.Descriptor instead.
 func (*DagListReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{13}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DagListReq) GetListParams() *common.ListParamsSt {
@@ -1078,6 +826,20 @@ func (x *DagListReq) GetPaused() bool {
 	return false
 }
 
+func (x *DagListReq) GetProject() string {
+	if x != nil && x.Project != nil {
+		return *x.Project
+	}
+	return ""
+}
+
+func (x *DagListReq) GetTemplate() string {
+	if x != nil && x.Template != nil {
+		return *x.Template
+	}
+	return ""
+}
+
 type DagListRep struct {
 	state          protoimpl.MessageState   `protogen:"open.v1"`
 	PaginationInfo *common.PaginationInfoSt `protobuf:"bytes,1,opt,name=pagination_info,json=paginationInfo,proto3" json:"pagination_info,omitempty"`
@@ -1088,7 +850,7 @@ type DagListRep struct {
 
 func (x *DagListRep) Reset() {
 	*x = DagListRep{}
-	mi := &file_server_v1_dag_proto_msgTypes[14]
+	mi := &file_server_v1_dag_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1100,7 +862,7 @@ func (x *DagListRep) String() string {
 func (*DagListRep) ProtoMessage() {}
 
 func (x *DagListRep) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[14]
+	mi := &file_server_v1_dag_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1113,7 +875,7 @@ func (x *DagListRep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagListRep.ProtoReflect.Descriptor instead.
 func (*DagListRep) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{14}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DagListRep) GetPaginationInfo() *common.PaginationInfoSt {
@@ -1132,14 +894,15 @@ func (x *DagListRep) GetResults() []*DagMain {
 
 type DagGetReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DagGetReq) Reset() {
 	*x = DagGetReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[15]
+	mi := &file_server_v1_dag_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1151,7 +914,7 @@ func (x *DagGetReq) String() string {
 func (*DagGetReq) ProtoMessage() {}
 
 func (x *DagGetReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[15]
+	mi := &file_server_v1_dag_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1164,7 +927,14 @@ func (x *DagGetReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagGetReq.ProtoReflect.Descriptor instead.
 func (*DagGetReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{15}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *DagGetReq) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *DagGetReq) GetName() string {
@@ -1175,17 +945,18 @@ func (x *DagGetReq) GetName() string {
 }
 
 type DagStatsReq struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Project string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Name    string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// Сколько последних завершённых ранов агрегировать; 0 — дефолт (20).
-	LastRuns      int32 `protobuf:"varint,2,opt,name=last_runs,json=lastRuns,proto3" json:"last_runs,omitempty"`
+	LastRuns      int32 `protobuf:"varint,3,opt,name=last_runs,json=lastRuns,proto3" json:"last_runs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DagStatsReq) Reset() {
 	*x = DagStatsReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[16]
+	mi := &file_server_v1_dag_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1197,7 +968,7 @@ func (x *DagStatsReq) String() string {
 func (*DagStatsReq) ProtoMessage() {}
 
 func (x *DagStatsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[16]
+	mi := &file_server_v1_dag_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1210,7 +981,14 @@ func (x *DagStatsReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagStatsReq.ProtoReflect.Descriptor instead.
 func (*DagStatsReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{16}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *DagStatsReq) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *DagStatsReq) GetName() string {
@@ -1243,7 +1021,7 @@ type DagTaskStat struct {
 
 func (x *DagTaskStat) Reset() {
 	*x = DagTaskStat{}
-	mi := &file_server_v1_dag_proto_msgTypes[17]
+	mi := &file_server_v1_dag_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1255,7 +1033,7 @@ func (x *DagTaskStat) String() string {
 func (*DagTaskStat) ProtoMessage() {}
 
 func (x *DagTaskStat) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[17]
+	mi := &file_server_v1_dag_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1268,7 +1046,7 @@ func (x *DagTaskStat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagTaskStat.ProtoReflect.Descriptor instead.
 func (*DagTaskStat) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{17}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *DagTaskStat) GetTask() string {
@@ -1324,7 +1102,7 @@ type DagStatsRep struct {
 
 func (x *DagStatsRep) Reset() {
 	*x = DagStatsRep{}
-	mi := &file_server_v1_dag_proto_msgTypes[18]
+	mi := &file_server_v1_dag_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1336,7 +1114,7 @@ func (x *DagStatsRep) String() string {
 func (*DagStatsRep) ProtoMessage() {}
 
 func (x *DagStatsRep) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[18]
+	mi := &file_server_v1_dag_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1349,7 +1127,7 @@ func (x *DagStatsRep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagStatsRep.ProtoReflect.Descriptor instead.
 func (*DagStatsRep) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{18}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DagStatsRep) GetRuns() int64 {
@@ -1367,19 +1145,20 @@ func (x *DagStatsRep) GetTasks() []*DagTaskStat {
 }
 
 type DagSetScheduleReq struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Project string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Name    string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// Cron-расписание (5 полей или @daily и т.п.); пустая строка — снять.
-	Schedule string `protobuf:"bytes,2,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	Schedule string `protobuf:"bytes,3,opt,name=schedule,proto3" json:"schedule,omitempty"`
 	// Наверстывать пропущенные тики расписания.
-	Catchup       bool `protobuf:"varint,3,opt,name=catchup,proto3" json:"catchup,omitempty"`
+	Catchup       bool `protobuf:"varint,4,opt,name=catchup,proto3" json:"catchup,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DagSetScheduleReq) Reset() {
 	*x = DagSetScheduleReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[19]
+	mi := &file_server_v1_dag_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1391,7 +1170,7 @@ func (x *DagSetScheduleReq) String() string {
 func (*DagSetScheduleReq) ProtoMessage() {}
 
 func (x *DagSetScheduleReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[19]
+	mi := &file_server_v1_dag_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1404,7 +1183,14 @@ func (x *DagSetScheduleReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagSetScheduleReq.ProtoReflect.Descriptor instead.
 func (*DagSetScheduleReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{19}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *DagSetScheduleReq) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *DagSetScheduleReq) GetName() string {
@@ -1430,15 +1216,16 @@ func (x *DagSetScheduleReq) GetCatchup() bool {
 
 type DagSetPausedReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Paused        bool                   `protobuf:"varint,2,opt,name=paused,proto3" json:"paused,omitempty"`
+	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Paused        bool                   `protobuf:"varint,3,opt,name=paused,proto3" json:"paused,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DagSetPausedReq) Reset() {
 	*x = DagSetPausedReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[20]
+	mi := &file_server_v1_dag_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1450,7 +1237,7 @@ func (x *DagSetPausedReq) String() string {
 func (*DagSetPausedReq) ProtoMessage() {}
 
 func (x *DagSetPausedReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[20]
+	mi := &file_server_v1_dag_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1463,7 +1250,14 @@ func (x *DagSetPausedReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagSetPausedReq.ProtoReflect.Descriptor instead.
 func (*DagSetPausedReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{20}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *DagSetPausedReq) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *DagSetPausedReq) GetName() string {
@@ -1482,15 +1276,16 @@ func (x *DagSetPausedReq) GetPaused() bool {
 
 type DagSetPoolReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Pool          string                 `protobuf:"bytes,2,opt,name=pool,proto3" json:"pool,omitempty"` // пусто — снять пул дага
+	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Pool          string                 `protobuf:"bytes,3,opt,name=pool,proto3" json:"pool,omitempty"` // пусто — снять пул дага
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DagSetPoolReq) Reset() {
 	*x = DagSetPoolReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[21]
+	mi := &file_server_v1_dag_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1502,7 +1297,7 @@ func (x *DagSetPoolReq) String() string {
 func (*DagSetPoolReq) ProtoMessage() {}
 
 func (x *DagSetPoolReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[21]
+	mi := &file_server_v1_dag_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1515,7 +1310,14 @@ func (x *DagSetPoolReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagSetPoolReq.ProtoReflect.Descriptor instead.
 func (*DagSetPoolReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{21}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *DagSetPoolReq) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *DagSetPoolReq) GetName() string {
@@ -1532,157 +1334,17 @@ func (x *DagSetPoolReq) GetPool() string {
 	return ""
 }
 
-type DagSyncReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DagSyncReq) Reset() {
-	*x = DagSyncReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[22]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DagSyncReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DagSyncReq) ProtoMessage() {}
-
-func (x *DagSyncReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[22]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DagSyncReq.ProtoReflect.Descriptor instead.
-func (*DagSyncReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{22}
-}
-
-func (x *DagSyncReq) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-type DagSyncRep struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Id записи очереди регистраций — для поллинга статуса.
-	RegistrationId string `protobuf:"bytes,1,opt,name=registration_id,json=registrationId,proto3" json:"registration_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *DagSyncRep) Reset() {
-	*x = DagSyncRep{}
-	mi := &file_server_v1_dag_proto_msgTypes[23]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DagSyncRep) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DagSyncRep) ProtoMessage() {}
-
-func (x *DagSyncRep) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[23]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DagSyncRep.ProtoReflect.Descriptor instead.
-func (*DagSyncRep) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{23}
-}
-
-func (x *DagSyncRep) GetRegistrationId() string {
-	if x != nil {
-		return x.RegistrationId
-	}
-	return ""
-}
-
-type DagSetAutoUpdateReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	AutoUpdate    bool                   `protobuf:"varint,2,opt,name=auto_update,json=autoUpdate,proto3" json:"auto_update,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DagSetAutoUpdateReq) Reset() {
-	*x = DagSetAutoUpdateReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[24]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DagSetAutoUpdateReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DagSetAutoUpdateReq) ProtoMessage() {}
-
-func (x *DagSetAutoUpdateReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[24]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DagSetAutoUpdateReq.ProtoReflect.Descriptor instead.
-func (*DagSetAutoUpdateReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{24}
-}
-
-func (x *DagSetAutoUpdateReq) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *DagSetAutoUpdateReq) GetAutoUpdate() bool {
-	if x != nil {
-		return x.AutoUpdate
-	}
-	return false
-}
-
 type DagDeleteReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DagDeleteReq) Reset() {
 	*x = DagDeleteReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[25]
+	mi := &file_server_v1_dag_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1694,7 +1356,7 @@ func (x *DagDeleteReq) String() string {
 func (*DagDeleteReq) ProtoMessage() {}
 
 func (x *DagDeleteReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[25]
+	mi := &file_server_v1_dag_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1707,7 +1369,14 @@ func (x *DagDeleteReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DagDeleteReq.ProtoReflect.Descriptor instead.
 func (*DagDeleteReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{25}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *DagDeleteReq) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *DagDeleteReq) GetName() string {
@@ -1731,7 +1400,7 @@ type TaskResourcesMain struct {
 
 func (x *TaskResourcesMain) Reset() {
 	*x = TaskResourcesMain{}
-	mi := &file_server_v1_dag_proto_msgTypes[26]
+	mi := &file_server_v1_dag_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1743,7 +1412,7 @@ func (x *TaskResourcesMain) String() string {
 func (*TaskResourcesMain) ProtoMessage() {}
 
 func (x *TaskResourcesMain) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[26]
+	mi := &file_server_v1_dag_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1756,7 +1425,7 @@ func (x *TaskResourcesMain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskResourcesMain.ProtoReflect.Descriptor instead.
 func (*TaskResourcesMain) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{26}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *TaskResourcesMain) GetTask() string {
@@ -1803,14 +1472,15 @@ func (x *TaskResourcesMain) GetModifiedAt() *timestamppb.Timestamp {
 
 type TaskResourcesListReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // имя дага
+	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"` // имя дага
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskResourcesListReq) Reset() {
 	*x = TaskResourcesListReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[27]
+	mi := &file_server_v1_dag_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1822,7 +1492,7 @@ func (x *TaskResourcesListReq) String() string {
 func (*TaskResourcesListReq) ProtoMessage() {}
 
 func (x *TaskResourcesListReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[27]
+	mi := &file_server_v1_dag_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1835,7 +1505,14 @@ func (x *TaskResourcesListReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskResourcesListReq.ProtoReflect.Descriptor instead.
 func (*TaskResourcesListReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{27}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *TaskResourcesListReq) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *TaskResourcesListReq) GetName() string {
@@ -1854,7 +1531,7 @@ type TaskResourcesListRep struct {
 
 func (x *TaskResourcesListRep) Reset() {
 	*x = TaskResourcesListRep{}
-	mi := &file_server_v1_dag_proto_msgTypes[28]
+	mi := &file_server_v1_dag_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1866,7 +1543,7 @@ func (x *TaskResourcesListRep) String() string {
 func (*TaskResourcesListRep) ProtoMessage() {}
 
 func (x *TaskResourcesListRep) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[28]
+	mi := &file_server_v1_dag_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1879,7 +1556,7 @@ func (x *TaskResourcesListRep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskResourcesListRep.ProtoReflect.Descriptor instead.
 func (*TaskResourcesListRep) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{28}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *TaskResourcesListRep) GetResults() []*TaskResourcesMain {
@@ -1891,19 +1568,20 @@ func (x *TaskResourcesListRep) GetResults() []*TaskResourcesMain {
 
 type TaskResourcesSetReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // имя дага
-	Task          string                 `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
-	CpuRequest    string                 `protobuf:"bytes,3,opt,name=cpu_request,json=cpuRequest,proto3" json:"cpu_request,omitempty"`
-	CpuLimit      string                 `protobuf:"bytes,4,opt,name=cpu_limit,json=cpuLimit,proto3" json:"cpu_limit,omitempty"`
-	MemoryRequest string                 `protobuf:"bytes,5,opt,name=memory_request,json=memoryRequest,proto3" json:"memory_request,omitempty"`
-	MemoryLimit   string                 `protobuf:"bytes,6,opt,name=memory_limit,json=memoryLimit,proto3" json:"memory_limit,omitempty"`
+	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"` // имя дага
+	Task          string                 `protobuf:"bytes,3,opt,name=task,proto3" json:"task,omitempty"`
+	CpuRequest    string                 `protobuf:"bytes,4,opt,name=cpu_request,json=cpuRequest,proto3" json:"cpu_request,omitempty"`
+	CpuLimit      string                 `protobuf:"bytes,5,opt,name=cpu_limit,json=cpuLimit,proto3" json:"cpu_limit,omitempty"`
+	MemoryRequest string                 `protobuf:"bytes,6,opt,name=memory_request,json=memoryRequest,proto3" json:"memory_request,omitempty"`
+	MemoryLimit   string                 `protobuf:"bytes,7,opt,name=memory_limit,json=memoryLimit,proto3" json:"memory_limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskResourcesSetReq) Reset() {
 	*x = TaskResourcesSetReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[29]
+	mi := &file_server_v1_dag_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1915,7 +1593,7 @@ func (x *TaskResourcesSetReq) String() string {
 func (*TaskResourcesSetReq) ProtoMessage() {}
 
 func (x *TaskResourcesSetReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[29]
+	mi := &file_server_v1_dag_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1928,7 +1606,14 @@ func (x *TaskResourcesSetReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskResourcesSetReq.ProtoReflect.Descriptor instead.
 func (*TaskResourcesSetReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{29}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *TaskResourcesSetReq) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *TaskResourcesSetReq) GetName() string {
@@ -1975,15 +1660,16 @@ func (x *TaskResourcesSetReq) GetMemoryLimit() string {
 
 type TaskResourcesDeleteReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // имя дага
-	Task          string                 `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
+	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"` // имя дага
+	Task          string                 `protobuf:"bytes,3,opt,name=task,proto3" json:"task,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskResourcesDeleteReq) Reset() {
 	*x = TaskResourcesDeleteReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[30]
+	mi := &file_server_v1_dag_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1995,7 +1681,7 @@ func (x *TaskResourcesDeleteReq) String() string {
 func (*TaskResourcesDeleteReq) ProtoMessage() {}
 
 func (x *TaskResourcesDeleteReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[30]
+	mi := &file_server_v1_dag_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2008,7 +1694,14 @@ func (x *TaskResourcesDeleteReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskResourcesDeleteReq.ProtoReflect.Descriptor instead.
 func (*TaskResourcesDeleteReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{30}
+	return file_server_v1_dag_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *TaskResourcesDeleteReq) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *TaskResourcesDeleteReq) GetName() string {
@@ -2025,94 +1718,40 @@ func (x *TaskResourcesDeleteReq) GetTask() string {
 	return ""
 }
 
-type DagPushManifestReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DescribeId    string                 `protobuf:"bytes,1,opt,name=describe_id,json=describeId,proto3" json:"describe_id,omitempty"`
-	Manifest      []byte                 `protobuf:"bytes,2,opt,name=manifest,proto3" json:"manifest,omitempty"` // JSON-манифест дага
-	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`       // непустая — describe упал (например, невалидный даг)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DagPushManifestReq) Reset() {
-	*x = DagPushManifestReq{}
-	mi := &file_server_v1_dag_proto_msgTypes[31]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DagPushManifestReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DagPushManifestReq) ProtoMessage() {}
-
-func (x *DagPushManifestReq) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dag_proto_msgTypes[31]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DagPushManifestReq.ProtoReflect.Descriptor instead.
-func (*DagPushManifestReq) Descriptor() ([]byte, []int) {
-	return file_server_v1_dag_proto_rawDescGZIP(), []int{31}
-}
-
-func (x *DagPushManifestReq) GetDescribeId() string {
-	if x != nil {
-		return x.DescribeId
-	}
-	return ""
-}
-
-func (x *DagPushManifestReq) GetManifest() []byte {
-	if x != nil {
-		return x.Manifest
-	}
-	return nil
-}
-
-func (x *DagPushManifestReq) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
-}
-
 var File_server_v1_dag_proto protoreflect.FileDescriptor
 
 const file_server_v1_dag_proto_rawDesc = "" +
 	"\n" +
-	"\x13server_v1/dag.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x13common/common.proto\"\xe2\x04\n" +
-	"\aDagMain\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05image\x18\x02 \x01(\tR\x05image\x12!\n" +
-	"\fimage_digest\x18\x03 \x01(\tR\vimageDigest\x12\x1a\n" +
-	"\bschedule\x18\x04 \x01(\tR\bschedule\x12\x16\n" +
-	"\x06paused\x18\x05 \x01(\bR\x06paused\x12\x1f\n" +
-	"\vsdk_version\x18\x06 \x01(\tR\n" +
+	"\x13server_v1/dag.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x13common/common.proto\"6\n" +
+	"\x06DagRef\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xc5\x05\n" +
+	"\aDagMain\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
+	"\btemplate\x18\x03 \x01(\tR\btemplate\x12+\n" +
+	"\x11template_orphaned\x18\x04 \x01(\bR\x10templateOrphaned\x12\x14\n" +
+	"\x05image\x18\x05 \x01(\tR\x05image\x12!\n" +
+	"\fimage_digest\x18\x06 \x01(\tR\vimageDigest\x12\x1f\n" +
+	"\vauto_update\x18\a \x01(\bR\n" +
+	"autoUpdate\x12\x1a\n" +
+	"\bschedule\x18\b \x01(\tR\bschedule\x12\x16\n" +
+	"\x06paused\x18\t \x01(\bR\x06paused\x12\x18\n" +
+	"\acatchup\x18\n" +
+	" \x01(\bR\acatchup\x12\x1f\n" +
+	"\vsdk_version\x18\v \x01(\tR\n" +
 	"sdkVersion\x12,\n" +
-	"\x05tasks\x18\a \x03(\v2\x16.server_v1.DagTaskMainR\x05tasks\x129\n" +
+	"\x05tasks\x18\f \x03(\v2\x16.server_v1.DagTaskMainR\x05tasks\x12&\n" +
+	"\x0fmax_active_runs\x18\r \x01(\x05R\rmaxActiveRuns\x12\x12\n" +
+	"\x04pool\x18\x0e \x01(\tR\x04pool\x12?\n" +
+	"\vnext_run_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampH\x00R\tnextRunAt\x88\x01\x01\x129\n" +
 	"\n" +
-	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12@\n" +
-	"\vmodified_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampH\x00R\n" +
-	"modifiedAt\x88\x01\x01\x12?\n" +
-	"\vnext_run_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tnextRunAt\x88\x01\x01\x12\x18\n" +
-	"\acatchup\x18\v \x01(\bR\acatchup\x12&\n" +
-	"\x0fmax_active_runs\x18\f \x01(\x05R\rmaxActiveRuns\x12\x1f\n" +
-	"\vauto_update\x18\r \x01(\bR\n" +
-	"autoUpdate\x122\n" +
-	"\tlast_runs\x18\x0e \x03(\v2\x15.server_v1.DagLastRunR\blastRuns\x12\x12\n" +
-	"\x04pool\x18\x0f \x01(\tR\x04poolB\x0e\n" +
-	"\f_modified_atB\x0e\n" +
-	"\f_next_run_at\";\n" +
+	"created_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12@\n" +
+	"\vmodified_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampH\x01R\n" +
+	"modifiedAt\x88\x01\x01\x122\n" +
+	"\tlast_runs\x18\x12 \x03(\v2\x15.server_v1.DagLastRunR\blastRunsB\x0e\n" +
+	"\f_next_run_atB\x0e\n" +
+	"\f_modified_at\";\n" +
 	"\n" +
 	"DagLastRun\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x16\n" +
@@ -2148,76 +1787,42 @@ const file_server_v1_dag_proto_rawDesc = "" +
 	"cpuRequest\x12\x1b\n" +
 	"\tcpu_limit\x18\x02 \x01(\tR\bcpuLimit\x12%\n" +
 	"\x0ememory_request\x18\x03 \x01(\tR\rmemoryRequest\x12!\n" +
-	"\fmemory_limit\x18\x04 \x01(\tR\vmemoryLimit\"\xff\x01\n" +
-	"\x0eDagRegisterReq\x12\x14\n" +
-	"\x05image\x18\x01 \x01(\tR\x05image\x12$\n" +
-	"\vauto_update\x18\x02 \x01(\bH\x00R\n" +
-	"autoUpdate\x88\x01\x01\x12\x1f\n" +
-	"\bschedule\x18\x03 \x01(\tH\x01R\bschedule\x88\x01\x01\x12\x1d\n" +
-	"\acatchup\x18\x04 \x01(\bH\x02R\acatchup\x88\x01\x01\x12\x1b\n" +
-	"\x06paused\x18\x05 \x01(\bH\x03R\x06paused\x88\x01\x01\x12\x17\n" +
-	"\x04pool\x18\x06 \x01(\tH\x04R\x04pool\x88\x01\x01B\x0e\n" +
-	"\f_auto_updateB\v\n" +
+	"\fmemory_limit\x18\x04 \x01(\tR\vmemoryLimit\"\xfb\x01\n" +
+	"\fDagCreateReq\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x1a\n" +
+	"\btemplate\x18\x02 \x01(\tR\btemplate\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1f\n" +
+	"\bschedule\x18\x04 \x01(\tH\x00R\bschedule\x88\x01\x01\x12\x1d\n" +
+	"\acatchup\x18\x05 \x01(\bH\x01R\acatchup\x88\x01\x01\x12\x1b\n" +
+	"\x06paused\x18\x06 \x01(\bH\x02R\x06paused\x88\x01\x01\x12\x17\n" +
+	"\x04pool\x18\a \x01(\tH\x03R\x04pool\x88\x01\x01B\v\n" +
 	"\t_scheduleB\n" +
 	"\n" +
 	"\b_catchupB\t\n" +
 	"\a_pausedB\a\n" +
-	"\x05_pool\"9\n" +
-	"\x0eDagRegisterRep\x12'\n" +
-	"\x0fregistration_id\x18\x01 \x01(\tR\x0eregistrationId\"\xd1\x04\n" +
-	"\x13DagRegistrationMain\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
-	"\x05image\x18\x02 \x01(\tR\x05image\x12\x16\n" +
-	"\x06source\x18\x03 \x01(\tR\x06source\x12\x16\n" +
-	"\x06status\x18\x04 \x01(\tR\x06status\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\x12\x19\n" +
-	"\bdag_name\x18\x06 \x01(\tR\adagName\x12\x1f\n" +
-	"\bschedule\x18\a \x01(\tH\x00R\bschedule\x88\x01\x01\x12\x1d\n" +
-	"\acatchup\x18\b \x01(\bH\x01R\acatchup\x88\x01\x01\x12\x1b\n" +
-	"\x06paused\x18\t \x01(\bH\x02R\x06paused\x88\x01\x01\x12$\n" +
-	"\vauto_update\x18\n" +
-	" \x01(\bH\x03R\n" +
-	"autoUpdate\x88\x01\x01\x12\x17\n" +
-	"\x04pool\x18\x0e \x01(\tH\x04R\x04pool\x88\x01\x01\x129\n" +
-	"\n" +
-	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12>\n" +
-	"\n" +
-	"started_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampH\x05R\tstartedAt\x88\x01\x01\x12@\n" +
-	"\vfinished_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampH\x06R\n" +
-	"finishedAt\x88\x01\x01B\v\n" +
-	"\t_scheduleB\n" +
-	"\n" +
-	"\b_catchupB\t\n" +
-	"\a_pausedB\x0e\n" +
-	"\f_auto_updateB\a\n" +
-	"\x05_poolB\r\n" +
-	"\v_started_atB\x0e\n" +
-	"\f_finished_at\"\x83\x01\n" +
-	"\x16DagRegistrationListReq\x12\x1e\n" +
-	"\bdag_name\x18\x01 \x01(\tH\x00R\adagName\x88\x01\x01\x12\x1b\n" +
-	"\x06active\x18\x02 \x01(\bH\x01R\x06active\x88\x01\x01\x12\x14\n" +
-	"\x05limit\x18\x03 \x01(\x03R\x05limitB\v\n" +
-	"\t_dag_nameB\t\n" +
-	"\a_active\"R\n" +
-	"\x16DagRegistrationListRep\x128\n" +
-	"\aresults\x18\x01 \x03(\v2\x1e.server_v1.DagRegistrationMainR\aresults\"'\n" +
-	"\x15DagRegistrationGetReq\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"k\n" +
+	"\x05_pool\"\xc4\x01\n" +
 	"\n" +
 	"DagListReq\x125\n" +
 	"\vlist_params\x18\x01 \x01(\v2\x14.common.ListParamsStR\n" +
 	"listParams\x12\x1b\n" +
-	"\x06paused\x18\x02 \x01(\bH\x00R\x06paused\x88\x01\x01B\t\n" +
-	"\a_paused\"}\n" +
+	"\x06paused\x18\x02 \x01(\bH\x00R\x06paused\x88\x01\x01\x12\x1d\n" +
+	"\aproject\x18\x03 \x01(\tH\x01R\aproject\x88\x01\x01\x12\x1f\n" +
+	"\btemplate\x18\x04 \x01(\tH\x02R\btemplate\x88\x01\x01B\t\n" +
+	"\a_pausedB\n" +
+	"\n" +
+	"\b_projectB\v\n" +
+	"\t_template\"}\n" +
 	"\n" +
 	"DagListRep\x12A\n" +
 	"\x0fpagination_info\x18\x01 \x01(\v2\x18.common.PaginationInfoStR\x0epaginationInfo\x12,\n" +
-	"\aresults\x18\x02 \x03(\v2\x12.server_v1.DagMainR\aresults\"\x1f\n" +
-	"\tDagGetReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\">\n" +
-	"\vDagStatsReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1b\n" +
-	"\tlast_runs\x18\x02 \x01(\x05R\blastRuns\"\xad\x02\n" +
+	"\aresults\x18\x02 \x03(\v2\x12.server_v1.DagMainR\aresults\"9\n" +
+	"\tDagGetReq\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"X\n" +
+	"\vDagStatsReq\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
+	"\tlast_runs\x18\x03 \x01(\x05R\blastRuns\"\xad\x02\n" +
 	"\vDagTaskStat\x12\x12\n" +
 	"\x04task\x18\x01 \x01(\tR\x04task\x12\x12\n" +
 	"\x04runs\x18\x02 \x01(\x03R\x04runs\x12(\n" +
@@ -2229,29 +1834,23 @@ const file_server_v1_dag_proto_rawDesc = "" +
 	"\x16_max_peak_memory_bytes\"O\n" +
 	"\vDagStatsRep\x12\x12\n" +
 	"\x04runs\x18\x01 \x01(\x03R\x04runs\x12,\n" +
-	"\x05tasks\x18\x02 \x03(\v2\x16.server_v1.DagTaskStatR\x05tasks\"]\n" +
-	"\x11DagSetScheduleReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
-	"\bschedule\x18\x02 \x01(\tR\bschedule\x12\x18\n" +
-	"\acatchup\x18\x03 \x01(\bR\acatchup\"=\n" +
-	"\x0fDagSetPausedReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
-	"\x06paused\x18\x02 \x01(\bR\x06paused\"7\n" +
-	"\rDagSetPoolReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
-	"\x04pool\x18\x02 \x01(\tR\x04pool\" \n" +
-	"\n" +
-	"DagSyncReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"5\n" +
-	"\n" +
-	"DagSyncRep\x12'\n" +
-	"\x0fregistration_id\x18\x01 \x01(\tR\x0eregistrationId\"J\n" +
-	"\x13DagSetAutoUpdateReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
-	"\vauto_update\x18\x02 \x01(\bR\n" +
-	"autoUpdate\"\"\n" +
-	"\fDagDeleteReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\xec\x01\n" +
+	"\x05tasks\x18\x02 \x03(\v2\x16.server_v1.DagTaskStatR\x05tasks\"w\n" +
+	"\x11DagSetScheduleReq\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
+	"\bschedule\x18\x03 \x01(\tR\bschedule\x12\x18\n" +
+	"\acatchup\x18\x04 \x01(\bR\acatchup\"W\n" +
+	"\x0fDagSetPausedReq\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
+	"\x06paused\x18\x03 \x01(\bR\x06paused\"Q\n" +
+	"\rDagSetPoolReq\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04pool\x18\x03 \x01(\tR\x04pool\"<\n" +
+	"\fDagDeleteReq\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xec\x01\n" +
 	"\x11TaskResourcesMain\x12\x12\n" +
 	"\x04task\x18\x01 \x01(\tR\x04task\x12\x1f\n" +
 	"\vcpu_request\x18\x02 \x01(\tR\n" +
@@ -2260,46 +1859,39 @@ const file_server_v1_dag_proto_rawDesc = "" +
 	"\x0ememory_request\x18\x04 \x01(\tR\rmemoryRequest\x12!\n" +
 	"\fmemory_limit\x18\x05 \x01(\tR\vmemoryLimit\x12;\n" +
 	"\vmodified_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"modifiedAt\"*\n" +
-	"\x14TaskResourcesListReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"N\n" +
+	"modifiedAt\"D\n" +
+	"\x14TaskResourcesListReq\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"N\n" +
 	"\x14TaskResourcesListRep\x126\n" +
-	"\aresults\x18\x01 \x03(\v2\x1c.server_v1.TaskResourcesMainR\aresults\"\xc5\x01\n" +
-	"\x13TaskResourcesSetReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
-	"\x04task\x18\x02 \x01(\tR\x04task\x12\x1f\n" +
-	"\vcpu_request\x18\x03 \x01(\tR\n" +
+	"\aresults\x18\x01 \x03(\v2\x1c.server_v1.TaskResourcesMainR\aresults\"\xdf\x01\n" +
+	"\x13TaskResourcesSetReq\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04task\x18\x03 \x01(\tR\x04task\x12\x1f\n" +
+	"\vcpu_request\x18\x04 \x01(\tR\n" +
 	"cpuRequest\x12\x1b\n" +
-	"\tcpu_limit\x18\x04 \x01(\tR\bcpuLimit\x12%\n" +
-	"\x0ememory_request\x18\x05 \x01(\tR\rmemoryRequest\x12!\n" +
-	"\fmemory_limit\x18\x06 \x01(\tR\vmemoryLimit\"@\n" +
-	"\x16TaskResourcesDeleteReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
-	"\x04task\x18\x02 \x01(\tR\x04task\"g\n" +
-	"\x12DagPushManifestReq\x12\x1f\n" +
-	"\vdescribe_id\x18\x01 \x01(\tR\n" +
-	"describeId\x12\x1a\n" +
-	"\bmanifest\x18\x02 \x01(\fR\bmanifest\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error2\xd4\f\n" +
+	"\tcpu_limit\x18\x05 \x01(\tR\bcpuLimit\x12%\n" +
+	"\x0ememory_request\x18\x06 \x01(\tR\rmemoryRequest\x12!\n" +
+	"\fmemory_limit\x18\a \x01(\tR\vmemoryLimit\"Z\n" +
+	"\x16TaskResourcesDeleteReq\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04task\x18\x03 \x01(\tR\x04task2\x8c\t\n" +
 	"\n" +
-	"DagService\x12T\n" +
-	"\vRegisterDag\x12\x19.server_v1.DagRegisterReq\x1a\x19.server_v1.DagRegisterRep\"\x0f\x82\xd3\xe4\x93\x02\t:\x01*\"\x04/dag\x12v\n" +
-	"\x13ListDagRegistration\x12!.server_v1.DagRegistrationListReq\x1a!.server_v1.DagRegistrationListRep\"\x19\x82\xd3\xe4\x93\x02\x13\x12\x11/dag-registration\x12v\n" +
-	"\x12GetDagRegistration\x12 .server_v1.DagRegistrationGetReq\x1a\x1e.server_v1.DagRegistrationMain\"\x1e\x82\xd3\xe4\x93\x02\x18\x12\x16/dag-registration/{id}\x12E\n" +
-	"\aListDag\x12\x15.server_v1.DagListReq\x1a\x15.server_v1.DagListRep\"\f\x82\xd3\xe4\x93\x02\x06\x12\x04/dag\x12G\n" +
-	"\x06GetDag\x12\x14.server_v1.DagGetReq\x1a\x12.server_v1.DagMain\"\x13\x82\xd3\xe4\x93\x02\r\x12\v/dag/{name}\x12X\n" +
-	"\vGetDagStats\x12\x16.server_v1.DagStatsReq\x1a\x16.server_v1.DagStatsRep\"\x19\x82\xd3\xe4\x93\x02\x13\x12\x11/dag/{name}/stats\x12g\n" +
-	"\x0eSetDagSchedule\x12\x1c.server_v1.DagSetScheduleReq\x1a\x16.google.protobuf.Empty\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\x1a\x14/dag/{name}/schedule\x12a\n" +
-	"\fSetDagPaused\x12\x1a.server_v1.DagSetPausedReq\x1a\x16.google.protobuf.Empty\"\x1d\x82\xd3\xe4\x93\x02\x17:\x01*\x1a\x12/dag/{name}/paused\x12[\n" +
+	"DagService\x12I\n" +
+	"\tCreateDag\x12\x17.server_v1.DagCreateReq\x1a\x12.server_v1.DagMain\"\x0f\x82\xd3\xe4\x93\x02\t:\x01*\"\x04/dag\x12E\n" +
+	"\aListDag\x12\x15.server_v1.DagListReq\x1a\x15.server_v1.DagListRep\"\f\x82\xd3\xe4\x93\x02\x06\x12\x04/dag\x12Q\n" +
+	"\x06GetDag\x12\x14.server_v1.DagGetReq\x1a\x12.server_v1.DagMain\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/dag/{project}/{name}\x12b\n" +
+	"\vGetDagStats\x12\x16.server_v1.DagStatsReq\x1a\x16.server_v1.DagStatsRep\"#\x82\xd3\xe4\x93\x02\x1d\x12\x1b/dag/{project}/{name}/stats\x12q\n" +
+	"\x0eSetDagSchedule\x12\x1c.server_v1.DagSetScheduleReq\x1a\x16.google.protobuf.Empty\")\x82\xd3\xe4\x93\x02#:\x01*\x1a\x1e/dag/{project}/{name}/schedule\x12k\n" +
+	"\fSetDagPaused\x12\x1a.server_v1.DagSetPausedReq\x1a\x16.google.protobuf.Empty\"'\x82\xd3\xe4\x93\x02!:\x01*\x1a\x1c/dag/{project}/{name}/paused\x12e\n" +
 	"\n" +
-	"SetDagPool\x12\x18.server_v1.DagSetPoolReq\x1a\x16.google.protobuf.Empty\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\x1a\x10/dag/{name}/pool\x12T\n" +
-	"\aSyncDag\x12\x15.server_v1.DagSyncReq\x1a\x15.server_v1.DagSyncRep\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/dag/{name}/sync\x12n\n" +
-	"\x10SetDagAutoUpdate\x12\x1e.server_v1.DagSetAutoUpdateReq\x1a\x16.google.protobuf.Empty\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\x1a\x17/dag/{name}/auto_update\x12Q\n" +
-	"\tDeleteDag\x12\x17.server_v1.DagDeleteReq\x1a\x16.google.protobuf.Empty\"\x13\x82\xd3\xe4\x93\x02\r*\v/dag/{name}\x12y\n" +
-	"\x11ListTaskResources\x12\x1f.server_v1.TaskResourcesListReq\x1a\x1f.server_v1.TaskResourcesListRep\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/dag/{name}/task-resources\x12x\n" +
-	"\x10SetTaskResources\x12\x1e.server_v1.TaskResourcesSetReq\x1a\x16.google.protobuf.Empty\",\x82\xd3\xe4\x93\x02&:\x01*\x1a!/dag/{name}/task-resources/{task}\x12{\n" +
-	"\x13DeleteTaskResources\x12!.server_v1.TaskResourcesDeleteReq\x1a\x16.google.protobuf.Empty\")\x82\xd3\xe4\x93\x02#*!/dag/{name}/task-resources/{task}\x12b\n" +
-	"\x0fPushDagManifest\x12\x1d.server_v1.DagPushManifestReq\x1a\x16.google.protobuf.Empty\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/dag/manifestB0Z.github.com/rendau/loom/api/server_v1;server_v1b\x06proto3"
+	"SetDagPool\x12\x18.server_v1.DagSetPoolReq\x1a\x16.google.protobuf.Empty\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\x1a\x1a/dag/{project}/{name}/pool\x12[\n" +
+	"\tDeleteDag\x12\x17.server_v1.DagDeleteReq\x1a\x16.google.protobuf.Empty\"\x1d\x82\xd3\xe4\x93\x02\x17*\x15/dag/{project}/{name}\x12\x83\x01\n" +
+	"\x11ListTaskResources\x12\x1f.server_v1.TaskResourcesListReq\x1a\x1f.server_v1.TaskResourcesListRep\",\x82\xd3\xe4\x93\x02&\x12$/dag/{project}/{name}/task-resources\x12\x82\x01\n" +
+	"\x10SetTaskResources\x12\x1e.server_v1.TaskResourcesSetReq\x1a\x16.google.protobuf.Empty\"6\x82\xd3\xe4\x93\x020:\x01*\x1a+/dag/{project}/{name}/task-resources/{task}\x12\x85\x01\n" +
+	"\x13DeleteTaskResources\x12!.server_v1.TaskResourcesDeleteReq\x1a\x16.google.protobuf.Empty\"3\x82\xd3\xe4\x93\x02-*+/dag/{project}/{name}/task-resources/{task}B0Z.github.com/rendau/loom/api/server_v1;server_v1b\x06proto3"
 
 var (
 	file_server_v1_dag_proto_rawDescOnce sync.Once
@@ -2313,102 +1905,80 @@ func file_server_v1_dag_proto_rawDescGZIP() []byte {
 	return file_server_v1_dag_proto_rawDescData
 }
 
-var file_server_v1_dag_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_server_v1_dag_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_server_v1_dag_proto_goTypes = []any{
-	(*DagMain)(nil),                 // 0: server_v1.DagMain
-	(*DagLastRun)(nil),              // 1: server_v1.DagLastRun
-	(*DagTaskMain)(nil),             // 2: server_v1.DagTaskMain
-	(*DagTaskEnvSecret)(nil),        // 3: server_v1.DagTaskEnvSecret
-	(*DagTaskEnvVariable)(nil),      // 4: server_v1.DagTaskEnvVariable
-	(*DagTaskDepMain)(nil),          // 5: server_v1.DagTaskDepMain
-	(*DagTaskResources)(nil),        // 6: server_v1.DagTaskResources
-	(*DagRegisterReq)(nil),          // 7: server_v1.DagRegisterReq
-	(*DagRegisterRep)(nil),          // 8: server_v1.DagRegisterRep
-	(*DagRegistrationMain)(nil),     // 9: server_v1.DagRegistrationMain
-	(*DagRegistrationListReq)(nil),  // 10: server_v1.DagRegistrationListReq
-	(*DagRegistrationListRep)(nil),  // 11: server_v1.DagRegistrationListRep
-	(*DagRegistrationGetReq)(nil),   // 12: server_v1.DagRegistrationGetReq
-	(*DagListReq)(nil),              // 13: server_v1.DagListReq
-	(*DagListRep)(nil),              // 14: server_v1.DagListRep
-	(*DagGetReq)(nil),               // 15: server_v1.DagGetReq
-	(*DagStatsReq)(nil),             // 16: server_v1.DagStatsReq
-	(*DagTaskStat)(nil),             // 17: server_v1.DagTaskStat
-	(*DagStatsRep)(nil),             // 18: server_v1.DagStatsRep
-	(*DagSetScheduleReq)(nil),       // 19: server_v1.DagSetScheduleReq
-	(*DagSetPausedReq)(nil),         // 20: server_v1.DagSetPausedReq
-	(*DagSetPoolReq)(nil),           // 21: server_v1.DagSetPoolReq
-	(*DagSyncReq)(nil),              // 22: server_v1.DagSyncReq
-	(*DagSyncRep)(nil),              // 23: server_v1.DagSyncRep
-	(*DagSetAutoUpdateReq)(nil),     // 24: server_v1.DagSetAutoUpdateReq
-	(*DagDeleteReq)(nil),            // 25: server_v1.DagDeleteReq
-	(*TaskResourcesMain)(nil),       // 26: server_v1.TaskResourcesMain
-	(*TaskResourcesListReq)(nil),    // 27: server_v1.TaskResourcesListReq
-	(*TaskResourcesListRep)(nil),    // 28: server_v1.TaskResourcesListRep
-	(*TaskResourcesSetReq)(nil),     // 29: server_v1.TaskResourcesSetReq
-	(*TaskResourcesDeleteReq)(nil),  // 30: server_v1.TaskResourcesDeleteReq
-	(*DagPushManifestReq)(nil),      // 31: server_v1.DagPushManifestReq
-	(*timestamppb.Timestamp)(nil),   // 32: google.protobuf.Timestamp
-	(*common.ListParamsSt)(nil),     // 33: common.ListParamsSt
-	(*common.PaginationInfoSt)(nil), // 34: common.PaginationInfoSt
-	(*emptypb.Empty)(nil),           // 35: google.protobuf.Empty
+	(*DagRef)(nil),                  // 0: server_v1.DagRef
+	(*DagMain)(nil),                 // 1: server_v1.DagMain
+	(*DagLastRun)(nil),              // 2: server_v1.DagLastRun
+	(*DagTaskMain)(nil),             // 3: server_v1.DagTaskMain
+	(*DagTaskEnvSecret)(nil),        // 4: server_v1.DagTaskEnvSecret
+	(*DagTaskEnvVariable)(nil),      // 5: server_v1.DagTaskEnvVariable
+	(*DagTaskDepMain)(nil),          // 6: server_v1.DagTaskDepMain
+	(*DagTaskResources)(nil),        // 7: server_v1.DagTaskResources
+	(*DagCreateReq)(nil),            // 8: server_v1.DagCreateReq
+	(*DagListReq)(nil),              // 9: server_v1.DagListReq
+	(*DagListRep)(nil),              // 10: server_v1.DagListRep
+	(*DagGetReq)(nil),               // 11: server_v1.DagGetReq
+	(*DagStatsReq)(nil),             // 12: server_v1.DagStatsReq
+	(*DagTaskStat)(nil),             // 13: server_v1.DagTaskStat
+	(*DagStatsRep)(nil),             // 14: server_v1.DagStatsRep
+	(*DagSetScheduleReq)(nil),       // 15: server_v1.DagSetScheduleReq
+	(*DagSetPausedReq)(nil),         // 16: server_v1.DagSetPausedReq
+	(*DagSetPoolReq)(nil),           // 17: server_v1.DagSetPoolReq
+	(*DagDeleteReq)(nil),            // 18: server_v1.DagDeleteReq
+	(*TaskResourcesMain)(nil),       // 19: server_v1.TaskResourcesMain
+	(*TaskResourcesListReq)(nil),    // 20: server_v1.TaskResourcesListReq
+	(*TaskResourcesListRep)(nil),    // 21: server_v1.TaskResourcesListRep
+	(*TaskResourcesSetReq)(nil),     // 22: server_v1.TaskResourcesSetReq
+	(*TaskResourcesDeleteReq)(nil),  // 23: server_v1.TaskResourcesDeleteReq
+	(*timestamppb.Timestamp)(nil),   // 24: google.protobuf.Timestamp
+	(*common.ListParamsSt)(nil),     // 25: common.ListParamsSt
+	(*common.PaginationInfoSt)(nil), // 26: common.PaginationInfoSt
+	(*emptypb.Empty)(nil),           // 27: google.protobuf.Empty
 }
 var file_server_v1_dag_proto_depIdxs = []int32{
-	2,  // 0: server_v1.DagMain.tasks:type_name -> server_v1.DagTaskMain
-	32, // 1: server_v1.DagMain.created_at:type_name -> google.protobuf.Timestamp
-	32, // 2: server_v1.DagMain.modified_at:type_name -> google.protobuf.Timestamp
-	32, // 3: server_v1.DagMain.next_run_at:type_name -> google.protobuf.Timestamp
-	1,  // 4: server_v1.DagMain.last_runs:type_name -> server_v1.DagLastRun
-	5,  // 5: server_v1.DagTaskMain.depends_on:type_name -> server_v1.DagTaskDepMain
-	6,  // 6: server_v1.DagTaskMain.resources:type_name -> server_v1.DagTaskResources
-	3,  // 7: server_v1.DagTaskMain.secrets:type_name -> server_v1.DagTaskEnvSecret
-	4,  // 8: server_v1.DagTaskMain.variables:type_name -> server_v1.DagTaskEnvVariable
-	32, // 9: server_v1.DagRegistrationMain.created_at:type_name -> google.protobuf.Timestamp
-	32, // 10: server_v1.DagRegistrationMain.started_at:type_name -> google.protobuf.Timestamp
-	32, // 11: server_v1.DagRegistrationMain.finished_at:type_name -> google.protobuf.Timestamp
-	9,  // 12: server_v1.DagRegistrationListRep.results:type_name -> server_v1.DagRegistrationMain
-	33, // 13: server_v1.DagListReq.list_params:type_name -> common.ListParamsSt
-	34, // 14: server_v1.DagListRep.pagination_info:type_name -> common.PaginationInfoSt
-	0,  // 15: server_v1.DagListRep.results:type_name -> server_v1.DagMain
-	17, // 16: server_v1.DagStatsRep.tasks:type_name -> server_v1.DagTaskStat
-	32, // 17: server_v1.TaskResourcesMain.modified_at:type_name -> google.protobuf.Timestamp
-	26, // 18: server_v1.TaskResourcesListRep.results:type_name -> server_v1.TaskResourcesMain
-	7,  // 19: server_v1.DagService.RegisterDag:input_type -> server_v1.DagRegisterReq
-	10, // 20: server_v1.DagService.ListDagRegistration:input_type -> server_v1.DagRegistrationListReq
-	12, // 21: server_v1.DagService.GetDagRegistration:input_type -> server_v1.DagRegistrationGetReq
-	13, // 22: server_v1.DagService.ListDag:input_type -> server_v1.DagListReq
-	15, // 23: server_v1.DagService.GetDag:input_type -> server_v1.DagGetReq
-	16, // 24: server_v1.DagService.GetDagStats:input_type -> server_v1.DagStatsReq
-	19, // 25: server_v1.DagService.SetDagSchedule:input_type -> server_v1.DagSetScheduleReq
-	20, // 26: server_v1.DagService.SetDagPaused:input_type -> server_v1.DagSetPausedReq
-	21, // 27: server_v1.DagService.SetDagPool:input_type -> server_v1.DagSetPoolReq
-	22, // 28: server_v1.DagService.SyncDag:input_type -> server_v1.DagSyncReq
-	24, // 29: server_v1.DagService.SetDagAutoUpdate:input_type -> server_v1.DagSetAutoUpdateReq
-	25, // 30: server_v1.DagService.DeleteDag:input_type -> server_v1.DagDeleteReq
-	27, // 31: server_v1.DagService.ListTaskResources:input_type -> server_v1.TaskResourcesListReq
-	29, // 32: server_v1.DagService.SetTaskResources:input_type -> server_v1.TaskResourcesSetReq
-	30, // 33: server_v1.DagService.DeleteTaskResources:input_type -> server_v1.TaskResourcesDeleteReq
-	31, // 34: server_v1.DagService.PushDagManifest:input_type -> server_v1.DagPushManifestReq
-	8,  // 35: server_v1.DagService.RegisterDag:output_type -> server_v1.DagRegisterRep
-	11, // 36: server_v1.DagService.ListDagRegistration:output_type -> server_v1.DagRegistrationListRep
-	9,  // 37: server_v1.DagService.GetDagRegistration:output_type -> server_v1.DagRegistrationMain
-	14, // 38: server_v1.DagService.ListDag:output_type -> server_v1.DagListRep
-	0,  // 39: server_v1.DagService.GetDag:output_type -> server_v1.DagMain
-	18, // 40: server_v1.DagService.GetDagStats:output_type -> server_v1.DagStatsRep
-	35, // 41: server_v1.DagService.SetDagSchedule:output_type -> google.protobuf.Empty
-	35, // 42: server_v1.DagService.SetDagPaused:output_type -> google.protobuf.Empty
-	35, // 43: server_v1.DagService.SetDagPool:output_type -> google.protobuf.Empty
-	23, // 44: server_v1.DagService.SyncDag:output_type -> server_v1.DagSyncRep
-	35, // 45: server_v1.DagService.SetDagAutoUpdate:output_type -> google.protobuf.Empty
-	35, // 46: server_v1.DagService.DeleteDag:output_type -> google.protobuf.Empty
-	28, // 47: server_v1.DagService.ListTaskResources:output_type -> server_v1.TaskResourcesListRep
-	35, // 48: server_v1.DagService.SetTaskResources:output_type -> google.protobuf.Empty
-	35, // 49: server_v1.DagService.DeleteTaskResources:output_type -> google.protobuf.Empty
-	35, // 50: server_v1.DagService.PushDagManifest:output_type -> google.protobuf.Empty
-	35, // [35:51] is the sub-list for method output_type
-	19, // [19:35] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	3,  // 0: server_v1.DagMain.tasks:type_name -> server_v1.DagTaskMain
+	24, // 1: server_v1.DagMain.next_run_at:type_name -> google.protobuf.Timestamp
+	24, // 2: server_v1.DagMain.created_at:type_name -> google.protobuf.Timestamp
+	24, // 3: server_v1.DagMain.modified_at:type_name -> google.protobuf.Timestamp
+	2,  // 4: server_v1.DagMain.last_runs:type_name -> server_v1.DagLastRun
+	6,  // 5: server_v1.DagTaskMain.depends_on:type_name -> server_v1.DagTaskDepMain
+	7,  // 6: server_v1.DagTaskMain.resources:type_name -> server_v1.DagTaskResources
+	4,  // 7: server_v1.DagTaskMain.secrets:type_name -> server_v1.DagTaskEnvSecret
+	5,  // 8: server_v1.DagTaskMain.variables:type_name -> server_v1.DagTaskEnvVariable
+	25, // 9: server_v1.DagListReq.list_params:type_name -> common.ListParamsSt
+	26, // 10: server_v1.DagListRep.pagination_info:type_name -> common.PaginationInfoSt
+	1,  // 11: server_v1.DagListRep.results:type_name -> server_v1.DagMain
+	13, // 12: server_v1.DagStatsRep.tasks:type_name -> server_v1.DagTaskStat
+	24, // 13: server_v1.TaskResourcesMain.modified_at:type_name -> google.protobuf.Timestamp
+	19, // 14: server_v1.TaskResourcesListRep.results:type_name -> server_v1.TaskResourcesMain
+	8,  // 15: server_v1.DagService.CreateDag:input_type -> server_v1.DagCreateReq
+	9,  // 16: server_v1.DagService.ListDag:input_type -> server_v1.DagListReq
+	11, // 17: server_v1.DagService.GetDag:input_type -> server_v1.DagGetReq
+	12, // 18: server_v1.DagService.GetDagStats:input_type -> server_v1.DagStatsReq
+	15, // 19: server_v1.DagService.SetDagSchedule:input_type -> server_v1.DagSetScheduleReq
+	16, // 20: server_v1.DagService.SetDagPaused:input_type -> server_v1.DagSetPausedReq
+	17, // 21: server_v1.DagService.SetDagPool:input_type -> server_v1.DagSetPoolReq
+	18, // 22: server_v1.DagService.DeleteDag:input_type -> server_v1.DagDeleteReq
+	20, // 23: server_v1.DagService.ListTaskResources:input_type -> server_v1.TaskResourcesListReq
+	22, // 24: server_v1.DagService.SetTaskResources:input_type -> server_v1.TaskResourcesSetReq
+	23, // 25: server_v1.DagService.DeleteTaskResources:input_type -> server_v1.TaskResourcesDeleteReq
+	1,  // 26: server_v1.DagService.CreateDag:output_type -> server_v1.DagMain
+	10, // 27: server_v1.DagService.ListDag:output_type -> server_v1.DagListRep
+	1,  // 28: server_v1.DagService.GetDag:output_type -> server_v1.DagMain
+	14, // 29: server_v1.DagService.GetDagStats:output_type -> server_v1.DagStatsRep
+	27, // 30: server_v1.DagService.SetDagSchedule:output_type -> google.protobuf.Empty
+	27, // 31: server_v1.DagService.SetDagPaused:output_type -> google.protobuf.Empty
+	27, // 32: server_v1.DagService.SetDagPool:output_type -> google.protobuf.Empty
+	27, // 33: server_v1.DagService.DeleteDag:output_type -> google.protobuf.Empty
+	21, // 34: server_v1.DagService.ListTaskResources:output_type -> server_v1.TaskResourcesListRep
+	27, // 35: server_v1.DagService.SetTaskResources:output_type -> google.protobuf.Empty
+	27, // 36: server_v1.DagService.DeleteTaskResources:output_type -> google.protobuf.Empty
+	26, // [26:37] is the sub-list for method output_type
+	15, // [15:26] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_dag_proto_init() }
@@ -2416,20 +1986,18 @@ func file_server_v1_dag_proto_init() {
 	if File_server_v1_dag_proto != nil {
 		return
 	}
-	file_server_v1_dag_proto_msgTypes[0].OneofWrappers = []any{}
-	file_server_v1_dag_proto_msgTypes[2].OneofWrappers = []any{}
-	file_server_v1_dag_proto_msgTypes[7].OneofWrappers = []any{}
+	file_server_v1_dag_proto_msgTypes[1].OneofWrappers = []any{}
+	file_server_v1_dag_proto_msgTypes[3].OneofWrappers = []any{}
+	file_server_v1_dag_proto_msgTypes[8].OneofWrappers = []any{}
 	file_server_v1_dag_proto_msgTypes[9].OneofWrappers = []any{}
-	file_server_v1_dag_proto_msgTypes[10].OneofWrappers = []any{}
 	file_server_v1_dag_proto_msgTypes[13].OneofWrappers = []any{}
-	file_server_v1_dag_proto_msgTypes[17].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_v1_dag_proto_rawDesc), len(file_server_v1_dag_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   32,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

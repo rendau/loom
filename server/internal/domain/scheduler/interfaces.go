@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	commonModel "github.com/rendau/loom/server/internal/domain/common/model"
 	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	runModel "github.com/rendau/loom/server/internal/domain/run/model"
 	secretModel "github.com/rendau/loom/server/internal/domain/secret/model"
@@ -37,14 +38,14 @@ type RunServiceI interface {
 // админки, накладывается на манифест при launch (nil — оверрайда нет).
 type DagServiceI interface {
 	ListDueSchedules(ctx context.Context) ([]*dagModel.Main, error)
-	AdvanceNextRun(ctx context.Context, name string, from, to time.Time) (bool, error)
-	GetTaskResources(ctx context.Context, dagName, task string) (*dagModel.TaskResources, error)
+	AdvanceNextRun(ctx context.Context, ref dagModel.Ref, from, to time.Time) (bool, error)
+	GetTaskResources(ctx context.Context, ref dagModel.Ref, task string) (*dagModel.TaskResources, error)
 }
 
 // SettingsI — эффективные настройки скоупа дага для launch (TTL k8s
 // Job'ов).
 type SettingsI interface {
-	Resolve(ctx context.Context, dagName string) (settingModel.Effective, error)
+	Resolve(ctx context.Context, scope commonModel.Scope) (settingModel.Effective, error)
 }
 
 // ExecutorI — порт executor'а: запуск/остановка на уровне
@@ -68,13 +69,13 @@ type ArtifactI interface {
 // run_env); отсутствующий секрет — ошибка (Launch не должен стартовать
 // попытку с пустой переменной).
 type SecretResolverI interface {
-	ResolveValues(ctx context.Context, dagName string, names []string) (map[string]secretModel.Resolved, error)
+	ResolveValues(ctx context.Context, scope commonModel.Scope, names []string) (map[string]secretModel.Resolved, error)
 }
 
 // VariableResolverI — значения переменных для env попытки; семантика скоупа
 // и отсутствия — как у секретов.
 type VariableResolverI interface {
-	ResolveValues(ctx context.Context, dagName string, names []string) (map[string]variableModel.Resolved, error)
+	ResolveValues(ctx context.Context, scope commonModel.Scope, names []string) (map[string]variableModel.Resolved, error)
 }
 
 // TaskLogI — финализация лог-стрима попытки (на artifact-сервере) с

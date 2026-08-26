@@ -1,11 +1,13 @@
 // DTO настроек инсталляции (зеркало api/proto/server_v1/setting.proto).
-// Скоуп как у переменных: dag_name '' — глобальный, имя дага — уточнение,
-// перекрывающее глобальное при резолве.
+// Скоуп как у переменных: глобальный → проект → даг; более узкий
+// перекрывает более широкий при резолве.
+
+import type { Scope } from '~/types/common'
 
 export interface Setting {
   name: string
   value: string
-  dag_name: string // '' — глобальный скоуп
+  scope: Scope
   modified_at?: string
 }
 

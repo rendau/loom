@@ -1,25 +1,26 @@
 import { apiFetch } from '~/api/client'
+import type { Scope } from '~/types/common'
 import type { Setting } from '~/types/setting'
 
-// dagName undefined — все скоупы; '' — только глобальные; имя дага — его.
-export function listSettings(dagName?: string) {
+// scope undefined — все скоупы; иначе — только указанный.
+export function listSettings(scope?: Scope) {
   return apiFetch<{ results: Setting[] }>('/setting', {
-    query: dagName === undefined ? {} : { dag_name: dagName },
+    query: scope === undefined ? {} : { scope: { ...scope } },
   })
 }
 
-export function setSetting(dagName: string, name: string, value: string) {
+export function setSetting(scope: Scope, name: string, value: string) {
   return apiFetch<object>(`/setting/${encodeURIComponent(name)}`, {
     method: 'PUT',
-    body: { value, dag_name: dagName },
+    body: { value, scope },
   })
 }
 
-// Удаление уточнения настройки у дага (возврат к глобальному значению);
-// глобальные значения не удаляются.
-export function deleteSetting(dagName: string, name: string) {
+// Удаление уточнения настройки у проекта или дага (возврат к более
+// широкому скоупу); глобальные значения не удаляются.
+export function deleteSetting(scope: Scope, name: string) {
   return apiFetch<object>(`/setting/${encodeURIComponent(name)}`, {
     method: 'DELETE',
-    query: { dag_name: dagName },
+    query: { scope: { ...scope } },
   })
 }

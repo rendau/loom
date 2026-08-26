@@ -25,8 +25,8 @@ const hasVariables = computed(() => props.bindings.some(b => b.kind === 'variabl
 
 function envLink(b: RunEnvBinding): string {
   const query = new URLSearchParams({ kind: b.kind, q: b.name })
-  if (b.scope)
-    query.set('dag_name', b.scope)
+  if (b.scope && !scopeEq(b.scope, globalScope))
+    query.set('scope', scopeLabel(b.scope))
   return `/env?${query.toString()}`
 }
 </script>
@@ -68,8 +68,18 @@ function envLink(b: RunEnvBinding): string {
         <UBadge v-if="row.original.scope === undefined" color="error" variant="subtle" size="sm">
           не найдена — запуск таска упадёт
         </UBadge>
-        <UBadge v-else-if="row.original.scope === ''" color="neutral" variant="subtle" size="sm">глобальный</UBadge>
-        <UBadge v-else color="info" variant="subtle" size="sm">{{ row.original.scope }}</UBadge>
+        <UBadge
+          v-else-if="scopeKind(row.original.scope) === 'global'"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+        >глобальный</UBadge>
+        <UBadge
+          v-else
+          :color="scopeKind(row.original.scope) === 'dag' ? 'info' : 'primary'"
+          variant="subtle"
+          size="sm"
+        >{{ scopeLabel(row.original.scope) }}</UBadge>
       </template>
 
       <template #empty>

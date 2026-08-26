@@ -16,18 +16,21 @@ func EncodeDagMain(v *domainModel.Main, _ int) *pb.DagMain {
 	}
 
 	result := &pb.DagMain{
-		Name:          v.Name,
-		Image:         v.Image,
-		ImageDigest:   v.ImageDigest,
-		Schedule:      v.Schedule,
-		Paused:        v.Paused,
-		AutoUpdate:    v.AutoUpdate,
-		Pool:          v.Pool,
-		SdkVersion:    v.SdkVersion,
-		Catchup:       v.Catchup,
-		MaxActiveRuns: int32(v.MaxActiveRuns),
-		Tasks:         lo.Map(v.Tasks, EncodeDagTaskMain),
-		CreatedAt:     timestamppb.New(v.CreatedAt),
+		Project:          v.Project,
+		Name:             v.Name,
+		Template:         v.Template,
+		TemplateOrphaned: v.TemplateOrphaned,
+		Image:            v.Image,
+		ImageDigest:      v.ImageDigest,
+		Schedule:         v.Schedule,
+		Paused:           v.Paused,
+		AutoUpdate:       v.AutoUpdate,
+		Pool:             v.Pool,
+		SdkVersion:       v.SdkVersion,
+		Catchup:          v.Catchup,
+		MaxActiveRuns:    int32(v.MaxActiveRuns),
+		Tasks:            lo.Map(v.Tasks, EncodeDagTaskMain),
+		CreatedAt:        timestamppb.New(v.CreatedAt),
 	}
 	if !v.ModifiedAt.IsZero() {
 		result.ModifiedAt = timestamppb.New(v.ModifiedAt)
@@ -80,5 +83,34 @@ func DecodeDagListReq(v *pb.DagListReq) *domainModel.ListReq {
 	return &domainModel.ListReq{
 		ListParams: DecodeListParams(v.ListParams),
 		Paused:     v.Paused,
+		Project:    v.Project,
+		Template:   v.Template,
 	}
+}
+
+// DecodeDagRef собирает ссылку на даг из запроса (проект + имя).
+func DecodeDagRef(project, name string) domainModel.Ref {
+	return domainModel.NewRef(project, name)
+}
+
+// DecodeDagRefFilter — необязательный фильтр по дагу: пара задаётся
+// целиком, иначе фильтра нет (например, счётчики по всем дагам).
+func DecodeDagRefFilter(project, name *string) *domainModel.Ref {
+	if project == nil || name == nil {
+		return nil
+	}
+	return new(domainModel.NewRef(*project, *name))
+}
+
+// EncodeDagRef — ссылка на даг в proto (права пользователя, ответы).
+func EncodeDagRef(v domainModel.Ref, _ int) *pb.DagRef {
+	return &pb.DagRef{Project: v.Project, Name: v.Name}
+}
+
+// DecodeDagRefPb — ссылка на даг из proto.
+func DecodeDagRefPb(v *pb.DagRef, _ int) domainModel.Ref {
+	if v == nil {
+		return domainModel.Ref{}
+	}
+	return domainModel.NewRef(v.GetProject(), v.GetName())
 }

@@ -1,9 +1,9 @@
 // Package service — настройки инсталляции в БД (вместо env-конфига):
-// retention ранов, TTL k8s Job'ов и т.п. Скоуп как у переменных: dag_name
-// = "" — глобальный, иначе уточнение для дага; уточнение перекрывает
-// глобальное при резолве. Имена настроек фиксированы (model.Defs) —
-// произвольные отклоняются, поэтому потребители всегда получают полный
-// набор значений (страховка — дефолт из Defs).
+// retention ранов, TTL k8s Job'ов и т.п. Скоуп как у переменных:
+// глобальный → проект → даг, более узкий перекрывает более широкий при
+// резолве. Имена настроек фиксированы (model.Defs) — произвольные
+// отклоняются, поэтому потребители всегда получают полный набор значений
+// (страховка — дефолт из Defs).
 package service
 
 import (
@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"time"
 
+	commonModel "github.com/rendau/loom/server/internal/domain/common/model"
 	"github.com/rendau/loom/server/internal/domain/setting/model"
 	"github.com/rendau/loom/server/internal/errs"
 )
@@ -25,10 +26,10 @@ func New(repoDb RepoDbI) *Service {
 	return &Service{repoDb: repoDb}
 }
 
-// List — сохранённые значения; dagName nil — все скоупы, "" — только
-// глобальные, имя дага — только его уточнения.
-func (s *Service) List(ctx context.Context, dagName *string) ([]*model.Main, error) {
-	items, err := s.repoDb.List(ctx, dagName)
+// List — сохранённые значения; scope nil — все скоупы, иначе только
+// указанный.
+func (s *Service) List(ctx context.Context, scope *commonModel.Scope) ([]*model.Main, error) {
+	items, err := s.repoDb.List(ctx, scope)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.List: %w", err)
 	}
@@ -36,12 +37,15 @@ func (s *Service) List(ctx context.Context, dagName *string) ([]*model.Main, err
 }
 
 // Set задаёт значение настройки в скоупе, валидируя имя и значение по типу.
-func (s *Service) Set(ctx context.Context, dagName, name, value string) error {
+func (s *Service) Set(ctx context.Context, scope commonModel.Scope, name, value string) error {
 	def, ok := model.Defs[name]
 	if !ok {
 		return errs.ErrFull{Err: errs.InvalidRequest, Desc: fmt.Sprintf("неизвестная настройка %q", name)}
 	}
-	if dagName != "" && !def.PerDag {
+	if !scope.Valid() {
+		return errs.ErrFull{Err: errs.InvalidRequest, Desc: "некорректный скоуп"}
+	}
+	if !scope.IsGlobal() && !def.Scoped {
 		return errs.ErrFull{Err: errs.InvalidRequest,
 			Desc: fmt.Sprintf("настройка %q задаётся только глобально", name)}
 	}
@@ -50,17 +54,17 @@ func (s *Service) Set(ctx context.Context, dagName, name, value string) error {
 			Desc: fmt.Sprintf("недопустимое значение настройки %q: %v", name, err)}
 	}
 
-	if err := s.repoDb.Set(ctx, dagName, name, value); err != nil {
+	if err := s.repoDb.Set(ctx, scope, name, value); err != nil {
 		return fmt.Errorf("repoDb.Set: %w", err)
 	}
 	return nil
 }
 
-// Delete удаляет уточнение настройки у дага (возврат к глобальному
-// значению). Глобальный скоуп не удаляется — только меняется: retention и
-// executor всегда должны видеть полный набор значений.
-func (s *Service) Delete(ctx context.Context, dagName, name string) error {
-	if dagName == "" {
+// Delete удаляет уточнение настройки у проекта или дага (возврат к более
+// широкому скоупу). Глобальный скоуп не удаляется — только меняется:
+// retention и executor всегда должны видеть полный набор значений.
+func (s *Service) Delete(ctx context.Context, scope commonModel.Scope, name string) error {
+	if scope.IsGlobal() {
 		return errs.ErrFull{Err: errs.InvalidRequest,
 			Desc: "глобальное значение настройки нельзя удалить — только изменить"}
 	}
@@ -68,7 +72,7 @@ func (s *Service) Delete(ctx context.Context, dagName, name string) error {
 		return errs.ErrFull{Err: errs.InvalidRequest, Desc: fmt.Sprintf("неизвестная настройка %q", name)}
 	}
 
-	found, err := s.repoDb.Delete(ctx, dagName, name)
+	found, err := s.repoDb.Delete(ctx, scope, name)
 	if err != nil {
 		return fmt.Errorf("repoDb.Delete: %w", err)
 	}
@@ -78,40 +82,45 @@ func (s *Service) Delete(ctx context.Context, dagName, name string) error {
 	return nil
 }
 
-// Resolve — эффективные настройки для скоупа дага (dagName "" — чисто
-// глобальные): значение дага перекрывает глобальное, отсутствие обоих
-// закрывает дефолт из Defs.
-func (s *Service) Resolve(ctx context.Context, dagName string) (model.Effective, error) {
-	perDag, err := s.ResolveForDags(ctx, []string{dagName})
+// ResolveGlobal — эффективные настройки без уточнений (глобальный скоуп).
+func (s *Service) ResolveGlobal(ctx context.Context) (model.Effective, error) {
+	return s.Resolve(ctx, commonModel.GlobalScope())
+}
+
+// Resolve — эффективные настройки для скоупа: значение дага перекрывает
+// проектное, проектное — глобальное, отсутствие всех закрывает дефолт из
+// Defs.
+func (s *Service) Resolve(ctx context.Context, scope commonModel.Scope) (model.Effective, error) {
+	byScope, err := s.ResolveMany(ctx, []commonModel.Scope{scope})
 	if err != nil {
 		return model.Effective{}, err
 	}
-	return perDag[dagName], nil
+	return byScope[scope], nil
 }
 
-// ResolveForDags — эффективные настройки сразу для набора дагов одним
+// ResolveMany — эффективные настройки сразу для набора скоупов одним
 // запросом (retention-проход).
-func (s *Service) ResolveForDags(ctx context.Context, dagNames []string) (map[string]model.Effective, error) {
-	values, err := s.repoDb.GetValues(ctx, dagNames)
+func (s *Service) ResolveMany(ctx context.Context, scopes []commonModel.Scope) (map[commonModel.Scope]model.Effective, error) {
+	values, err := s.repoDb.GetValues(ctx, scopes)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.GetValues: %w", err)
 	}
 
-	result := make(map[string]model.Effective, len(dagNames))
-	for _, dagName := range dagNames {
-		result[dagName] = buildEffective(values[""], values[dagName])
+	result := make(map[commonModel.Scope]model.Effective, len(scopes))
+	for _, scope := range scopes {
+		result[scope] = buildEffective(scope, values)
 	}
 	return result, nil
 }
 
-// buildEffective собирает Effective из глобальных значений и уточнений
-// дага. Битое значение в БД (не должно случаться — Set валидирует)
-// пропускается с warn — сработает следующий уровень.
-func buildEffective(global, dag map[string]string) model.Effective {
+// buildEffective собирает Effective, идя по цепочке скоупов от самого
+// узкого к глобальному. Битое значение в БД (не должно случаться — Set
+// валидирует) пропускается с warn: сработает следующий уровень.
+func buildEffective(scope commonModel.Scope, values map[commonModel.Scope]map[string]string) model.Effective {
 	get := func(name string) any {
 		def := model.Defs[name]
-		for _, scope := range []map[string]string{dag, global} {
-			raw, ok := scope[name]
+		for _, sc := range scope.Chain() {
+			raw, ok := values[sc][name]
 			if !ok {
 				continue
 			}

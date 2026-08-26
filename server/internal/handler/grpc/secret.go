@@ -9,6 +9,7 @@ import (
 
 	pb "github.com/rendau/loom/api/server_v1"
 	secretModel "github.com/rendau/loom/server/internal/domain/secret/model"
+	"github.com/rendau/loom/server/internal/handler/grpc/dto"
 	secretUsc "github.com/rendau/loom/server/internal/usecase/secret"
 )
 
@@ -23,7 +24,7 @@ func NewSecret(uc *secretUsc.Usecase) *Secret {
 }
 
 func (h *Secret) ListSecret(ctx context.Context, req *pb.SecretListReq) (*pb.SecretListRep, error) {
-	items, err := h.usecase.List(ctx, req.DagName)
+	items, err := h.usecase.List(ctx, dto.DecodeScopeFilter(req.GetScope()))
 	if err != nil {
 		return nil, encodeErr(err)
 	}
@@ -31,21 +32,21 @@ func (h *Secret) ListSecret(ctx context.Context, req *pb.SecretListReq) (*pb.Sec
 }
 
 func (h *Secret) SetSecret(ctx context.Context, req *pb.SecretSetReq) (*emptypb.Empty, error) {
-	if err := h.usecase.Set(ctx, req.GetDagName(), req.GetName(), []byte(req.GetValue())); err != nil {
+	if err := h.usecase.Set(ctx, dto.DecodeScope(req.GetScope()), req.GetName(), []byte(req.GetValue())); err != nil {
 		return nil, encodeErr(err)
 	}
 	return &emptypb.Empty{}, nil
 }
 
 func (h *Secret) DeleteSecret(ctx context.Context, req *pb.SecretDeleteReq) (*emptypb.Empty, error) {
-	if err := h.usecase.Delete(ctx, req.GetDagName(), req.GetName()); err != nil {
+	if err := h.usecase.Delete(ctx, dto.DecodeScope(req.GetScope()), req.GetName()); err != nil {
 		return nil, encodeErr(err)
 	}
 	return &emptypb.Empty{}, nil
 }
 
 func (h *Secret) GetSecretValue(ctx context.Context, req *pb.SecretGetValueReq) (*pb.SecretValueRep, error) {
-	value, err := h.usecase.GetValue(ctx, req.GetDagName(), req.GetName())
+	value, err := h.usecase.GetValue(ctx, dto.DecodeScope(req.GetScope()), req.GetName())
 	if err != nil {
 		return nil, encodeErr(err)
 	}
@@ -55,7 +56,7 @@ func (h *Secret) GetSecretValue(ctx context.Context, req *pb.SecretGetValueReq) 
 func encodeSecretMeta(v *secretModel.Meta, _ int) *pb.SecretMetaMain {
 	result := &pb.SecretMetaMain{
 		Name:      v.Name,
-		DagName:   v.DagName,
+		Scope:     dto.EncodeScope(v.Scope),
 		CreatedAt: timestamppb.New(v.CreatedAt),
 	}
 	if !v.ModifiedAt.IsZero() {

@@ -286,7 +286,7 @@ func (s *Scheduler) cronTriggerDag(ctx context.Context, dag *dagModel.Main) erro
 			return fmt.Errorf("cron parse %q: %w", dag.Schedule, err)
 		}
 
-		advanced, err := s.dagSvc.AdvanceNextRun(ctx, dag.Name, tick, next)
+		advanced, err := s.dagSvc.AdvanceNextRun(ctx, dag.Ref, tick, next)
 		if err != nil {
 			return fmt.Errorf("advance next run: %w", err)
 		}
@@ -421,23 +421,23 @@ func limitActiveRuns(runs []*runModel.Main) []*runModel.Main {
 		return a.CreatedAt.Compare(b.CreatedAt)
 	})
 
-	limits := map[string]int{}
+	limits := map[dagModel.Ref]int{}
 	for _, run := range sorted { // после цикла — значение самого свежего рана
 		m, err := manifest.Parse(run.Manifest)
 		if err != nil {
 			continue
 		}
-		limits[run.DagName] = m.MaxActiveRuns
+		limits[run.Dag] = m.MaxActiveRuns
 	}
 
-	taken := map[string]int{}
+	taken := map[dagModel.Ref]int{}
 	result := make([]*runModel.Main, 0, len(sorted))
 	for _, run := range sorted {
-		limit := limits[run.DagName]
-		if limit > 0 && taken[run.DagName] >= limit {
+		limit := limits[run.Dag]
+		if limit > 0 && taken[run.Dag] >= limit {
 			continue
 		}
-		taken[run.DagName]++
+		taken[run.Dag]++
 		result = append(result, run)
 	}
 	return result
@@ -574,22 +574,26 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 
 	// оверрайд ресурсов из админки приоритетнее манифеста (по-полево);
 	// настройки скоупа дага дают TTL k8s Job'а попытки
-	resOverride, err := s.dagSvc.GetTaskResources(ctx, run.DagName, c.Task)
+	resOverride, err := s.dagSvc.GetTaskResources(ctx, run.Dag, c.Task)
 	if err != nil {
 		return fmt.Errorf("dagSvc.GetTaskResources: %w", err)
 	}
-	settings, err := s.settings.Resolve(ctx, run.DagName)
+	settings, err := s.settings.Resolve(ctx, run.Dag.Scope())
 	if err != nil {
 		return fmt.Errorf("settings.Resolve: %w", err)
 	}
 
 	spec := runModel.LaunchSpec{
-		Ref:     runModel.AttemptRef{RunId: c.RunId, Task: c.Task, Attempt: c.Attempt},
-		DagName: run.DagName,
-		Image:   run.ImageDigest,
-		JobTTL:  settings.K8sJobTTL,
+		Ref:      runModel.AttemptRef{RunId: c.RunId, Task: c.Task, Attempt: c.Attempt},
+		Dag:      run.Dag,
+		Template: run.Template,
+		Image:    run.ImageDigest,
+		JobTTL:   settings.K8sJobTTL,
 		Env: map[string]string{
-			loom.EnvRunID:        c.RunId,
+			loom.EnvRunID: c.RunId,
+			// образ может нести несколько дагов — бинарнику нужно знать,
+			// какой из них запускать
+			loom.EnvDag:          run.Template,
 			loom.EnvTask:         c.Task,
 			loom.EnvAttempt:      strconv.Itoa(int(c.Attempt)),
 			loom.EnvDepAttempts:  string(depAttemptsJson),
@@ -603,13 +607,14 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 		spec.Env[loom.EnvRunParams] = string(run.Params)
 	}
 
-	// секреты и переменные манифеста → env контейнера (локальный скоуп дага
-	// перекрывает глобальный); отсутствующее имя валит запуск (launch_failed),
+	// секреты и переменные манифеста → env контейнера (скоуп дага
+	// перекрывает проектный, проектный — глобальный); отсутствующее имя
+	// валит запуск (launch_failed),
 	// после добавления попытку вернёт RetryTask
 	var envSnapshot []runModel.RunEnv
 	if len(task.Secrets) > 0 {
 		names := lo.Uniq(lo.Map(task.Secrets, func(s dagModel.SecretRef, _ int) string { return s.Secret }))
-		values, err := s.secrets.ResolveValues(ctx, run.DagName, names)
+		values, err := s.secrets.ResolveValues(ctx, run.Dag.Scope(), names)
 		if err != nil {
 			return fmt.Errorf("resolve secrets: %w", err)
 		}
@@ -623,7 +628,7 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 	}
 	if len(task.Variables) > 0 {
 		names := lo.Uniq(lo.Map(task.Variables, func(v dagModel.VariableRef, _ int) string { return v.Variable }))
-		values, err := s.variables.ResolveValues(ctx, run.DagName, names)
+		values, err := s.variables.ResolveValues(ctx, run.Dag.Scope(), names)
 		if err != nil {
 			return fmt.Errorf("resolve variables: %w", err)
 		}

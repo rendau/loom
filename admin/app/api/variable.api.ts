@@ -1,24 +1,25 @@
 import { apiFetch } from '~/api/client'
+import type { Scope } from '~/types/common'
 import type { Variable } from '~/types/variable'
 
-// dagName undefined — все скоупы; '' — только глобальные; имя дага — его.
-export function listVariables(dagName?: string) {
+// scope undefined — все скоупы; иначе — только указанный.
+export function listVariables(scope?: Scope) {
   return apiFetch<{ results: Variable[] }>('/variable', {
-    query: dagName === undefined ? {} : { dag_name: dagName },
+    query: scope === undefined ? {} : { scope: { ...scope } },
   })
 }
 
 // Создание переменной или перезапись значения существующей.
-export function setVariable(dagName: string, name: string, value: string) {
+export function setVariable(scope: Scope, name: string, value: string) {
   return apiFetch<object>(`/variable/${encodeURIComponent(name)}`, {
     method: 'PUT',
-    body: { value, dag_name: dagName },
+    body: { value, scope },
   })
 }
 
-export function deleteVariable(dagName: string, name: string) {
+export function deleteVariable(scope: Scope, name: string) {
   return apiFetch<object>(`/variable/${encodeURIComponent(name)}`, {
     method: 'DELETE',
-    query: { dag_name: dagName },
+    query: { scope: { ...scope } },
   })
 }

@@ -1,3 +1,4 @@
+import type { DagRef } from '~/types/common'
 import { apiFetch } from '~/api/client'
 import type { LoginRep, User, UserRole } from '~/types/user'
 
@@ -28,16 +29,24 @@ export function listUsers() {
   return apiFetch<{ results: User[] }>('/user')
 }
 
-export function createUser(body: { username: string, password: string, role: UserRole, dag_names: string[] }) {
+export function createUser(body: {
+  username: string
+  password: string
+  role: UserRole
+  dags: DagRef[]
+  projects: string[]
+}) {
   return apiFetch<User>('/user', { method: 'POST', body: { ...body } })
 }
 
 export interface UserUpdateBody {
   password?: string
   role?: UserRole
-  dag_names?: string[]
+  dags?: DagRef[]
+  projects?: string[]
   // true — заменить набор назначенных дагов (в т.ч. очистить).
-  set_dag_names?: boolean
+  set_dags?: boolean
+  set_projects?: boolean
 }
 
 export function updateUser(id: string, body: UserUpdateBody) {

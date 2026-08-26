@@ -8,6 +8,7 @@ import (
 	"time"
 
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	"github.com/rendau/loom/server/internal/domain/stats/model"
 )
 
@@ -55,7 +56,7 @@ func (r *Repo) Window(ctx context.Context, since time.Time) (model.Window, error
 
 func (r *Repo) Upcoming(ctx context.Context) ([]model.Upcoming, error) {
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT name, next_run_at, schedule FROM dag
+		SELECT project_name, name, next_run_at, schedule FROM dag
 		WHERE NOT paused AND schedule <> '' AND next_run_at IS NOT NULL
 		ORDER BY next_run_at LIMIT $1`, upcomingLimit)
 	if err != nil {
@@ -66,7 +67,7 @@ func (r *Repo) Upcoming(ctx context.Context) ([]model.Upcoming, error) {
 	var result []model.Upcoming
 	for rows.Next() {
 		var u model.Upcoming
-		if err = rows.Scan(&u.DagName, &u.NextRunAt, &u.Schedule); err != nil {
+		if err = rows.Scan(&u.Dag.Project, &u.Dag.Name, &u.NextRunAt, &u.Schedule); err != nil {
 			return nil, fmt.Errorf("Upcoming scan: %w", err)
 		}
 		result = append(result, u)
@@ -101,7 +102,7 @@ func (r *Repo) RecentFailures(ctx context.Context) ([]model.Failure, error) {
 	// lateral: первый упавший таск рана и exit_reason его последней попытки —
 	// «что именно сломалось» видно прямо на обзоре
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT r.id, r.dag_name, r.finished_at,
+		SELECT r.id, r.project_name, r.dag_name, r.finished_at,
 			coalesce(ft.task, ''), coalesce(ft.exit_reason, '')
 		FROM run r
 		LEFT JOIN LATERAL (
@@ -124,7 +125,8 @@ func (r *Repo) RecentFailures(ctx context.Context) ([]model.Failure, error) {
 	var result []model.Failure
 	for rows.Next() {
 		var f model.Failure
-		if err = rows.Scan(&f.RunId, &f.DagName, &f.FinishedAt, &f.Task, &f.ExitReason); err != nil {
+		if err = rows.Scan(&f.RunId, &f.Dag.Project, &f.Dag.Name, &f.FinishedAt,
+			&f.Task, &f.ExitReason); err != nil {
 			return nil, fmt.Errorf("RecentFailures scan: %w", err)
 		}
 		result = append(result, f)
@@ -135,16 +137,17 @@ func (r *Repo) RecentFailures(ctx context.Context) ([]model.Failure, error) {
 // DagTaskStats — агрегаты по таскам дага за последние lastRuns завершённых
 // ранов: сколько ранов реально попало в окно + по таскам длительность
 // текущих попыток и пик памяти.
-func (r *Repo) DagTaskStats(ctx context.Context, dagName string, lastRuns int64) (int64, []model.TaskStat, error) {
+func (r *Repo) DagTaskStats(ctx context.Context, ref dagModel.Ref, lastRuns int64) (int64, []model.TaskStat, error) {
 	con := r.TxM.GetConnection(ctx)
 
 	var runs int64
 	err := con.QueryRow(ctx, `
 		SELECT count(*) FROM (
 			SELECT 1 FROM run
-			WHERE dag_name = $1 AND status <> 'running' AND finished_at IS NOT NULL
-			ORDER BY finished_at DESC LIMIT $2
-		) t`, dagName, lastRuns).Scan(&runs)
+			WHERE project_name = $1 AND dag_name = $2
+			  AND status <> 'running' AND finished_at IS NOT NULL
+			ORDER BY finished_at DESC LIMIT $3
+		) t`, ref.Project, ref.Name, lastRuns).Scan(&runs)
 	if err != nil {
 		return 0, nil, fmt.Errorf("DagTaskStats count: %w", err)
 	}
@@ -155,8 +158,9 @@ func (r *Repo) DagTaskStats(ctx context.Context, dagName string, lastRuns int64)
 	rows, err := con.Query(ctx, `
 		WITH last_runs AS (
 			SELECT id FROM run
-			WHERE dag_name = $1 AND status <> 'running' AND finished_at IS NOT NULL
-			ORDER BY finished_at DESC LIMIT $2
+			WHERE project_name = $1 AND dag_name = $2
+			  AND status <> 'running' AND finished_at IS NOT NULL
+			ORDER BY finished_at DESC LIMIT $3
 		)
 		SELECT ti.task,
 			count(*),
@@ -169,7 +173,7 @@ func (r *Repo) DagTaskStats(ctx context.Context, dagName string, lastRuns int64)
 		LEFT JOIN attempt a ON a.run_id = ti.run_id AND a.task = ti.task AND a.attempt = ti.attempt
 		WHERE ti.started_at IS NOT NULL AND ti.finished_at IS NOT NULL
 		GROUP BY ti.task
-		ORDER BY ti.task`, dagName, lastRuns)
+		ORDER BY ti.task`, ref.Project, ref.Name, lastRuns)
 	if err != nil {
 		return 0, nil, fmt.Errorf("DagTaskStats: %w", err)
 	}
@@ -217,17 +221,49 @@ func (r *Repo) Activity(ctx context.Context, days int) ([]model.Day, error) {
 	return result, rows.Err()
 }
 
+// ActivityHours — раны по часам за последние hours часов, включая пустые
+// часы. Момент возвращается как есть (timestamptz) — час показывают в
+// таймзоне смотрящего.
+func (r *Repo) ActivityHours(ctx context.Context, hours int) ([]model.Hour, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
+		SELECT h.hour,
+			count(r.id) FILTER (WHERE r.status = 'success'),
+			count(r.id) FILTER (WHERE r.status = 'failed'),
+			count(r.id) FILTER (WHERE r.status = 'running')
+		FROM generate_series(
+			date_trunc('hour', now()) - make_interval(hours => $1 - 1),
+			date_trunc('hour', now()),
+			interval '1 hour'
+		) AS h(hour)
+		LEFT JOIN run r ON date_trunc('hour', r.created_at) = h.hour
+		GROUP BY h.hour ORDER BY h.hour`, hours)
+	if err != nil {
+		return nil, fmt.Errorf("ActivityHours: %w", err)
+	}
+	defer rows.Close()
+
+	var result []model.Hour
+	for rows.Next() {
+		var h model.Hour
+		if err = rows.Scan(&h.Hour, &h.Success, &h.Failed, &h.Running); err != nil {
+			return nil, fmt.Errorf("ActivityHours scan: %w", err)
+		}
+		result = append(result, h)
+	}
+	return result, rows.Err()
+}
+
 // DagDurations — среднее и максимальное время завершённых ранов дага после
 // since (самые долгие первыми).
 func (r *Repo) DagDurations(ctx context.Context, since time.Time) ([]model.DagDuration, error) {
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT dag_name,
+		SELECT project_name, dag_name,
 			avg(extract(epoch FROM finished_at - created_at)),
 			max(extract(epoch FROM finished_at - created_at)),
 			count(*)
 		FROM run
 		WHERE finished_at IS NOT NULL AND finished_at >= $1
-		GROUP BY dag_name
+		GROUP BY project_name, dag_name
 		ORDER BY avg(extract(epoch FROM finished_at - created_at)) DESC
 		LIMIT $2`, since, durationLimit)
 	if err != nil {
@@ -238,7 +274,7 @@ func (r *Repo) DagDurations(ctx context.Context, since time.Time) ([]model.DagDu
 	var result []model.DagDuration
 	for rows.Next() {
 		var d model.DagDuration
-		if err = rows.Scan(&d.DagName, &d.AvgSec, &d.MaxSec, &d.Runs); err != nil {
+		if err = rows.Scan(&d.Dag.Project, &d.Dag.Name, &d.AvgSec, &d.MaxSec, &d.Runs); err != nil {
 			return nil, fmt.Errorf("DagDurations scan: %w", err)
 		}
 		result = append(result, d)

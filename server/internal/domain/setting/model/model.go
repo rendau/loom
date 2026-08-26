@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	commonModel "github.com/rendau/loom/server/internal/domain/common/model"
+)
 
 // Имена известных настроек. Список фиксирован: значения сидируются
 // миграцией, произвольные имена сервис отклоняет.
@@ -27,32 +31,33 @@ const (
 
 // Def — описание известной настройки: тип значения, глобальный дефолт
 // (страховка на случай отсутствия строки в БД) и допустимость уточнения
-// на даге.
+// в скоупе проекта или дага.
 type Def struct {
 	Name    string
 	Kind    string
 	Default string
-	PerDag  bool
+	Scoped  bool
 }
 
 // Defs — реестр известных настроек.
 var Defs = map[string]Def{
-	RunTTL:      {Name: RunTTL, Kind: KindDuration, Default: "720h", PerDag: true},
-	RunKeepLast: {Name: RunKeepLast, Kind: KindInt, Default: "0", PerDag: true},
-	K8sJobTTL:   {Name: K8sJobTTL, Kind: KindDuration, Default: "1h", PerDag: true},
-	DagRegTTL:   {Name: DagRegTTL, Kind: KindDuration, Default: "720h", PerDag: false},
+	RunTTL:      {Name: RunTTL, Kind: KindDuration, Default: "720h", Scoped: true},
+	RunKeepLast: {Name: RunKeepLast, Kind: KindInt, Default: "0", Scoped: true},
+	K8sJobTTL:   {Name: K8sJobTTL, Kind: KindDuration, Default: "1h", Scoped: true},
+	DagRegTTL:   {Name: DagRegTTL, Kind: KindDuration, Default: "720h", Scoped: false},
 }
 
 // Main — сохранённое значение настройки в скоупе.
 type Main struct {
-	DagName    string // '' — глобальный скоуп
+	Scope      commonModel.Scope
 	Name       string
 	Value      string
 	ModifiedAt time.Time
 }
 
 // Effective — результат резолва настроек для скоупа дага: значение дага
-// перекрывает глобальное, отсутствие обоих закрывает дефолт из Defs.
+// перекрывает проектное, проектное — глобальное, отсутствие всех трёх
+// закрывает дефолт из Defs.
 type Effective struct {
 	RunTTL      time.Duration
 	RunKeepLast int64

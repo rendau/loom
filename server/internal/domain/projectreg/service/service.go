@@ -1,5 +1,5 @@
-// Package service (dagreg) — асинхронная очередь регистраций дагов:
-// RegisterDag лишь ставит запись в очередь, а pull + describe выполняет
+// Package service (projectreg) — асинхронная очередь регистраций проектов:
+// RegisterProject лишь ставит запись в очередь, а pull + describe выполняет
 // фоновый воркер (claim через FOR UPDATE SKIP LOCKED — инстансы control
 // plane не конфликтуют). Админка поллит статусы записей.
 package service
@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rendau/loom/server/internal/domain/dagreg/model"
+	"github.com/rendau/loom/server/internal/domain/projectreg/model"
 	"github.com/rendau/loom/server/internal/errs"
 )
 
@@ -58,10 +58,10 @@ func New(repoDb RepoDbI, settings SettingsI, tick, staleAfter time.Duration) *Se
 }
 
 // Enqueue ставит регистрацию в очередь. Для source=auto действует дедуп:
-// незавершённая регистрация того же образа — новая не создаётся (nil).
+// незавершённая регистрация того же проекта — новая не создаётся (nil).
 func (s *Service) Enqueue(ctx context.Context, spec model.EnqueueSpec) (*model.Main, error) {
 	if spec.Source == model.SourceAuto {
-		active, err := s.repoDb.HasActive(ctx, spec.Image)
+		active, err := s.repoDb.HasActive(ctx, spec.ProjectName)
 		if err != nil {
 			return nil, fmt.Errorf("repoDb.HasActive: %w", err)
 		}
@@ -71,16 +71,13 @@ func (s *Service) Enqueue(ctx context.Context, spec model.EnqueueSpec) (*model.M
 	}
 
 	m := &model.Main{
-		Id:         newRegId(),
-		Image:      spec.Image,
-		Source:     spec.Source,
-		DagName:    spec.DagName,
-		Schedule:   spec.Schedule,
-		Catchup:    spec.Catchup,
-		Paused:     spec.Paused,
-		AutoUpdate: spec.AutoUpdate,
-		Pool:       spec.Pool,
-		Status:     model.StatusPending,
+		Id:          newRegId(),
+		ProjectName: spec.ProjectName,
+		Image:       spec.Image,
+		Source:      spec.Source,
+		AutoUpdate:  spec.AutoUpdate,
+		CreateDags:  spec.CreateDags,
+		Status:      model.StatusPending,
 	}
 	if err := s.repoDb.Create(ctx, m); err != nil {
 		return nil, fmt.Errorf("repoDb.Create: %w", err)
@@ -90,13 +87,14 @@ func (s *Service) Enqueue(ctx context.Context, spec model.EnqueueSpec) (*model.M
 	return m, nil
 }
 
-// EnqueueAuto — постановка авто-перерегистрации от dagsync: имя дага
-// известно сразу, настройки дага не трогаются.
-func (s *Service) EnqueueAuto(ctx context.Context, image, dagName string) error {
+// EnqueueAuto — постановка авто-перерегистрации от dagsync: проект
+// известен сразу, его настройки не трогаются. Новые даги образа
+// авто-обновление не заводит — это решение админа.
+func (s *Service) EnqueueAuto(ctx context.Context, projectName, image string) error {
 	_, err := s.Enqueue(ctx, model.EnqueueSpec{
-		Image:   image,
-		Source:  model.SourceAuto,
-		DagName: dagName,
+		ProjectName: projectName,
+		Image:       image,
+		Source:      model.SourceAuto,
 	})
 	return err
 }
@@ -132,7 +130,7 @@ func (s *Service) Nudge() {
 // разрывает цикл зависимостей (обработчик регистраций сам зовёт Enqueue).
 func (s *Service) Start(processor ProcessorI) {
 	s.processor = processor
-	slog.Info("dag registration worker started", "tick", s.tick)
+	slog.Info("project registration worker started", "tick", s.tick)
 	s.wg.Go(s.loop)
 }
 
@@ -154,7 +152,7 @@ func (s *Service) loop() {
 		}
 
 		if err := s.pass(s.ctx); err != nil && s.ctx.Err() == nil {
-			slog.Error("dag registration pass", "error", err)
+			slog.Error("project registration pass", "error", err)
 		}
 	}
 }
@@ -190,9 +188,10 @@ func (s *Service) pass(ctx context.Context) error {
 }
 
 func (s *Service) process(reg *model.Main) {
-	slog.Info("dag registration started", "id", reg.Id, "image", reg.Image, "source", reg.Source)
+	slog.Info("project registration started", "id", reg.Id,
+		"project", reg.ProjectName, "image", reg.Image, "source", reg.Source)
 
-	dagName, err := s.processor.Process(s.ctx, reg)
+	result, err := s.processor.Process(s.ctx, reg)
 
 	// финализация и при погашенном ctx (graceful shutdown): запись не должна
 	// зависнуть в running до FailStale
@@ -200,16 +199,18 @@ func (s *Service) process(reg *model.Main) {
 	defer cancel()
 
 	if err != nil {
-		slog.Error("dag registration failed", "id", reg.Id, "image", reg.Image, "error", err)
-		if fErr := s.repoDb.Finish(finishCtx, reg.Id, model.StatusFailed, err.Error(), dagName); fErr != nil {
-			slog.Error("dag registration finish", "id", reg.Id, "error", fErr)
+		slog.Error("project registration failed", "id", reg.Id,
+			"project", reg.ProjectName, "image", reg.Image, "error", err)
+		if fErr := s.repoDb.Finish(finishCtx, reg.Id, model.StatusFailed, err.Error(), result); fErr != nil {
+			slog.Error("project registration finish", "id", reg.Id, "error", fErr)
 		}
 		return
 	}
 
-	slog.Info("dag registered", "id", reg.Id, "dag", dagName, "image", reg.Image)
-	if fErr := s.repoDb.Finish(finishCtx, reg.Id, model.StatusSuccess, "", dagName); fErr != nil {
-		slog.Error("dag registration finish", "id", reg.Id, "error", fErr)
+	slog.Info("project registered", "id", reg.Id, "project", reg.ProjectName,
+		"image", reg.Image, "dags", len(result))
+	if fErr := s.repoDb.Finish(finishCtx, reg.Id, model.StatusSuccess, "", result); fErr != nil {
+		slog.Error("project registration finish", "id", reg.Id, "error", fErr)
 	}
 }
 
@@ -217,21 +218,21 @@ func (s *Service) process(reg *model.Main) {
 // failed, завершённые старше TTL удаляются. Ошибки не прерывают проход.
 func (s *Service) maintain(ctx context.Context) {
 	if n, err := s.repoDb.FailStale(ctx, time.Now().Add(-s.staleAfter)); err != nil {
-		slog.Error("dag registration fail stale", "error", err)
+		slog.Error("project registration fail stale", "error", err)
 	} else if n > 0 {
-		slog.Warn("stale dag registrations failed", "count", n)
+		slog.Warn("stale project registrations failed", "count", n)
 	}
 
 	// TTL истории — глобальная настройка dag_reg_ttl из БД (правки в
 	// админке подхватываются без рестарта)
-	eff, err := s.settings.Resolve(ctx, "")
+	eff, err := s.settings.ResolveGlobal(ctx)
 	if err != nil {
-		slog.Error("dag registration resolve settings", "error", err)
+		slog.Error("project registration resolve settings", "error", err)
 		return
 	}
 	if eff.DagRegTTL > 0 {
 		if _, err = s.repoDb.DeleteFinishedBefore(ctx, time.Now().Add(-eff.DagRegTTL)); err != nil {
-			slog.Error("dag registration ttl cleanup", "error", err)
+			slog.Error("project registration ttl cleanup", "error", err)
 		}
 	}
 }

@@ -3,82 +3,98 @@ package loom
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/samber/lo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/rendau/loom/api/server_v1"
 )
 
-// Version — версия SDK. Попадает в манифест; server проверяет по ней
-// совместимость при регистрации дага.
-const Version = "0.3.0"
+// Version — версия SDK. Попадает в каталог образа; server проверяет по ней
+// совместимость при регистрации проекта.
+const Version = "0.4.0"
 
-// EnvDescribeID — env-контракт describe-Job'а (регистрация дага через
-// k8s): непустой id включает отправку манифеста (или ошибки
-// валидации дага) на control plane по адресу EnvServerAddr — describe_id
-// одноразовый, им регистрация сопоставляет ответ Job'а. Печать манифеста в
+// EnvDescribeID — env-контракт describe-Job'а (регистрация проекта через
+// k8s): непустой id включает отправку каталога образа (или ошибки
+// каталога) на control plane по адресу EnvServerAddr — describe_id
+// одноразовый, им регистрация сопоставляет ответ Job'а. Печать каталога в
 // stdout при этом сохраняется (диагностика через kubectl logs).
 const EnvDescribeID = "LOOM_DESCRIBE_ID"
 
-// pushManifestTimeout — на дозвон до control plane из describe-Job'а.
-const pushManifestTimeout = 30 * time.Second
+// pushCatalogTimeout — на дозвон до control plane из describe-Job'а.
+const pushCatalogTimeout = 30 * time.Second
 
 const usage = `usage: <dag-binary> <command>
 
 commands:
-  describe   напечатать JSON-манифест дага (регистрация и валидация на
-             server); с env LOOM_DESCRIBE_ID + LOOM_SERVER_ADDR манифест
-             дополнительно отправляется на control plane (describe-Job
-             регистрации через kubernetes)
-  run        выполнить даг целиком в локальном режиме (in-process)
-  run --task=<name> --run-id=<id> --attempt=<n>
+  describe   напечатать JSON-каталог образа: манифесты всех дагов бинарника
+             (регистрация и валидация на server); с env LOOM_DESCRIBE_ID +
+             LOOM_SERVER_ADDR каталог дополнительно отправляется на control
+             plane (describe-Job регистрации через kubernetes)
+  run [--dag=<name>] [--params='{...}']
+             выполнить даг целиком в локальном режиме (in-process); --dag
+             обязателен, если бинарник несёт несколько дагов
+  run [--dag=<name>] --task=<name> --run-id=<id> --attempt=<n>
              выполнить один таск в распределённом режиме (вызывает executor);
              параметры также берутся из env: LOOM_ARTIFACT_ADDR (обязателен),
-             LOOM_SERVER_ADDR, LOOM_RUN_ID, LOOM_TASK, LOOM_ATTEMPT,
+             LOOM_SERVER_ADDR, LOOM_DAG, LOOM_RUN_ID, LOOM_TASK, LOOM_ATTEMPT,
              LOOM_DEP_ATTEMPTS; флаги приоритетнее env
 
 exit codes: 0 — успех, 1 — таск упал, 2 — некорректный вызов/конфигурация
 `
 
 // Main — входная точка бинарника дага; вызывается последней строкой main().
-// Один и тот же бинарник отдаёт манифест (describe), выполняет даг локально
-// (run) и отрабатывает один таск в распределённом режиме (run --task).
-func Main(d *DAG) {
-	os.Exit(runCLI(d, os.Args[1:], os.Stdout, os.Stderr))
+// Один и тот же бинарник отдаёт каталог своих дагов (describe), выполняет
+// даг локально (run) и отрабатывает один таск в распределённом режиме
+// (run --task). Дагов в образе может быть несколько — каждый становится
+// шаблоном проекта на control plane.
+func Main(dags ...*DAG) {
+	os.Exit(runCLI(dags, os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func runCLI(d *DAG, args []string, stdout, stderr io.Writer) int {
+func runCLI(dags []*DAG, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
 
-	validateErr := d.Validate()
-
 	switch args[0] {
 	case "describe":
-		return runDescribe(d, validateErr, stdout, stderr)
+		return runDescribe(dags, stdout, stderr)
 
 	case "run":
-		if validateErr != nil {
-			fmt.Fprintf(stderr, "invalid dag: %v\n", validateErr)
-			return 2
-		}
 		fs := flag.NewFlagSet("run", flag.ContinueOnError)
 		fs.SetOutput(stderr)
+		dagName := fs.String("dag", "", "имя дага в образе (по умолчанию единственный)")
 		task := fs.String("task", "", "имя таска (распределённый режим)")
 		runID := fs.String("run-id", "", "id рана (распределённый режим)")
 		attempt := fs.Int("attempt", 0, "номер попытки (распределённый режим; 0 — из env, иначе 1)")
 		params := fs.String("params", "", "параметры рана, JSON-объект (локальный режим)")
 		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+
+		if *dagName == "" {
+			*dagName = os.Getenv(EnvDag)
+		}
+
+		d, err := selectDag(dags, *dagName)
+		if err != nil {
+			fmt.Fprintf(stderr, "%v\n", err)
+			return 2
+		}
+		if err = d.Validate(); err != nil {
+			fmt.Fprintf(stderr, "invalid dag %q: %v\n", d.name, err)
 			return 2
 		}
 
@@ -98,7 +114,7 @@ func runCLI(d *DAG, args []string, stdout, stderr io.Writer) int {
 		if *params != "" {
 			opts = append(opts, LocalParams([]byte(*params)))
 		}
-		if err := d.RunLocal(ctx, opts...); err != nil {
+		if err = d.RunLocal(ctx, opts...); err != nil {
 			fmt.Fprintf(stderr, "run failed: %v\n", err)
 			return 1
 		}
@@ -111,43 +127,88 @@ func runCLI(d *DAG, args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// runDescribe печатает манифест в stdout, а при непустом EnvDescribeID ещё
-// и отправляет его на control plane (push-режим describe-Job'а). Ошибка
-// валидации дага в push-режиме тоже уходит на server — иначе
-// регистрация ждала бы таймаута и разбирала логи пода.
-func runDescribe(d *DAG, validateErr error, stdout, stderr io.Writer) int {
+// selectDag выбирает даг образа по имени; пустое имя допустимо, только
+// если даг в образе один.
+func selectDag(dags []*DAG, name string) (*DAG, error) {
+	names := lo.Map(dags, func(d *DAG, _ int) string { return d.name })
+
+	switch {
+	case len(dags) == 0:
+		return nil, errors.New("no dags declared")
+
+	case name == "":
+		if len(dags) == 1 {
+			return dags[0], nil
+		}
+		return nil, fmt.Errorf("dag name is required: image carries %d dags (%s)",
+			len(dags), strings.Join(names, ", "))
+
+	default:
+		d, ok := lo.Find(dags, func(d *DAG) bool { return d.name == name })
+		if !ok {
+			return nil, fmt.Errorf("unknown dag %q: image carries %s", name, strings.Join(names, ", "))
+		}
+		return d, nil
+	}
+}
+
+// runDescribe печатает каталог образа в stdout, а при непустом
+// EnvDescribeID ещё и отправляет его на control plane (push-режим
+// describe-Job'а). Ошибки валидации отдельных дагов едут внутри каталога:
+// остальные даги образа регистрируются как обычно. Сводка уезжает
+// отдельным полем error, только если валидных дагов не осталось ни одного —
+// такую регистрацию server завалит целиком, не разбирая каталог.
+func runDescribe(dags []*DAG, stdout, stderr io.Writer) int {
 	describeID := os.Getenv(EnvDescribeID)
 
-	if validateErr != nil {
+	catalog, err := buildCatalog(dags)
+	if err != nil {
 		if describeID != "" {
-			if err := pushManifest(describeID, nil, validateErr.Error()); err != nil {
-				fmt.Fprintf(stderr, "push manifest: %v\n", err)
+			if pushErr := pushCatalog(describeID, nil, err.Error()); pushErr != nil {
+				fmt.Fprintf(stderr, "push catalog: %v\n", pushErr)
 			}
 		}
-		fmt.Fprintf(stderr, "invalid dag: %v\n", validateErr)
+		fmt.Fprintf(stderr, "invalid dag catalog: %v\n", err)
 		return 2
 	}
 
-	manifest, err := json.MarshalIndent(d.Manifest(), "", "  ")
+	raw, err := json.MarshalIndent(catalog, "", "  ")
 	if err != nil {
-		fmt.Fprintf(stderr, "encode manifest: %v\n", err)
+		fmt.Fprintf(stderr, "encode catalog: %v\n", err)
 		return 1
 	}
-	fmt.Fprintln(stdout, string(manifest))
+	fmt.Fprintln(stdout, string(raw))
 
-	if describeID == "" {
-		return 0
+	broken := lo.Filter(catalog.Dags, func(v CatalogDag, _ int) bool { return v.Error != "" })
+	for _, v := range broken {
+		fmt.Fprintf(stderr, "invalid dag %q: %s\n", v.Name, v.Error)
 	}
-	if err = pushManifest(describeID, manifest, ""); err != nil {
-		fmt.Fprintf(stderr, "push manifest: %v\n", err)
-		return 1
+
+	// ни одного валидного дага — регистрировать нечего
+	allBroken := len(broken) == len(catalog.Dags)
+
+	if describeID != "" {
+		errMsg := ""
+		if allBroken {
+			errMsg = strings.Join(lo.Map(broken, func(v CatalogDag, _ int) string {
+				return fmt.Sprintf("dag %q: %s", v.Name, v.Error)
+			}), "; ")
+		}
+		if err = pushCatalog(describeID, raw, errMsg); err != nil {
+			fmt.Fprintf(stderr, "push catalog: %v\n", err)
+			return 1
+		}
+	}
+
+	if allBroken {
+		return 2
 	}
 	return 0
 }
 
-// pushManifest отправляет манифест (или ошибку валидации) на control plane
-// вызовом DagService.PushDagManifest.
-func pushManifest(describeID string, manifest []byte, errMsg string) error {
+// pushCatalog отправляет каталог образа (или ошибку) на control plane
+// вызовом ProjectService.PushDagCatalog.
+func pushCatalog(describeID string, catalog []byte, errMsg string) error {
 	addr := os.Getenv(EnvServerAddr)
 	if addr == "" {
 		return fmt.Errorf("%s is required when %s is set", EnvServerAddr, EnvDescribeID)
@@ -159,16 +220,16 @@ func pushManifest(describeID string, manifest []byte, errMsg string) error {
 	}
 	defer func() { _ = conn.Close() }()
 
-	ctx, cancel := context.WithTimeout(context.Background(), pushManifestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), pushCatalogTimeout)
 	defer cancel()
 
-	_, err = pb.NewDagServiceClient(conn).PushDagManifest(ctx, &pb.DagPushManifestReq{
+	_, err = pb.NewProjectServiceClient(conn).PushDagCatalog(ctx, &pb.DagPushCatalogReq{
 		DescribeId: describeID,
-		Manifest:   manifest,
+		Catalog:    catalog,
 		Error:      errMsg,
 	})
 	if err != nil {
-		return fmt.Errorf("push dag manifest: %w", err)
+		return fmt.Errorf("push dag catalog: %w", err)
 	}
 	return nil
 }

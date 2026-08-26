@@ -1,5 +1,7 @@
 // DTO ранов (зеркало api/proto/server_v1/run.proto).
 
+import type { Scope } from '~/types/common'
+
 export type RunStatus = 'running' | 'success' | 'failed' | 'canceled'
 
 export type TaskStatus =
@@ -17,7 +19,10 @@ export type AttemptStatus = 'starting' | 'running' | 'success' | 'failed'
 
 export interface Run {
   id: string
+  project: string
   dag_name: string
+  // Имя дага в образе, которым запускаются таски.
+  template: string
   image: string
   image_digest: string
   trigger: string // manual | schedule | backfill
@@ -36,7 +41,8 @@ export interface RunEnv {
   env: string
   kind: 'variable' | 'secret'
   name: string
-  scope: string // '' — глобальный скоуп, иначе имя дага
+  // Источник значения: глобальный скоуп, проект или даг.
+  scope: Scope
   value: string
   resolved_at: string
 }

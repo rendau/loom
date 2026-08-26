@@ -7,6 +7,7 @@ option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
 import "google/api/annotations.proto";
 import "google/protobuf/empty.proto";
 import "server_v1/auth.proto"; // UserMain
+import "server_v1/dag.proto";  // DagRef
 
 // UserService — управление пользователями админки; доступен только роли
 // admin.
@@ -24,7 +25,8 @@ service UserService {
     };
   }
 
-  // UpdateUser меняет заданные поля: пароль, роль, набор назначенных дагов.
+  // UpdateUser меняет заданные поля: пароль, роль, наборы назначенных
+  // дагов и проектов.
   rpc UpdateUser(UserUpdateReq) returns (google.protobuf.Empty) {
     option (google.api.http) = {
       put: "/user/{id}"
@@ -49,16 +51,21 @@ message UserCreateReq {
   string username = 1;
   string password = 2;
   string role = 3; // admin | user
-  repeated string dag_names = 4;
+  repeated DagRef dags = 5;
+  repeated string projects = 6;
+  reserved 4; // были dag_names
 }
 
 message UserUpdateReq {
   string id = 1;
   optional string password = 2;
   optional string role = 3;
-  // Отсутствует — набор дагов не меняется; пустой список очищает его.
-  repeated string dag_names = 4;
-  bool set_dag_names = 5;
+  // set_* = false — набор не меняется; true с пустым списком очищает его.
+  repeated DagRef dags = 6;
+  bool set_dags = 7;
+  repeated string projects = 8;
+  bool set_projects = 9;
+  reserved 4, 5; // были dag_names / set_dag_names
 }
 
 message UserDeleteReq {

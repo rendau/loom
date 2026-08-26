@@ -1,6 +1,7 @@
 // Package retention — очистка завершённых ранов: периодическое удаление
 // артефактов и логов (artifact-сервер) и записей БД. Лимиты — настройки
-// из БД (run_ttl и run_keep_last, скоуп дага перекрывает глобальный); ран
+// из БД (run_ttl и run_keep_last; скоуп дага перекрывает проектный,
+// проектный — глобальный); ран
 // удаляется, если нарушает любой из них. Порядок удаления — данные раньше
 // записи рана: упавшая на артефактах очистка оставляет ран в БД и
 // повторится следующим проходом.
@@ -13,6 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
+
+	commonModel "github.com/rendau/loom/server/internal/domain/common/model"
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	settingModel "github.com/rendau/loom/server/internal/domain/setting/model"
 )
 
@@ -21,14 +26,14 @@ import (
 const sweepLimit = 100
 
 type RunServiceI interface {
-	ListRetentionDags(ctx context.Context) ([]string, error)
-	ListExpired(ctx context.Context, dagName string, before *time.Time, keepLast, limit int64) ([]string, error)
+	ListRetentionDags(ctx context.Context) ([]dagModel.Ref, error)
+	ListExpired(ctx context.Context, ref dagModel.Ref, before *time.Time, keepLast, limit int64) ([]string, error)
 	DeleteRun(ctx context.Context, runId string) error
 }
 
 // SettingsI — резолв retention-лимитов по скоупам дагов.
 type SettingsI interface {
-	ResolveForDags(ctx context.Context, dagNames []string) (map[string]settingModel.Effective, error)
+	ResolveMany(ctx context.Context, scopes []commonModel.Scope) (map[commonModel.Scope]settingModel.Effective, error)
 }
 
 type ArtifactI interface {
@@ -121,14 +126,16 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	effective, err := s.settings.ResolveForDags(ctx, dags)
+	scopes := lo.Map(dags, func(v dagModel.Ref, _ int) commonModel.Scope { return v.Scope() })
+
+	effective, err := s.settings.ResolveMany(ctx, scopes)
 	if err != nil {
-		return 0, fmt.Errorf("settings.ResolveForDags: %w", err)
+		return 0, fmt.Errorf("settings.ResolveMany: %w", err)
 	}
 
 	deleted := 0
 	for _, dag := range dags {
-		eff := effective[dag]
+		eff := effective[dag.Scope()]
 		if eff.RunTTL <= 0 && eff.RunKeepLast <= 0 {
 			continue
 		}
@@ -143,7 +150,7 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 
 		ids, err := s.runSvc.ListExpired(ctx, dag, before, eff.RunKeepLast, int64(sweepLimit-deleted))
 		if err != nil {
-			slog.Error("retention list expired", "dag", dag, "error", err)
+			slog.Error("retention list expired", "dag", dag.String(), "error", err)
 			continue
 		}
 

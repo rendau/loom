@@ -9,15 +9,18 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5"
 
+	commonModel "github.com/rendau/loom/server/internal/domain/common/model"
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	"github.com/rendau/loom/server/internal/domain/run/model"
 )
 
 var allowedSortFields = map[string]string{
-	"id":          "id",
-	"dag_name":    "dag_name",
-	"status":      "status",
-	"created_at":  "created_at",
-	"finished_at": "finished_at",
+	"id":           "id",
+	"dag_name":     "dag_name",
+	"project_name": "project_name",
+	"status":       "status",
+	"created_at":   "created_at",
+	"finished_at":  "finished_at",
 }
 
 func (r *Repo) getConditions(pars *model.ListReq) (map[string]any, map[string][]any) {
@@ -28,8 +31,12 @@ func (r *Repo) getConditions(pars *model.ListReq) (map[string]any, map[string][]
 		return conditions, conditionExps
 	}
 
-	if pars.DagName != nil {
-		conditions["dag_name"] = *pars.DagName
+	if pars.Dag != nil {
+		conditions["project_name"] = pars.Dag.Project
+		conditions["dag_name"] = pars.Dag.Name
+	}
+	if pars.Project != nil {
+		conditions["project_name"] = *pars.Project
 	}
 	if pars.Status != nil {
 		conditions["status"] = *pars.Status
@@ -416,13 +423,13 @@ func (r *Repo) CancelRun(ctx context.Context, runId string) (bool, []model.Attem
 }
 
 // CountRunsByStatus — счётчики ранов по статусам (фильтры-чипы админки);
-// dagName != nil — только раны этого дага.
-func (r *Repo) CountRunsByStatus(ctx context.Context, dagName *string) (map[string]int64, error) {
+// ref != nil — только раны этого дага.
+func (r *Repo) CountRunsByStatus(ctx context.Context, ref *dagModel.Ref) (map[string]int64, error) {
 	query := `SELECT status, count(*) FROM run`
 	var args []any
-	if dagName != nil {
-		query += ` WHERE dag_name = $1`
-		args = append(args, *dagName)
+	if ref != nil {
+		query += ` WHERE project_name = $1 AND dag_name = $2`
+		args = append(args, ref.Project, ref.Name)
 	}
 	query += ` GROUP BY status`
 
@@ -453,12 +460,13 @@ func (r *Repo) UpsertRunEnv(ctx context.Context, runId string, entries []model.R
 	b := &pgx.Batch{}
 	for _, e := range entries {
 		b.Queue(`
-			INSERT INTO run_env (run_id, env, kind, name, scope, value)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO run_env (run_id, env, kind, name, scope_kind, scope_name, value)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (run_id, kind, env)
-			DO UPDATE SET name = excluded.name, scope = excluded.scope,
+			DO UPDATE SET name = excluded.name, scope_kind = excluded.scope_kind,
+				scope_name = excluded.scope_name,
 				value = excluded.value, resolved_at = now()`,
-			runId, e.Env, e.Kind, e.Name, e.Scope, e.Value)
+			runId, e.Env, e.Kind, e.Name, e.Scope.Kind(), e.Scope.String(), e.Value)
 	}
 	if err := r.TxM.GetConnection(ctx).SendBatch(ctx, b).Close(); err != nil {
 		return fmt.Errorf("UpsertRunEnv: %w", err)
@@ -468,7 +476,7 @@ func (r *Repo) UpsertRunEnv(ctx context.Context, runId string, entries []model.R
 
 func (r *Repo) ListRunEnv(ctx context.Context, runId string) ([]model.RunEnv, error) {
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT env, kind, name, scope, value, resolved_at FROM run_env
+		SELECT env, kind, name, scope_kind, scope_name, value, resolved_at FROM run_env
 		WHERE run_id = $1 ORDER BY env, kind`, runId)
 	if err != nil {
 		return nil, fmt.Errorf("ListRunEnv: %w", err)
@@ -478,9 +486,12 @@ func (r *Repo) ListRunEnv(ctx context.Context, runId string) ([]model.RunEnv, er
 	var result []model.RunEnv
 	for rows.Next() {
 		var e model.RunEnv
-		if err = rows.Scan(&e.Env, &e.Kind, &e.Name, &e.Scope, &e.Value, &e.ResolvedAt); err != nil {
+		var scopeKind, scopeName string
+		if err = rows.Scan(&e.Env, &e.Kind, &e.Name, &scopeKind, &scopeName,
+			&e.Value, &e.ResolvedAt); err != nil {
 			return nil, fmt.Errorf("ListRunEnv scan: %w", err)
 		}
+		e.Scope = decodeScope(scopeKind, scopeName)
 		result = append(result, e)
 	}
 	if err = rows.Err(); err != nil {
@@ -609,24 +620,24 @@ func (r *Repo) ListPoolUsage(ctx context.Context) ([]model.PoolUsage, error) {
 	return result, nil
 }
 
-// ListRetentionDags возвращает имена дагов, у которых есть завершённые
-// раны — скоупы retention-прохода (включая даги, уже удалённые из dag:
-// их раны тоже подлежат очистке, настройки резолвятся до глобальных).
-func (r *Repo) ListRetentionDags(ctx context.Context) ([]string, error) {
+// ListRetentionDags возвращает даги, у которых есть завершённые раны —
+// скоупы retention-прохода (включая даги, уже удалённые из dag: их раны
+// тоже подлежат очистке, настройки резолвятся до глобальных).
+func (r *Repo) ListRetentionDags(ctx context.Context) ([]dagModel.Ref, error) {
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
-		SELECT DISTINCT dag_name FROM run WHERE finished_at IS NOT NULL`)
+		SELECT DISTINCT project_name, dag_name FROM run WHERE finished_at IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("ListRetentionDags: %w", err)
 	}
 	defer rows.Close()
 
-	var result []string
+	var result []dagModel.Ref
 	for rows.Next() {
-		var name string
-		if err = rows.Scan(&name); err != nil {
+		var ref dagModel.Ref
+		if err = rows.Scan(&ref.Project, &ref.Name); err != nil {
 			return nil, fmt.Errorf("ListRetentionDags scan: %w", err)
 		}
-		result = append(result, name)
+		result = append(result, ref)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("ListRetentionDags rows: %w", err)
@@ -638,7 +649,7 @@ func (r *Repo) ListRetentionDags(ctx context.Context) ([]string, error) {
 // из retention-лимитов (старые первыми): finished_at раньше before
 // (nil — по времени не чистить) либо за пределами keepLast последних
 // завершённых (0 — количество не ограничено).
-func (r *Repo) ListExpiredRuns(ctx context.Context, dagName string, before *time.Time,
+func (r *Repo) ListExpiredRuns(ctx context.Context, ref dagModel.Ref, before *time.Time,
 	keepLast, limit int64,
 ) ([]string, error) {
 	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
@@ -646,12 +657,12 @@ func (r *Repo) ListExpiredRuns(ctx context.Context, dagName string, before *time
 			SELECT id, finished_at,
 				row_number() OVER (ORDER BY finished_at DESC) AS rn
 			FROM run
-			WHERE dag_name = $1 AND finished_at IS NOT NULL
+			WHERE project_name = $1 AND dag_name = $2 AND finished_at IS NOT NULL
 		) t
-		WHERE ($2::timestamptz IS NOT NULL AND finished_at < $2)
-			OR ($3::bigint > 0 AND rn > $3)
+		WHERE ($3::timestamptz IS NOT NULL AND finished_at < $3)
+			OR ($4::bigint > 0 AND rn > $4)
 		ORDER BY finished_at
-		LIMIT $4`, dagName, before, keepLast, limit)
+		LIMIT $5`, ref.Project, ref.Name, before, keepLast, limit)
 	if err != nil {
 		return nil, fmt.Errorf("ListExpiredRuns: %w", err)
 	}
@@ -681,4 +692,20 @@ func (r *Repo) DeleteRun(ctx context.Context, runId string) error {
 		return fmt.Errorf("DeleteRun: %w", err)
 	}
 	return nil
+}
+
+// decodeScope восстанавливает скоуп из снапшота run_env: у дага имя
+// хранится в форме «проект/даг».
+func decodeScope(kind, name string) commonModel.Scope {
+	switch kind {
+	case "dag":
+		if ref, ok := dagModel.ParseRef(name); ok {
+			return ref.Scope()
+		}
+		return commonModel.GlobalScope()
+	case "project":
+		return commonModel.ProjectScope(name)
+	default:
+		return commonModel.GlobalScope()
+	}
 }

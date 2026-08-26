@@ -36,8 +36,11 @@ type DashboardRep struct {
 	RecentFailures []*DashboardFailure     `protobuf:"bytes,8,rep,name=recent_failures,json=recentFailures,proto3" json:"recent_failures,omitempty"` // последние провалившиеся раны
 	Activity       []*DashboardDay         `protobuf:"bytes,9,rep,name=activity,proto3" json:"activity,omitempty"`                                   // раны по дням (14 дней)
 	DagDurations   []*DashboardDagDuration `protobuf:"bytes,10,rep,name=dag_durations,json=dagDurations,proto3" json:"dag_durations,omitempty"`      // длительности за 7 дней
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Раны по часам (сутки): у инсталляции, вся история которой моложе
+	// суток, график по дням вырождается в один столбик.
+	ActivityHours []*DashboardHour `protobuf:"bytes,11,rep,name=activity_hours,json=activityHours,proto3" json:"activity_hours,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DashboardRep) Reset() {
@@ -140,6 +143,13 @@ func (x *DashboardRep) GetDagDurations() []*DashboardDagDuration {
 	return nil
 }
 
+func (x *DashboardRep) GetActivityHours() []*DashboardHour {
+	if x != nil {
+		return x.ActivityHours
+	}
+	return nil
+}
+
 type DashboardWindow struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Success       int64                  `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
@@ -194,6 +204,7 @@ func (x *DashboardWindow) GetFailed() int64 {
 
 type DashboardUpcoming struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Project       string                 `protobuf:"bytes,4,opt,name=project,proto3" json:"project,omitempty"`
 	DagName       string                 `protobuf:"bytes,1,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"`
 	NextRunAt     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=next_run_at,json=nextRunAt,proto3" json:"next_run_at,omitempty"`
 	Schedule      string                 `protobuf:"bytes,3,opt,name=schedule,proto3" json:"schedule,omitempty"`
@@ -229,6 +240,13 @@ func (x *DashboardUpcoming) ProtoReflect() protoreflect.Message {
 // Deprecated: Use DashboardUpcoming.ProtoReflect.Descriptor instead.
 func (*DashboardUpcoming) Descriptor() ([]byte, []int) {
 	return file_server_v1_dashboard_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *DashboardUpcoming) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *DashboardUpcoming) GetDagName() string {
@@ -315,6 +333,7 @@ func (x *DashboardPool) GetBusy() int64 {
 type DashboardFailure struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	RunId      string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	Project    string                 `protobuf:"bytes,6,opt,name=project,proto3" json:"project,omitempty"`
 	DagName    string                 `protobuf:"bytes,2,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"`
 	FinishedAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
 	// Первый упавший таск рана и исход его последней попытки — чтобы с
@@ -358,6 +377,13 @@ func (*DashboardFailure) Descriptor() ([]byte, []int) {
 func (x *DashboardFailure) GetRunId() string {
 	if x != nil {
 		return x.RunId
+	}
+	return ""
+}
+
+func (x *DashboardFailure) GetProject() string {
+	if x != nil {
+		return x.Project
 	}
 	return ""
 }
@@ -458,8 +484,77 @@ func (x *DashboardDay) GetRunning() int64 {
 	return 0
 }
 
+type DashboardHour struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Hour          *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=hour,proto3" json:"hour,omitempty"` // начало часа
+	Success       int64                  `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	Failed        int64                  `protobuf:"varint,3,opt,name=failed,proto3" json:"failed,omitempty"`
+	Running       int64                  `protobuf:"varint,4,opt,name=running,proto3" json:"running,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DashboardHour) Reset() {
+	*x = DashboardHour{}
+	mi := &file_server_v1_dashboard_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DashboardHour) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DashboardHour) ProtoMessage() {}
+
+func (x *DashboardHour) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_dashboard_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DashboardHour.ProtoReflect.Descriptor instead.
+func (*DashboardHour) Descriptor() ([]byte, []int) {
+	return file_server_v1_dashboard_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *DashboardHour) GetHour() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Hour
+	}
+	return nil
+}
+
+func (x *DashboardHour) GetSuccess() int64 {
+	if x != nil {
+		return x.Success
+	}
+	return 0
+}
+
+func (x *DashboardHour) GetFailed() int64 {
+	if x != nil {
+		return x.Failed
+	}
+	return 0
+}
+
+func (x *DashboardHour) GetRunning() int64 {
+	if x != nil {
+		return x.Running
+	}
+	return 0
+}
+
 type DashboardDagDuration struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Project       string                 `protobuf:"bytes,5,opt,name=project,proto3" json:"project,omitempty"`
 	DagName       string                 `protobuf:"bytes,1,opt,name=dag_name,json=dagName,proto3" json:"dag_name,omitempty"`
 	AvgSec        float64                `protobuf:"fixed64,2,opt,name=avg_sec,json=avgSec,proto3" json:"avg_sec,omitempty"`
 	MaxSec        float64                `protobuf:"fixed64,3,opt,name=max_sec,json=maxSec,proto3" json:"max_sec,omitempty"`
@@ -470,7 +565,7 @@ type DashboardDagDuration struct {
 
 func (x *DashboardDagDuration) Reset() {
 	*x = DashboardDagDuration{}
-	mi := &file_server_v1_dashboard_proto_msgTypes[6]
+	mi := &file_server_v1_dashboard_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -482,7 +577,7 @@ func (x *DashboardDagDuration) String() string {
 func (*DashboardDagDuration) ProtoMessage() {}
 
 func (x *DashboardDagDuration) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_dashboard_proto_msgTypes[6]
+	mi := &file_server_v1_dashboard_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -495,7 +590,14 @@ func (x *DashboardDagDuration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DashboardDagDuration.ProtoReflect.Descriptor instead.
 func (*DashboardDagDuration) Descriptor() ([]byte, []int) {
-	return file_server_v1_dashboard_proto_rawDescGZIP(), []int{6}
+	return file_server_v1_dashboard_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *DashboardDagDuration) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
 }
 
 func (x *DashboardDagDuration) GetDagName() string {
@@ -530,7 +632,7 @@ var File_server_v1_dashboard_proto protoreflect.FileDescriptor
 
 const file_server_v1_dashboard_proto_rawDesc = "" +
 	"\n" +
-	"\x19server_v1/dashboard.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8d\x04\n" +
+	"\x19server_v1/dashboard.proto\x12\tserver_v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xce\x04\n" +
 	"\fDashboardRep\x12\x1f\n" +
 	"\vactive_runs\x18\x01 \x01(\x03R\n" +
 	"activeRuns\x12\x1b\n" +
@@ -543,20 +645,23 @@ const file_server_v1_dashboard_proto_rawDesc = "" +
 	"\x0frecent_failures\x18\b \x03(\v2\x1b.server_v1.DashboardFailureR\x0erecentFailures\x123\n" +
 	"\bactivity\x18\t \x03(\v2\x17.server_v1.DashboardDayR\bactivity\x12D\n" +
 	"\rdag_durations\x18\n" +
-	" \x03(\v2\x1f.server_v1.DashboardDagDurationR\fdagDurations\"C\n" +
+	" \x03(\v2\x1f.server_v1.DashboardDagDurationR\fdagDurations\x12?\n" +
+	"\x0eactivity_hours\x18\v \x03(\v2\x18.server_v1.DashboardHourR\ractivityHours\"C\n" +
 	"\x0fDashboardWindow\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\x03R\asuccess\x12\x16\n" +
-	"\x06failed\x18\x02 \x01(\x03R\x06failed\"\x86\x01\n" +
-	"\x11DashboardUpcoming\x12\x19\n" +
+	"\x06failed\x18\x02 \x01(\x03R\x06failed\"\xa0\x01\n" +
+	"\x11DashboardUpcoming\x12\x18\n" +
+	"\aproject\x18\x04 \x01(\tR\aproject\x12\x19\n" +
 	"\bdag_name\x18\x01 \x01(\tR\adagName\x12:\n" +
 	"\vnext_run_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tnextRunAt\x12\x1a\n" +
 	"\bschedule\x18\x03 \x01(\tR\bschedule\"M\n" +
 	"\rDashboardPool\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05slots\x18\x02 \x01(\x03R\x05slots\x12\x12\n" +
-	"\x04busy\x18\x03 \x01(\x03R\x04busy\"\xb6\x01\n" +
+	"\x04busy\x18\x03 \x01(\x03R\x04busy\"\xd0\x01\n" +
 	"\x10DashboardFailure\x12\x15\n" +
-	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x19\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x18\n" +
+	"\aproject\x18\x06 \x01(\tR\aproject\x12\x19\n" +
 	"\bdag_name\x18\x02 \x01(\tR\adagName\x12;\n" +
 	"\vfinished_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"finishedAt\x12\x12\n" +
@@ -567,8 +672,14 @@ const file_server_v1_dashboard_proto_rawDesc = "" +
 	"\x04date\x18\x01 \x01(\tR\x04date\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\x03R\asuccess\x12\x16\n" +
 	"\x06failed\x18\x03 \x01(\x03R\x06failed\x12\x18\n" +
-	"\arunning\x18\x04 \x01(\x03R\arunning\"w\n" +
-	"\x14DashboardDagDuration\x12\x19\n" +
+	"\arunning\x18\x04 \x01(\x03R\arunning\"\x8b\x01\n" +
+	"\rDashboardHour\x12.\n" +
+	"\x04hour\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04hour\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\x03R\asuccess\x12\x16\n" +
+	"\x06failed\x18\x03 \x01(\x03R\x06failed\x12\x18\n" +
+	"\arunning\x18\x04 \x01(\x03R\arunning\"\x91\x01\n" +
+	"\x14DashboardDagDuration\x12\x18\n" +
+	"\aproject\x18\x05 \x01(\tR\aproject\x12\x19\n" +
 	"\bdag_name\x18\x01 \x01(\tR\adagName\x12\x17\n" +
 	"\aavg_sec\x18\x02 \x01(\x01R\x06avgSec\x12\x17\n" +
 	"\amax_sec\x18\x03 \x01(\x01R\x06maxSec\x12\x12\n" +
@@ -589,7 +700,7 @@ func file_server_v1_dashboard_proto_rawDescGZIP() []byte {
 	return file_server_v1_dashboard_proto_rawDescData
 }
 
-var file_server_v1_dashboard_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_server_v1_dashboard_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_server_v1_dashboard_proto_goTypes = []any{
 	(*DashboardRep)(nil),          // 0: server_v1.DashboardRep
 	(*DashboardWindow)(nil),       // 1: server_v1.DashboardWindow
@@ -597,9 +708,10 @@ var file_server_v1_dashboard_proto_goTypes = []any{
 	(*DashboardPool)(nil),         // 3: server_v1.DashboardPool
 	(*DashboardFailure)(nil),      // 4: server_v1.DashboardFailure
 	(*DashboardDay)(nil),          // 5: server_v1.DashboardDay
-	(*DashboardDagDuration)(nil),  // 6: server_v1.DashboardDagDuration
-	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
-	(*emptypb.Empty)(nil),         // 8: google.protobuf.Empty
+	(*DashboardHour)(nil),         // 6: server_v1.DashboardHour
+	(*DashboardDagDuration)(nil),  // 7: server_v1.DashboardDagDuration
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
+	(*emptypb.Empty)(nil),         // 9: google.protobuf.Empty
 }
 var file_server_v1_dashboard_proto_depIdxs = []int32{
 	1,  // 0: server_v1.DashboardRep.last_24h:type_name -> server_v1.DashboardWindow
@@ -608,16 +720,18 @@ var file_server_v1_dashboard_proto_depIdxs = []int32{
 	3,  // 3: server_v1.DashboardRep.pools:type_name -> server_v1.DashboardPool
 	4,  // 4: server_v1.DashboardRep.recent_failures:type_name -> server_v1.DashboardFailure
 	5,  // 5: server_v1.DashboardRep.activity:type_name -> server_v1.DashboardDay
-	6,  // 6: server_v1.DashboardRep.dag_durations:type_name -> server_v1.DashboardDagDuration
-	7,  // 7: server_v1.DashboardUpcoming.next_run_at:type_name -> google.protobuf.Timestamp
-	7,  // 8: server_v1.DashboardFailure.finished_at:type_name -> google.protobuf.Timestamp
-	8,  // 9: server_v1.DashboardService.GetDashboard:input_type -> google.protobuf.Empty
-	0,  // 10: server_v1.DashboardService.GetDashboard:output_type -> server_v1.DashboardRep
-	10, // [10:11] is the sub-list for method output_type
-	9,  // [9:10] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	7,  // 6: server_v1.DashboardRep.dag_durations:type_name -> server_v1.DashboardDagDuration
+	6,  // 7: server_v1.DashboardRep.activity_hours:type_name -> server_v1.DashboardHour
+	8,  // 8: server_v1.DashboardUpcoming.next_run_at:type_name -> google.protobuf.Timestamp
+	8,  // 9: server_v1.DashboardFailure.finished_at:type_name -> google.protobuf.Timestamp
+	8,  // 10: server_v1.DashboardHour.hour:type_name -> google.protobuf.Timestamp
+	9,  // 11: server_v1.DashboardService.GetDashboard:input_type -> google.protobuf.Empty
+	0,  // 12: server_v1.DashboardService.GetDashboard:output_type -> server_v1.DashboardRep
+	12, // [12:13] is the sub-list for method output_type
+	11, // [11:12] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_dashboard_proto_init() }
@@ -631,7 +745,7 @@ func file_server_v1_dashboard_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_v1_dashboard_proto_rawDesc), len(file_server_v1_dashboard_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

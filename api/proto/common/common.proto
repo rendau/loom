@@ -18,6 +18,14 @@ message PaginationInfoSt {
   int64 total_count = 3;
 }
 
+// ScopeSt — скоуп переменной, секрета или настройки: пустые оба поля —
+// глобальный, только project — проектный, оба — скоуп конкретного дага.
+// Более узкий перекрывает более широкий при резолве в момент запуска.
+message ScopeSt {
+  string project = 1;
+  string dag = 2;
+}
+
 message ErrorRep {
   string code = 1;
   string message = 2;

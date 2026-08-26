@@ -4,59 +4,44 @@ import (
 	"context"
 
 	"github.com/rendau/loom/server/internal/domain/dag/model"
-	dagregModel "github.com/rendau/loom/server/internal/domain/dagreg/model"
+	projectModel "github.com/rendau/loom/server/internal/domain/project/model"
 	statsModel "github.com/rendau/loom/server/internal/domain/stats/model"
 )
 
 type ServiceI interface {
 	List(ctx context.Context, pars *model.ListReq) ([]*model.Main, int64, error)
-	Get(ctx context.Context, name string, errNE bool) (*model.Main, bool, error)
-	Register(ctx context.Context, image, imageDigest string, rawManifest []byte, m *model.Manifest, autoUpdate *bool) (*model.Main, error)
-	ListLastRuns(ctx context.Context, dagNames []string, perDag int) (map[string][]model.LastRun, error)
-	ListTaskResources(ctx context.Context, dagName string) ([]*model.TaskResourcesEntry, error)
-	SetTaskResources(ctx context.Context, dagName, task string, res model.TaskResources) error
-	DeleteTaskResources(ctx context.Context, dagName, task string) error
-	SetSchedule(ctx context.Context, name, schedule string, catchup bool) error
-	SetPaused(ctx context.Context, name string, paused bool) error
-	SetPool(ctx context.Context, name, pool string) error
-	SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error
-	Delete(ctx context.Context, name string) error
+	Get(ctx context.Context, ref model.Ref, errNE bool) (*model.Main, bool, error)
+	Create(ctx context.Context, ref model.Ref, template string) (*model.Main, error)
+	ListLastRuns(ctx context.Context, refs []model.Ref, perDag int) (map[model.Ref][]model.LastRun, error)
+	ListTaskResources(ctx context.Context, ref model.Ref) ([]*model.TaskResourcesEntry, error)
+	SetTaskResources(ctx context.Context, ref model.Ref, task string, res model.TaskResources) error
+	DeleteTaskResources(ctx context.Context, ref model.Ref, task string) error
+	SetSchedule(ctx context.Context, ref model.Ref, schedule string, catchup bool) error
+	SetPaused(ctx context.Context, ref model.Ref, paused bool) error
+	SetPool(ctx context.Context, ref model.Ref, pool string) error
+	Delete(ctx context.Context, ref model.Ref) error
 }
 
-// ImageInspectorI — инспекция образа дага при регистрации: пиннутый digest
-// и JSON-манифест (`describe`). Реализации: docker-CLI (dockercli) и
-// одноразовый k8s Job (k8sdescriber) — pull и запуск
-// контейнера являются деталью реализации.
-type ImageInspectorI interface {
-	Inspect(ctx context.Context, image string) (digest string, manifest []byte, err error)
+// ProjectsI — проект и его каталог: даг заводится только от шаблона
+// существующего образа.
+type ProjectsI interface {
+	GetTemplate(ctx context.Context, project, name string, errNE bool) (*projectModel.Template, bool, error)
 }
 
-// ManifestSinkI — приём манифеста от describe-Job'а (PushDagManifest):
-// доставка ожидающей регистрации по одноразовому describe_id.
-// false — id неизвестен (регистрация не ждёт: опоздал, повтор или подбор).
-type ManifestSinkI interface {
-	Deliver(id string, manifest []byte, errMsg string) bool
-}
-
-// PoolCheckerI — проверка существования пулов из манифеста при регистрации:
-// таск с неизвестным пулом навсегда завис бы в очереди.
+// PoolCheckerI — проверка существования пула, назначаемого дагу: даг с
+// неизвестным пулом навсегда завис бы в очереди.
 type PoolCheckerI interface {
 	CheckExist(ctx context.Context, names []string) error
 }
 
 // StatsI — агрегаты по таскам дага (domain/stats): «жирные таски» админки.
 type StatsI interface {
-	DagStats(ctx context.Context, dagName string, lastRuns int64) (int64, []statsModel.TaskStat, error)
+	DagStats(ctx context.Context, ref model.Ref, lastRuns int64) (int64, []statsModel.TaskStat, error)
 }
 
-// AuthzI — проверка прав вызывающего на даг (расписание, пауза).
+// AuthzI — проверка прав вызывающего: даг (расписание, пауза, ресурсы) и
+// проект (заведение нового дага).
 type AuthzI interface {
-	RequireDag(ctx context.Context, dagName string) error
-}
-
-// RegistrationsI — очередь асинхронных регистраций дагов (domain/dagreg).
-type RegistrationsI interface {
-	Enqueue(ctx context.Context, spec dagregModel.EnqueueSpec) (*dagregModel.Main, error)
-	Get(ctx context.Context, id string) (*dagregModel.Main, error)
-	List(ctx context.Context, req *dagregModel.ListReq) ([]*dagregModel.Main, error)
+	RequireDag(ctx context.Context, ref model.Ref) error
+	RequireProject(ctx context.Context, project string) error
 }

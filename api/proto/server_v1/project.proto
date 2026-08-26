@@ -1,0 +1,235 @@
+syntax = "proto3";
+
+package server_v1;
+
+option go_package = "github.com/rendau/loom/api/server_v1;server_v1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "common/common.proto";
+import "server_v1/dag.proto";
+
+// ProjectService — проекты: docker-образ и объявленные в нём даги.
+//
+// Один образ может нести несколько дагов: server запускает контейнер в
+// режиме `describe`, получает каталог образа и сохраняет его даги как
+// шаблоны проекта, пиннуя образ к digest на момент регистрации. От
+// шаблона заводят даги-инстансы (DagService.CreateDag) — сколько угодно,
+// у каждого свои расписание, пул, переменные и секреты.
+service ProjectService {
+  // RegisterProject ставит регистрацию (или перерегистрацию — новая версия
+  // образа) проекта в очередь и сразу возвращает id записи регистрации:
+  // pull + describe выполняются асинхронно, статус — через
+  // Get/ListProjectRegistration.
+  rpc RegisterProject(ProjectRegisterReq) returns (ProjectRegisterRep) {
+    option (google.api.http) = {
+      post: "/project"
+      body: "*"
+    };
+  }
+
+  rpc ListProject(ProjectListReq) returns (ProjectListRep) {
+    option (google.api.http) = {
+      get: "/project"
+    };
+  }
+
+  // GetProject отдаёт проект вместе с каталогом его образа (шаблонами).
+  rpc GetProject(ProjectGetReq) returns (ProjectMain) {
+    option (google.api.http) = {
+      get: "/project/{name}"
+    };
+  }
+
+  // SyncProject — принудительное обновление из registry: перерегистрация
+  // текущего образа проекта прямо сейчас, не дожидаясь тика
+  // авто-обновления. Кладётся в ту же очередь (source=manual).
+  rpc SyncProject(ProjectSyncReq) returns (ProjectSyncRep) {
+    option (google.api.http) = {
+      post: "/project/{name}/sync"
+      body: "*"
+    };
+  }
+
+  // SetProjectAutoUpdate включает/выключает авто-обновление образа:
+  // control plane периодически сверяет digest тега с registry и при
+  // изменении перерегистрирует проект целиком.
+  rpc SetProjectAutoUpdate(ProjectSetAutoUpdateReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      put: "/project/{name}/auto_update"
+      body: "*"
+    };
+  }
+
+  // DeleteProject удаляет проект вместе с его шаблонами и дагами.
+  rpc DeleteProject(ProjectDeleteReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/project/{name}"
+    };
+  }
+
+  // ListProjectRegistration — записи очереди регистраций, новые первыми:
+  // активные (pending|running) и недавно завершённые (старые чистятся по
+  // TTL). source=auto — перерегистрация авто-обновления по digest.
+  rpc ListProjectRegistration(ProjectRegistrationListReq) returns (ProjectRegistrationListRep) {
+    option (google.api.http) = {
+      get: "/project-registration"
+    };
+  }
+
+  rpc GetProjectRegistration(ProjectRegistrationGetReq) returns (ProjectRegistrationMain) {
+    option (google.api.http) = {
+      get: "/project-registration/{id}"
+    };
+  }
+
+  // PushDagCatalog — внутренний вызов describe-Job'а: при регистрации через
+  // kubernetes Job сам отправляет каталог образа (или ошибку) на control
+  // plane, вместо передачи через логи пода. describe_id — одноразовый
+  // секрет, выданный Job'у в env при создании.
+  rpc PushDagCatalog(DagPushCatalogReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/project/catalog"
+      body: "*"
+    };
+  }
+}
+
+// ── Messages ────────────────────────────────────────────
+
+message ProjectMain {
+  string name = 1;
+  string image = 2;
+  string image_digest = 3;
+  // Авто-обновление: poll-синк digest'а тега образа.
+  bool auto_update = 4;
+  google.protobuf.Timestamp created_at = 5;
+  optional google.protobuf.Timestamp modified_at = 6;
+  // Даги образа (каталог `describe`); заполняется в GetProject.
+  repeated ProjectTemplateMain templates = 7;
+  // Сколько дагов-инстансов заведено в проекте.
+  int32 dag_count = 8;
+  // Размер образа в registry (config + слои, сжатыми) — сколько тянет
+  // pull; 0 — registry не удалось опросить при регистрации.
+  int64 image_size_bytes = 9;
+}
+
+// ProjectTemplateMain — даг, объявленный в образе. От него заводят
+// инстансы; манифест хранится один раз здесь.
+message ProjectTemplateMain {
+  string name = 1;
+  string sdk_version = 2;
+  // Шаблон пропал из образа при последней регистрации: его инстансы
+  // работают на последнем известном манифесте.
+  bool orphaned = 3;
+  // Лимит одновременно выполняющихся ранов; 0 — без лимита.
+  int32 max_active_runs = 4;
+  repeated DagTaskMain tasks = 5;
+  // Сколько дагов-инстансов заведено от этого шаблона.
+  int32 dag_count = 6;
+  google.protobuf.Timestamp created_at = 7;
+  optional google.protobuf.Timestamp modified_at = 8;
+}
+
+// Register
+
+message ProjectRegisterReq {
+  // Имя проекта: задаётся при регистрации, дальше не меняется.
+  string name = 1;
+  string image = 2;
+  // Авто-обновление; отсутствует — сохранить текущее значение
+  // (перерегистрация не сбрасывает флаг), у нового проекта — false.
+  optional bool auto_update = 3;
+  // Заводить даги-инстансы по новым шаблонам образа (по умолчанию true):
+  // имя инстанса совпадает с именем дага в образе.
+  optional bool create_dags = 4;
+}
+
+message ProjectRegisterRep {
+  // Id записи очереди регистраций — для поллинга статуса.
+  string registration_id = 1;
+}
+
+// Registrations
+
+message ProjectRegistrationMain {
+  string id = 1;
+  string project_name = 2;
+  string image = 3;
+  string source = 4; // manual | auto (авто-обновление по digest)
+  string status = 5; // pending | running | success | failed
+  string error = 6;  // причина failed
+  optional bool auto_update = 7;
+  bool create_dags = 8;
+  // Итог по дагам образа: у каждого либо ошибка манифеста, либо признак
+  // заведённого инстанса.
+  repeated ProjectRegistrationDag result = 9;
+  google.protobuf.Timestamp created_at = 10;
+  optional google.protobuf.Timestamp started_at = 11;
+  optional google.protobuf.Timestamp finished_at = 12;
+}
+
+message ProjectRegistrationDag {
+  string name = 1;
+  string error = 2;   // пусто — шаблон зарегистрирован
+  bool created = 3;   // заведён новый даг-инстанс
+}
+
+message ProjectRegistrationListReq {
+  optional string project_name = 1;
+  // true — только незавершённые (pending | running).
+  optional bool active = 2;
+  int64 limit = 3; // 0 — дефолт сервера (50)
+}
+
+message ProjectRegistrationListRep {
+  repeated ProjectRegistrationMain results = 1;
+}
+
+message ProjectRegistrationGetReq {
+  string id = 1;
+}
+
+// List
+
+message ProjectListReq {
+  common.ListParamsSt list_params = 1;
+  optional bool auto_update = 2;
+}
+
+message ProjectListRep {
+  common.PaginationInfoSt pagination_info = 1;
+  repeated ProjectMain results = 2;
+}
+
+// Get / Sync / AutoUpdate / Delete
+
+message ProjectGetReq {
+  string name = 1;
+}
+
+message ProjectSyncReq {
+  string name = 1;
+}
+
+message ProjectSyncRep {
+  string registration_id = 1;
+}
+
+message ProjectSetAutoUpdateReq {
+  string name = 1;
+  bool auto_update = 2;
+}
+
+message ProjectDeleteReq {
+  string name = 1;
+}
+
+// PushCatalog
+
+message DagPushCatalogReq {
+  string describe_id = 1;
+  bytes catalog = 2; // JSON-каталог образа (вывод `describe`)
+  string error = 3;  // непустая — describe упал целиком
+}

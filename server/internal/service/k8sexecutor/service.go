@@ -501,7 +501,9 @@ func annotationsRef(annotations map[string]string) (runModel.AttemptRef, bool) {
 func jobName(spec runModel.LaunchSpec) string {
 	hash := refHash(spec.Ref)
 	attempt := strconv.Itoa(int(spec.Ref.Attempt))
-	dag := namePart(spec.DagName, "dag")
+	// в имя Job'а идёт «проект-даг»: имена инстансов уникальны только
+	// внутри проекта
+	dag := namePart(spec.Dag.Project+"-"+spec.Dag.Name, "dag")
 	task := namePart(spec.Ref.Task, "task")
 
 	// три разделителя между четырьмя частями после префикса

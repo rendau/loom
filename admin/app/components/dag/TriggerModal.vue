@@ -27,7 +27,7 @@ async function confirm() {
     toast.add({ title: 'Параметры должны быть JSON-объектом', color: 'error' })
     return
   }
-  const rep = await action.run(() => triggerRun(dag.name, parsed), { success: 'Ран запущен' })
+  const rep = await action.run(() => triggerRun(dag, parsed), { success: 'Ран запущен' })
   if (rep) {
     emit('close')
     await navigateTo(`/runs/${rep.run_id}`)

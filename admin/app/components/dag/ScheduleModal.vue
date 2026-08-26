@@ -26,7 +26,7 @@ async function submit() {
     return
   const value = schedule.value.trim()
   const ok = await action.run(
-    () => setDagSchedule(dag.name, value, catchup.value),
+    () => setDagSchedule(dag, value, catchup.value),
     { success: value ? 'Расписание сохранено' : 'Расписание снято' },
   )
   if (ok !== undefined)

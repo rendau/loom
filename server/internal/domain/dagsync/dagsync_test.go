@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
+	projectModel "github.com/rendau/loom/server/internal/domain/project/model"
 )
 
 type fakeResolver struct {
@@ -27,19 +27,19 @@ type fakeEnqueuer struct {
 	calls int
 }
 
-func (f *fakeEnqueuer) EnqueueAuto(_ context.Context, _, dagName string) error {
-	if dagName == "" {
-		panic("dagsync must pass known dag name")
+func (f *fakeEnqueuer) EnqueueAuto(_ context.Context, projectName, _ string) error {
+	if projectName == "" {
+		panic("dagsync must pass known project name")
 	}
 	f.calls++
 	return f.err
 }
 
-func dag(image, pinned string) *dagModel.Main {
-	return &dagModel.Main{Name: "d1", Image: image, ImageDigest: pinned, AutoUpdate: true}
+func project(image, pinned string) *projectModel.Main {
+	return &projectModel.Main{Name: "p1", Image: image, ImageDigest: pinned, AutoUpdate: true}
 }
 
-func TestSyncDag(t *testing.T) {
+func TestSyncProject(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("digest unchanged — no re-register", func(t *testing.T) {
@@ -47,7 +47,7 @@ func TestSyncDag(t *testing.T) {
 		enqueuer := &fakeEnqueuer{}
 		s := New(nil, resolver, enqueuer, 0)
 
-		require.NoError(t, s.syncDag(ctx, dag("reg/d:latest", "reg/d@sha256:aaa")))
+		require.NoError(t, s.syncProject(ctx, project("reg/d:latest", "reg/d@sha256:aaa")))
 		assert.Equal(t, 1, resolver.calls)
 		assert.Equal(t, 0, enqueuer.calls)
 	})
@@ -57,7 +57,7 @@ func TestSyncDag(t *testing.T) {
 		enqueuer := &fakeEnqueuer{}
 		s := New(nil, resolver, enqueuer, 0)
 
-		require.NoError(t, s.syncDag(ctx, dag("reg/d:latest", "reg/d@sha256:aaa")))
+		require.NoError(t, s.syncProject(ctx, project("reg/d:latest", "reg/d@sha256:aaa")))
 		assert.Equal(t, 1, enqueuer.calls)
 	})
 
@@ -65,7 +65,7 @@ func TestSyncDag(t *testing.T) {
 		resolver := &fakeResolver{}
 		s := New(nil, resolver, &fakeEnqueuer{}, 0)
 
-		require.NoError(t, s.syncDag(ctx, dag("reg/d@sha256:aaa", "reg/d@sha256:aaa")))
+		require.NoError(t, s.syncProject(ctx, project("reg/d@sha256:aaa", "reg/d@sha256:aaa")))
 		assert.Equal(t, 0, resolver.calls)
 	})
 
@@ -73,7 +73,7 @@ func TestSyncDag(t *testing.T) {
 		resolver := &fakeResolver{}
 		s := New(nil, resolver, &fakeEnqueuer{}, 0)
 
-		require.NoError(t, s.syncDag(ctx, dag("reg/d:latest", "reg/d:latest")))
+		require.NoError(t, s.syncProject(ctx, project("reg/d:latest", "reg/d:latest")))
 		assert.Equal(t, 0, resolver.calls)
 	})
 
@@ -82,7 +82,7 @@ func TestSyncDag(t *testing.T) {
 		enqueuer := &fakeEnqueuer{}
 		s := New(nil, resolver, enqueuer, 0)
 
-		require.Error(t, s.syncDag(ctx, dag("reg/d:latest", "reg/d@sha256:aaa")))
+		require.Error(t, s.syncProject(ctx, project("reg/d:latest", "reg/d@sha256:aaa")))
 		assert.Equal(t, 0, enqueuer.calls)
 	})
 
@@ -91,6 +91,6 @@ func TestSyncDag(t *testing.T) {
 		enqueuer := &fakeEnqueuer{err: fmt.Errorf("db down")}
 		s := New(nil, resolver, enqueuer, 0)
 
-		require.Error(t, s.syncDag(ctx, dag("reg/d:latest", "reg/d@sha256:aaa")))
+		require.Error(t, s.syncProject(ctx, project("reg/d:latest", "reg/d@sha256:aaa")))
 	})
 }

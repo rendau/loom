@@ -1,6 +1,6 @@
 // demo-etl — пример дага на loom SDK: extract → (stream) → transform → load.
 //
-//	go run ./demo-etl describe   # JSON-манифест
+//	go run ./demo-etl describe   # JSON-каталог образа
 //	go run ./demo-etl run        # локальный запуск целиком
 package main
 

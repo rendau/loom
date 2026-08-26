@@ -7,34 +7,22 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/rendau/loom/server/internal/domain/dag/manifest"
 	"github.com/rendau/loom/server/internal/domain/dag/model"
-	dagregModel "github.com/rendau/loom/server/internal/domain/dagreg/model"
 	statsModel "github.com/rendau/loom/server/internal/domain/stats/model"
 	"github.com/rendau/loom/server/internal/errs"
 	"github.com/rendau/loom/server/internal/util"
 )
 
-// maxManifestSize — предохранитель на манифест из PushDagManifest.
-const maxManifestSize = 1 << 20
-
 type Usecase struct {
-	svc           ServiceI
-	inspector     ImageInspectorI
-	pools         PoolCheckerI
-	sink          ManifestSinkI // nil — регистрация не через describe-Job (EXECUTOR != k8s)
-	registrations RegistrationsI
-	stats         StatsI
-	authz         AuthzI
+	svc      ServiceI
+	projects ProjectsI
+	pools    PoolCheckerI
+	stats    StatsI
+	authz    AuthzI
 }
 
-func New(svc ServiceI, inspector ImageInspectorI, pools PoolCheckerI, sink ManifestSinkI,
-	registrations RegistrationsI, stats StatsI, authz AuthzI,
-) *Usecase {
-	return &Usecase{
-		svc: svc, inspector: inspector, pools: pools, sink: sink,
-		registrations: registrations, stats: stats, authz: authz,
-	}
+func New(svc ServiceI, projects ProjectsI, pools PoolCheckerI, stats StatsI, authz AuthzI) *Usecase {
+	return &Usecase{svc: svc, projects: projects, pools: pools, stats: stats, authz: authz}
 }
 
 const lastRunsPerDag = 5
@@ -50,40 +38,121 @@ func (u *Usecase) List(ctx context.Context, pars *model.ListReq) ([]*model.Main,
 
 	// статус-стрип: последние раны дособираются одним запросом на страницу
 	lastRuns, err := u.svc.ListLastRuns(ctx,
-		lo.Map(items, func(d *model.Main, _ int) string { return d.Name }), lastRunsPerDag)
+		lo.Map(items, func(d *model.Main, _ int) model.Ref { return d.Ref }), lastRunsPerDag)
 	if err != nil {
 		return nil, 0, fmt.Errorf("svc.ListLastRuns: %w", err)
 	}
 	for _, d := range items {
-		d.LastRuns = lastRuns[d.Name]
+		d.LastRuns = lastRuns[d.Ref]
 	}
 
 	return items, tCount, nil
 }
 
-func (u *Usecase) Get(ctx context.Context, name string) (*model.Main, error) {
-	result, _, err := u.svc.Get(ctx, name, true)
+func (u *Usecase) Get(ctx context.Context, ref model.Ref) (*model.Main, error) {
+	if ref.Empty() {
+		return nil, errs.IdRequired
+	}
+
+	result, _, err := u.svc.Get(ctx, ref, true)
 	if err != nil {
 		return nil, fmt.Errorf("svc.Get: %w", err)
 	}
 
-	lastRuns, err := u.svc.ListLastRuns(ctx, []string{name}, lastRunsPerDag)
+	lastRuns, err := u.svc.ListLastRuns(ctx, []model.Ref{ref}, lastRunsPerDag)
 	if err != nil {
 		return nil, fmt.Errorf("svc.ListLastRuns: %w", err)
 	}
-	result.LastRuns = lastRuns[name]
+	result.LastRuns = lastRuns[ref]
 
+	return result, nil
+}
+
+// CreateSpec — заведение дага-инстанса от шаблона образа с желаемыми
+// настройками (nil — не задано).
+type CreateSpec struct {
+	Project  string
+	Template string
+	Name     string // пусто — имя шаблона
+	Schedule *string
+	Catchup  *bool
+	Paused   *bool
+	Pool     *string
+}
+
+// Create заводит даг от шаблона проекта: от одного шаблона инстансов может
+// быть сколько угодно, различаются они настройками и своими переменными.
+func (u *Usecase) Create(ctx context.Context, spec CreateSpec) (*model.Main, error) {
+	if spec.Project == "" || spec.Template == "" {
+		return nil, errs.IdRequired
+	}
+	if err := u.authz.RequireProject(ctx, spec.Project); err != nil {
+		return nil, err
+	}
+
+	// шаблон должен быть в образе: инстанс без манифеста нечем запускать
+	if _, _, err := u.projects.GetTemplate(ctx, spec.Project, spec.Template, true); err != nil {
+		return nil, fmt.Errorf("projects.GetTemplate: %w", err)
+	}
+
+	// расписание и пул валидируем до создания — ошибку формы нужно вернуть
+	// сразу, а не оставлять полусозданный даг
+	if spec.Schedule != nil && *spec.Schedule != "" {
+		if _, err := util.CronNext(*spec.Schedule, time.Now()); err != nil {
+			return nil, errs.ErrFull{Err: errs.InvalidRequest,
+				Desc: fmt.Sprintf("некорректное расписание %q: %v", *spec.Schedule, err)}
+		}
+	}
+	if spec.Pool != nil && *spec.Pool != "" {
+		if err := u.pools.CheckExist(ctx, []string{*spec.Pool}); err != nil {
+			return nil, err
+		}
+	}
+
+	name := spec.Name
+	if name == "" {
+		name = spec.Template
+	}
+	ref := model.NewRef(spec.Project, name)
+
+	result, err := u.svc.Create(ctx, ref, spec.Template)
+	if err != nil {
+		return nil, fmt.Errorf("svc.Create: %w", err)
+	}
+
+	// порядок paused → schedule: cron не должен стрельнуть до паузы
+	if spec.Paused != nil && *spec.Paused {
+		if err = u.svc.SetPaused(ctx, ref, true); err != nil {
+			return nil, fmt.Errorf("svc.SetPaused: %w", err)
+		}
+	}
+	if spec.Pool != nil && *spec.Pool != "" {
+		if err = u.svc.SetPool(ctx, ref, *spec.Pool); err != nil {
+			return nil, fmt.Errorf("svc.SetPool: %w", err)
+		}
+	}
+	if spec.Schedule != nil && *spec.Schedule != "" {
+		if err = u.svc.SetSchedule(ctx, ref, *spec.Schedule, lo.FromPtr(spec.Catchup)); err != nil {
+			return nil, fmt.Errorf("svc.SetSchedule: %w", err)
+		}
+	}
+
+	if spec.Paused != nil || spec.Pool != nil || spec.Schedule != nil {
+		if result, _, err = u.svc.Get(ctx, ref, true); err != nil {
+			return nil, fmt.Errorf("svc.Get: %w", err)
+		}
+	}
 	return result, nil
 }
 
 // GetStats — агрегаты по таскам дага за последние lastRuns завершённых
 // ранов («жирные таски»); lastRuns 0 — дефолт, потолок — защита от тяжёлых
 // запросов.
-func (u *Usecase) GetStats(ctx context.Context, name string, lastRuns int64) (int64, []statsModel.TaskStat, error) {
-	if name == "" {
+func (u *Usecase) GetStats(ctx context.Context, ref model.Ref, lastRuns int64) (int64, []statsModel.TaskStat, error) {
+	if ref.Empty() {
 		return 0, nil, errs.IdRequired
 	}
-	if _, _, err := u.svc.Get(ctx, name, true); err != nil {
+	if _, _, err := u.svc.Get(ctx, ref, true); err != nil {
 		return 0, nil, fmt.Errorf("svc.Get: %w", err)
 	}
 
@@ -94,216 +163,73 @@ func (u *Usecase) GetStats(ctx context.Context, name string, lastRuns int64) (in
 		lastRuns = 100
 	}
 
-	runs, stats, err := u.stats.DagStats(ctx, name, lastRuns)
+	runs, stats, err := u.stats.DagStats(ctx, ref, lastRuns)
 	if err != nil {
 		return 0, nil, fmt.Errorf("stats.DagStats: %w", err)
 	}
 	return runs, stats, nil
 }
 
-// Register ставит регистрацию дага в очередь и сразу возвращает запись
-// регистрации: pull + describe выполняются асинхронно (статус — через
-// Get/ListRegistrations). Желаемые настройки (schedule/catchup/paused)
-// применяются только если даг создаётся впервые; autoUpdate nil — сохранить
-// текущее значение флага.
-func (u *Usecase) Register(ctx context.Context, spec dagregModel.EnqueueSpec) (*dagregModel.Main, error) {
-	if spec.Image == "" {
-		return nil, errs.ImageRequired
-	}
-
-	// расписание валидируем до постановки в очередь — ошибка формы должна
-	// вернуться сразу, а не статусом failed через минуты pull'а
-	if spec.Schedule != nil && *spec.Schedule != "" {
-		if _, err := util.CronNext(*spec.Schedule, time.Now()); err != nil {
-			return nil, errs.ErrFull{Err: errs.InvalidRequest,
-				Desc: fmt.Sprintf("некорректное расписание %q: %v", *spec.Schedule, err)}
-		}
-	}
-
-	// пул — тоже до очереди: ошибку «нет такого пула» нужно вернуть форме
-	if spec.Pool != nil && *spec.Pool != "" {
-		if err := u.pools.CheckExist(ctx, []string{*spec.Pool}); err != nil {
-			return nil, err
-		}
-	}
-
-	spec.Source = dagregModel.SourceManual
-	spec.DagName = ""
-
-	reg, err := u.registrations.Enqueue(ctx, spec)
-	if err != nil {
-		return nil, fmt.Errorf("registrations.Enqueue: %w", err)
-	}
-	return reg, nil
-}
-
-// Process — собственно обработка регистрации из очереди (dagreg.ProcessorI):
-// инспекция образа (пиннинг digest + `describe`) → валидация манифеста →
-// сохранение. Имя дага берётся из манифеста; повторная регистрация обновляет
-// образ и манифест, настройки дага не трогает.
-func (u *Usecase) Process(ctx context.Context, reg *dagregModel.Main) (string, error) {
-	digest, raw, err := u.inspector.Inspect(ctx, reg.Image)
-	if err != nil {
-		return reg.DagName, fmt.Errorf("инспекция образа: %w", err)
-	}
-
-	m, err := manifest.Parse(raw)
-	if err != nil {
-		return reg.DagName, fmt.Errorf("разбор манифеста: %w", err)
-	}
-
-	_, existed, err := u.svc.Get(ctx, m.Name, false)
-	if err != nil {
-		return m.Name, fmt.Errorf("svc.Get: %w", err)
-	}
-
-	if _, err = u.svc.Register(ctx, reg.Image, digest, raw, m, reg.AutoUpdate); err != nil {
-		return m.Name, fmt.Errorf("svc.Register: %w", err)
-	}
-
-	// желаемые настройки — только новому дагу; порядок paused → schedule,
-	// чтобы cron не успел стрельнуть до постановки на паузу
-	if !existed {
-		if reg.Paused != nil && *reg.Paused {
-			if err = u.svc.SetPaused(ctx, m.Name, true); err != nil {
-				return m.Name, fmt.Errorf("svc.SetPaused: %w", err)
-			}
-		}
-		if reg.Pool != nil && *reg.Pool != "" {
-			if err = u.svc.SetPool(ctx, m.Name, *reg.Pool); err != nil {
-				return m.Name, fmt.Errorf("svc.SetPool: %w", err)
-			}
-		}
-		if reg.Schedule != nil && *reg.Schedule != "" {
-			if err = u.svc.SetSchedule(ctx, m.Name, *reg.Schedule, lo.FromPtr(reg.Catchup)); err != nil {
-				return m.Name, fmt.Errorf("svc.SetSchedule: %w", err)
-			}
-		}
-	}
-	return m.Name, nil
-}
-
-// Sync — принудительное обновление дага из registry: перерегистрация его
-// текущего образа прямо сейчас, не дожидаясь тика авто-обновления. Образ
-// берётся из записи дага (тег, каким его задали при регистрации), поэтому
-// pull + describe подтягивают актуальное содержимое тега; digest и манифест
-// дага переписываются результатом, настройки — нет.
-func (u *Usecase) Sync(ctx context.Context, name string) (*dagregModel.Main, error) {
-	if name == "" {
-		return nil, errs.IdRequired
-	}
-
-	dag, _, err := u.svc.Get(ctx, name, true)
-	if err != nil {
-		return nil, fmt.Errorf("svc.Get: %w", err)
-	}
-
-	reg, err := u.registrations.Enqueue(ctx, dagregModel.EnqueueSpec{
-		Image:   dag.Image,
-		Source:  dagregModel.SourceManual,
-		DagName: dag.Name,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("registrations.Enqueue: %w", err)
-	}
-	return reg, nil
-}
-
-func (u *Usecase) GetRegistration(ctx context.Context, id string) (*dagregModel.Main, error) {
-	if id == "" {
-		return nil, errs.IdRequired
-	}
-	result, err := u.registrations.Get(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("registrations.Get: %w", err)
-	}
-	return result, nil
-}
-
-func (u *Usecase) ListRegistrations(ctx context.Context, req *dagregModel.ListReq) ([]*dagregModel.Main, error) {
-	items, err := u.registrations.List(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("registrations.List: %w", err)
-	}
-	return items, nil
-}
-
-// PushManifest — приём манифеста от describe-Job'а: доставка
-// ожидающей регистрации по одноразовому describe_id.
-func (u *Usecase) PushManifest(_ context.Context, id string, manifest []byte, errMsg string) error {
-	if id == "" {
-		return errs.IdRequired
-	}
-	if len(manifest) > maxManifestSize {
-		return errs.ErrFull{Err: errs.InvalidRequest, Desc: fmt.Sprintf("manifest too large: %d bytes", len(manifest))}
-	}
-
-	if u.sink == nil || !u.sink.Deliver(id, manifest, errMsg) {
-		return errs.ErrFull{Err: errs.ObjectNotFound, Desc: "unknown describe id"}
-	}
-	return nil
-}
-
 // ListTaskResources — оверрайды ресурсов тасков дага (читают все
 // аутентифицированные, как и сам даг).
-func (u *Usecase) ListTaskResources(ctx context.Context, name string) ([]*model.TaskResourcesEntry, error) {
-	if name == "" {
+func (u *Usecase) ListTaskResources(ctx context.Context, ref model.Ref) ([]*model.TaskResourcesEntry, error) {
+	if ref.Empty() {
 		return nil, errs.IdRequired
 	}
-	items, err := u.svc.ListTaskResources(ctx, name)
+	items, err := u.svc.ListTaskResources(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("svc.ListTaskResources: %w", err)
 	}
 	return items, nil
 }
 
-func (u *Usecase) SetTaskResources(ctx context.Context, name, task string, res model.TaskResources) error {
-	if name == "" || task == "" {
+func (u *Usecase) SetTaskResources(ctx context.Context, ref model.Ref, task string, res model.TaskResources) error {
+	if ref.Empty() || task == "" {
 		return errs.IdRequired
 	}
-	if err := u.authz.RequireDag(ctx, name); err != nil {
+	if err := u.authz.RequireDag(ctx, ref); err != nil {
 		return err
 	}
-	if err := u.svc.SetTaskResources(ctx, name, task, res); err != nil {
+	if err := u.svc.SetTaskResources(ctx, ref, task, res); err != nil {
 		return fmt.Errorf("svc.SetTaskResources: %w", err)
 	}
 	return nil
 }
 
-func (u *Usecase) DeleteTaskResources(ctx context.Context, name, task string) error {
-	if name == "" || task == "" {
+func (u *Usecase) DeleteTaskResources(ctx context.Context, ref model.Ref, task string) error {
+	if ref.Empty() || task == "" {
 		return errs.IdRequired
 	}
-	if err := u.authz.RequireDag(ctx, name); err != nil {
+	if err := u.authz.RequireDag(ctx, ref); err != nil {
 		return err
 	}
-	if err := u.svc.DeleteTaskResources(ctx, name, task); err != nil {
+	if err := u.svc.DeleteTaskResources(ctx, ref, task); err != nil {
 		return fmt.Errorf("svc.DeleteTaskResources: %w", err)
 	}
 	return nil
 }
 
-func (u *Usecase) SetSchedule(ctx context.Context, name, schedule string, catchup bool) error {
-	if name == "" {
+func (u *Usecase) SetSchedule(ctx context.Context, ref model.Ref, schedule string, catchup bool) error {
+	if ref.Empty() {
 		return errs.IdRequired
 	}
-	if err := u.authz.RequireDag(ctx, name); err != nil {
+	if err := u.authz.RequireDag(ctx, ref); err != nil {
 		return err
 	}
-	if err := u.svc.SetSchedule(ctx, name, schedule, catchup); err != nil {
+	if err := u.svc.SetSchedule(ctx, ref, schedule, catchup); err != nil {
 		return fmt.Errorf("svc.SetSchedule: %w", err)
 	}
 	return nil
 }
 
-func (u *Usecase) SetPaused(ctx context.Context, name string, paused bool) error {
-	if name == "" {
+func (u *Usecase) SetPaused(ctx context.Context, ref model.Ref, paused bool) error {
+	if ref.Empty() {
 		return errs.IdRequired
 	}
-	if err := u.authz.RequireDag(ctx, name); err != nil {
+	if err := u.authz.RequireDag(ctx, ref); err != nil {
 		return err
 	}
-	if err := u.svc.SetPaused(ctx, name, paused); err != nil {
+	if err := u.svc.SetPaused(ctx, ref, paused); err != nil {
 		return fmt.Errorf("svc.SetPaused: %w", err)
 	}
 	return nil
@@ -311,11 +237,11 @@ func (u *Usecase) SetPaused(ctx context.Context, name string, paused bool) error
 
 // SetPool задаёт (или снимает — пустая строка) пул слотов дага. Пул
 // действует на все таски дага; смена применяется со следующего рана.
-func (u *Usecase) SetPool(ctx context.Context, name, pool string) error {
-	if name == "" {
+func (u *Usecase) SetPool(ctx context.Context, ref model.Ref, pool string) error {
+	if ref.Empty() {
 		return errs.IdRequired
 	}
-	if err := u.authz.RequireDag(ctx, name); err != nil {
+	if err := u.authz.RequireDag(ctx, ref); err != nil {
 		return err
 	}
 	// неизвестный пул навсегда оставил бы таски дага в очереди
@@ -324,27 +250,20 @@ func (u *Usecase) SetPool(ctx context.Context, name, pool string) error {
 			return err
 		}
 	}
-	if err := u.svc.SetPool(ctx, name, pool); err != nil {
+	if err := u.svc.SetPool(ctx, ref, pool); err != nil {
 		return fmt.Errorf("svc.SetPool: %w", err)
 	}
 	return nil
 }
 
-func (u *Usecase) SetAutoUpdate(ctx context.Context, name string, autoUpdate bool) error {
-	if name == "" {
+func (u *Usecase) Delete(ctx context.Context, ref model.Ref) error {
+	if ref.Empty() {
 		return errs.IdRequired
 	}
-	if err := u.svc.SetAutoUpdate(ctx, name, autoUpdate); err != nil {
-		return fmt.Errorf("svc.SetAutoUpdate: %w", err)
+	if err := u.authz.RequireDag(ctx, ref); err != nil {
+		return err
 	}
-	return nil
-}
-
-func (u *Usecase) Delete(ctx context.Context, name string) error {
-	if name == "" {
-		return errs.IdRequired
-	}
-	if err := u.svc.Delete(ctx, name); err != nil {
+	if err := u.svc.Delete(ctx, ref); err != nil {
 		return fmt.Errorf("svc.Delete: %w", err)
 	}
 	return nil

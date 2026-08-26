@@ -35,7 +35,8 @@ const (
 type UserServiceClient interface {
 	ListUser(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*UserListRep, error)
 	CreateUser(ctx context.Context, in *UserCreateReq, opts ...grpc.CallOption) (*UserMain, error)
-	// UpdateUser меняет заданные поля: пароль, роль, набор назначенных дагов.
+	// UpdateUser меняет заданные поля: пароль, роль, наборы назначенных
+	// дагов и проектов.
 	UpdateUser(ctx context.Context, in *UserUpdateReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	DeleteUser(ctx context.Context, in *UserDeleteReq, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
@@ -97,7 +98,8 @@ func (c *userServiceClient) DeleteUser(ctx context.Context, in *UserDeleteReq, o
 type UserServiceServer interface {
 	ListUser(context.Context, *emptypb.Empty) (*UserListRep, error)
 	CreateUser(context.Context, *UserCreateReq) (*UserMain, error)
-	// UpdateUser меняет заданные поля: пароль, роль, набор назначенных дагов.
+	// UpdateUser меняет заданные поля: пароль, роль, наборы назначенных
+	// дагов и проектов.
 	UpdateUser(context.Context, *UserUpdateReq) (*emptypb.Empty, error)
 	DeleteUser(context.Context, *UserDeleteReq) (*emptypb.Empty, error)
 	mustEmbedUnimplementedUserServiceServer()

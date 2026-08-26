@@ -8,7 +8,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/samber/lo"
+
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	"github.com/rendau/loom/server/internal/domain/user/model"
 )
 
@@ -143,38 +146,44 @@ func (r *Repo) LockUsers(ctx context.Context) error {
 
 // ── назначенные даги ────────────────────────────────────
 
-func (r *Repo) SetUserDags(ctx context.Context, userId string, dagNames []string) error {
+func (r *Repo) SetUserDags(ctx context.Context, userId string, dags []dagModel.Ref) error {
 	conn := r.TxM.GetConnection(ctx)
 	if _, err := conn.Exec(ctx, `DELETE FROM user_dag WHERE user_id = $1`, userId); err != nil {
 		return fmt.Errorf("SetUserDags delete: %w", err)
 	}
-	if len(dagNames) == 0 {
+	if len(dags) == 0 {
 		return nil
 	}
+
+	projects := lo.Map(dags, func(v dagModel.Ref, _ int) string { return v.Project })
+	names := lo.Map(dags, func(v dagModel.Ref, _ int) string { return v.Name })
+
 	_, err := conn.Exec(ctx, `
-		INSERT INTO user_dag (user_id, dag_name)
-		SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`, userId, dagNames)
+		INSERT INTO user_dag (user_id, project_name, dag_name)
+		SELECT $1, * FROM unnest($2::text[], $3::text[]) ON CONFLICT DO NOTHING`,
+		userId, projects, names)
 	if err != nil {
 		return fmt.Errorf("SetUserDags insert: %w", err)
 	}
 	return nil
 }
 
-func (r *Repo) ListUserDags(ctx context.Context, userId string) ([]string, error) {
-	rows, err := r.TxM.GetConnection(ctx).Query(ctx,
-		`SELECT dag_name FROM user_dag WHERE user_id = $1 ORDER BY dag_name`, userId)
+func (r *Repo) ListUserDags(ctx context.Context, userId string) ([]dagModel.Ref, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx, `
+		SELECT project_name, dag_name FROM user_dag
+		WHERE user_id = $1 ORDER BY project_name, dag_name`, userId)
 	if err != nil {
 		return nil, fmt.Errorf("ListUserDags: %w", err)
 	}
 	defer rows.Close()
 
-	var result []string
+	var result []dagModel.Ref
 	for rows.Next() {
-		var name string
-		if err = rows.Scan(&name); err != nil {
+		var ref dagModel.Ref
+		if err = rows.Scan(&ref.Project, &ref.Name); err != nil {
 			return nil, fmt.Errorf("ListUserDags scan: %w", err)
 		}
-		result = append(result, name)
+		result = append(result, ref)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("ListUserDags rows: %w", err)
@@ -182,13 +191,67 @@ func (r *Repo) ListUserDags(ctx context.Context, userId string) ([]string, error
 	return result, nil
 }
 
-func (r *Repo) HasUserDag(ctx context.Context, userId, dagName string) (bool, error) {
+func (r *Repo) HasUserDag(ctx context.Context, userId string, ref dagModel.Ref) (bool, error) {
 	var exists bool
 	err := r.TxM.GetConnection(ctx).QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM user_dag WHERE user_id = $1 AND dag_name = $2)`,
-		userId, dagName).Scan(&exists)
+		SELECT EXISTS (
+			SELECT 1 FROM user_dag
+			WHERE user_id = $1 AND project_name = $2 AND dag_name = $3)`,
+		userId, ref.Project, ref.Name).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("HasUserDag: %w", err)
+	}
+	return exists, nil
+}
+
+// ── права на проекты: даг проекта считается назначенным целиком ─────────
+
+func (r *Repo) SetUserProjects(ctx context.Context, userId string, projects []string) error {
+	conn := r.TxM.GetConnection(ctx)
+	if _, err := conn.Exec(ctx, `DELETE FROM user_project WHERE user_id = $1`, userId); err != nil {
+		return fmt.Errorf("SetUserProjects delete: %w", err)
+	}
+	if len(projects) == 0 {
+		return nil
+	}
+	_, err := conn.Exec(ctx, `
+		INSERT INTO user_project (user_id, project_name)
+		SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`, userId, projects)
+	if err != nil {
+		return fmt.Errorf("SetUserProjects insert: %w", err)
+	}
+	return nil
+}
+
+func (r *Repo) ListUserProjects(ctx context.Context, userId string) ([]string, error) {
+	rows, err := r.TxM.GetConnection(ctx).Query(ctx,
+		`SELECT project_name FROM user_project WHERE user_id = $1 ORDER BY project_name`, userId)
+	if err != nil {
+		return nil, fmt.Errorf("ListUserProjects: %w", err)
+	}
+	defer rows.Close()
+
+	var result []string
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("ListUserProjects scan: %w", err)
+		}
+		result = append(result, name)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListUserProjects rows: %w", err)
+	}
+	return result, nil
+}
+
+func (r *Repo) HasUserProject(ctx context.Context, userId, project string) (bool, error) {
+	var exists bool
+	err := r.TxM.GetConnection(ctx).QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM user_project WHERE user_id = $1 AND project_name = $2)`,
+		userId, project).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("HasUserProject: %w", err)
 	}
 	return exists, nil
 }

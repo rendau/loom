@@ -1,7 +1,7 @@
 // Package service — переменные для env-инъекции в поды тасков: как секреты,
-// но значения хранятся открыто и видны в админке. Скоупы: dag_name = "" —
-// глобальный, иначе локальный для дага; локальный перекрывает глобальный
-// при резолве в Launch.
+// но значения хранятся открыто и видны в админке. Скоупы трёхуровневые
+// (глобальный → проект → даг); более узкий перекрывает более широкий при
+// резолве в Launch.
 package service
 
 import (
@@ -11,6 +11,7 @@ import (
 
 	"github.com/samber/lo"
 
+	commonModel "github.com/rendau/loom/server/internal/domain/common/model"
 	"github.com/rendau/loom/server/internal/domain/variable/model"
 	"github.com/rendau/loom/server/internal/errs"
 )
@@ -26,10 +27,10 @@ func New(repoDb RepoDbI) *Service {
 	return &Service{repoDb: repoDb}
 }
 
-// List — переменные со значениями; dagName nil — все скоупы, "" — только
-// глобальные, имя дага — только его локальные.
-func (s *Service) List(ctx context.Context, dagName *string) ([]*model.Main, error) {
-	items, err := s.repoDb.List(ctx, dagName)
+// List — переменные со значениями; scope nil — все скоупы, иначе только
+// указанный.
+func (s *Service) List(ctx context.Context, scope *commonModel.Scope) ([]*model.Main, error) {
+	items, err := s.repoDb.List(ctx, scope)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.List: %w", err)
 	}
@@ -37,7 +38,10 @@ func (s *Service) List(ctx context.Context, dagName *string) ([]*model.Main, err
 }
 
 // Set создаёт переменную или перезаписывает значение существующей.
-func (s *Service) Set(ctx context.Context, dagName, name, value string) error {
+func (s *Service) Set(ctx context.Context, scope commonModel.Scope, name, value string) error {
+	if !scope.Valid() {
+		return errs.ErrFull{Err: errs.InvalidRequest, Desc: "некорректный скоуп"}
+	}
 	if !nameRe.MatchString(name) {
 		return errs.ErrFull{Err: errs.InvalidRequest, Desc: fmt.Sprintf("недопустимое имя переменной %q", name)}
 	}
@@ -46,14 +50,14 @@ func (s *Service) Set(ctx context.Context, dagName, name, value string) error {
 			Desc: fmt.Sprintf("значение больше лимита %d байт", model.MaxValueSize)}
 	}
 
-	if err := s.repoDb.Set(ctx, dagName, name, value); err != nil {
+	if err := s.repoDb.Set(ctx, scope, name, value); err != nil {
 		return fmt.Errorf("repoDb.Set: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) Delete(ctx context.Context, dagName, name string) error {
-	found, err := s.repoDb.Delete(ctx, dagName, name)
+func (s *Service) Delete(ctx context.Context, scope commonModel.Scope, name string) error {
+	found, err := s.repoDb.Delete(ctx, scope, name)
 	if err != nil {
 		return fmt.Errorf("repoDb.Delete: %w", err)
 	}
@@ -64,10 +68,10 @@ func (s *Service) Delete(ctx context.Context, dagName, name string) error {
 }
 
 // ResolveValues возвращает значения переменных для инъекции в env попытки
-// дага (локальный скоуп перекрывает глобальный); любая отсутствующая
+// дага (даг перекрывает проект, проект — глобальный); любая отсутствующая
 // переменная — ошибка (попытка не должна стартовать с пустой переменной).
-func (s *Service) ResolveValues(ctx context.Context, dagName string, names []string) (map[string]model.Resolved, error) {
-	values, err := s.repoDb.GetValues(ctx, dagName, names)
+func (s *Service) ResolveValues(ctx context.Context, scope commonModel.Scope, names []string) (map[string]model.Resolved, error) {
+	values, err := s.repoDb.GetValues(ctx, scope, names)
 	if err != nil {
 		return nil, fmt.Errorf("repoDb.GetValues: %w", err)
 	}

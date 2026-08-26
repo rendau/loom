@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	"github.com/rendau/loom/server/internal/domain/user/model"
 )
 
@@ -17,9 +18,12 @@ type RepoDbI interface {
 	CountUsers(ctx context.Context) (int64, error)
 	LockUsers(ctx context.Context) error
 
-	SetUserDags(ctx context.Context, userId string, dagNames []string) error
-	ListUserDags(ctx context.Context, userId string) ([]string, error)
-	HasUserDag(ctx context.Context, userId, dagName string) (bool, error)
+	SetUserDags(ctx context.Context, userId string, dags []dagModel.Ref) error
+	ListUserDags(ctx context.Context, userId string) ([]dagModel.Ref, error)
+	HasUserDag(ctx context.Context, userId string, ref dagModel.Ref) (bool, error)
+	SetUserProjects(ctx context.Context, userId string, projects []string) error
+	ListUserProjects(ctx context.Context, userId string) ([]string, error)
+	HasUserProject(ctx context.Context, userId, project string) (bool, error)
 
 	CreateSession(ctx context.Context, tokenHash, userId string, expiresAt time.Time) error
 	GetSessionUser(ctx context.Context, tokenHash string) (*model.Main, bool, error)

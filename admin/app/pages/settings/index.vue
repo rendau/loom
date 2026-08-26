@@ -20,7 +20,7 @@ const values = ref<Record<string, string>>({})
 async function load() {
   loading.value = true
   try {
-    stored.value = (await listSettings('')).results ?? []
+    stored.value = (await listSettings(globalScope)).results ?? []
     loadError.value = ''
     const next: Record<string, string> = {}
     for (const def of settingDefs)
@@ -55,7 +55,7 @@ function isValid(name: string): boolean {
 
 async function save(name: string) {
   const value = (values.value[name] ?? '').trim()
-  const ok = await action.run(() => setSetting('', name, value), { success: 'Настройка сохранена' })
+  const ok = await action.run(() => setSetting(globalScope, name, value), { success: 'Настройка сохранена' })
   if (ok !== undefined)
     await load()
 }

@@ -80,7 +80,11 @@ service RunService {
 
 message RunMain {
   string id = 1;
-  string dag_name = 2;
+  // Даг рана: проект + имя инстанса.
+  string project = 2;
+  string dag_name = 12;
+  // Имя дага в образе, которым запускаются таски (env LOOM_DAG).
+  string template = 13;
   string image = 3;
   string image_digest = 4;
   string trigger = 5; // manual | schedule | backfill
@@ -124,6 +128,7 @@ message AttemptMain {
 // Trigger
 
 message RunTriggerReq {
+  string project = 3;
   string dag_name = 1;
   // Параметры рана (JSON-объект ≤ 64KB), таскам доступны через
   // LOOM_RUN_PARAMS / rt.Params().
@@ -138,6 +143,8 @@ message RunTriggerRep {
 
 message RunListReq {
   common.ListParamsSt list_params = 1;
+  // Фильтры: конкретный даг (project + dag_name) или все раны проекта.
+  optional string project = 4;
   optional string dag_name = 2;
   optional string status = 3;
 }
@@ -169,6 +176,7 @@ message RunCancelReq {
 // Backfill
 
 message RunBackfillReq {
+  string project = 5;
   string dag_name = 1;
   google.protobuf.Timestamp from = 2; // включительно
   google.protobuf.Timestamp to = 3;   // исключительно
@@ -200,7 +208,8 @@ message RunEnvMain {
   string env = 1;   // имя env-переменной в контейнере
   string kind = 2;  // variable | secret
   string name = 3;  // имя переменной/секрета control plane
-  string scope = 4; // '' — глобальный скоуп, иначе имя дага
+  // Источник значения: глобальный скоуп, проект или даг.
+  common.ScopeSt scope = 4;
   string value = 5; // значение переменной; у секретов всегда пусто
   google.protobuf.Timestamp resolved_at = 6;
 }
@@ -208,6 +217,7 @@ message RunEnvMain {
 // Count
 
 message RunCountReq {
+  optional string project = 2;
   optional string dag_name = 1;
 }
 

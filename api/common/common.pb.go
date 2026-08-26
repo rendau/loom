@@ -157,6 +157,61 @@ func (x *PaginationInfoSt) GetTotalCount() int64 {
 	return 0
 }
 
+// ScopeSt — скоуп переменной, секрета или настройки: пустые оба поля —
+// глобальный, только project — проектный, оба — скоуп конкретного дага.
+// Более узкий перекрывает более широкий при резолве в момент запуска.
+type ScopeSt struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Dag           string                 `protobuf:"bytes,2,opt,name=dag,proto3" json:"dag,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScopeSt) Reset() {
+	*x = ScopeSt{}
+	mi := &file_common_common_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScopeSt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScopeSt) ProtoMessage() {}
+
+func (x *ScopeSt) ProtoReflect() protoreflect.Message {
+	mi := &file_common_common_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScopeSt.ProtoReflect.Descriptor instead.
+func (*ScopeSt) Descriptor() ([]byte, []int) {
+	return file_common_common_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ScopeSt) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
+}
+
+func (x *ScopeSt) GetDag() string {
+	if x != nil {
+		return x.Dag
+	}
+	return ""
+}
+
 type ErrorRep struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -168,7 +223,7 @@ type ErrorRep struct {
 
 func (x *ErrorRep) Reset() {
 	*x = ErrorRep{}
-	mi := &file_common_common_proto_msgTypes[2]
+	mi := &file_common_common_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -180,7 +235,7 @@ func (x *ErrorRep) String() string {
 func (*ErrorRep) ProtoMessage() {}
 
 func (x *ErrorRep) ProtoReflect() protoreflect.Message {
-	mi := &file_common_common_proto_msgTypes[2]
+	mi := &file_common_common_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -193,7 +248,7 @@ func (x *ErrorRep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorRep.ProtoReflect.Descriptor instead.
 func (*ErrorRep) Descriptor() ([]byte, []int) {
-	return file_common_common_proto_rawDescGZIP(), []int{2}
+	return file_common_common_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ErrorRep) GetCode() string {
@@ -233,7 +288,10 @@ const file_common_common_proto_rawDesc = "" +
 	"\x04page\x18\x01 \x01(\x03R\x04page\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x03R\bpageSize\x12\x1f\n" +
 	"\vtotal_count\x18\x03 \x01(\x03R\n" +
-	"totalCount\"\xa9\x01\n" +
+	"totalCount\"5\n" +
+	"\aScopeSt\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x10\n" +
+	"\x03dag\x18\x02 \x01(\tR\x03dag\"\xa9\x01\n" +
 	"\bErrorRep\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x124\n" +
@@ -254,15 +312,16 @@ func file_common_common_proto_rawDescGZIP() []byte {
 	return file_common_common_proto_rawDescData
 }
 
-var file_common_common_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_common_common_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_common_common_proto_goTypes = []any{
 	(*ListParamsSt)(nil),     // 0: common.ListParamsSt
 	(*PaginationInfoSt)(nil), // 1: common.PaginationInfoSt
-	(*ErrorRep)(nil),         // 2: common.ErrorRep
-	nil,                      // 3: common.ErrorRep.FieldsEntry
+	(*ScopeSt)(nil),          // 2: common.ScopeSt
+	(*ErrorRep)(nil),         // 3: common.ErrorRep
+	nil,                      // 4: common.ErrorRep.FieldsEntry
 }
 var file_common_common_proto_depIdxs = []int32{
-	3, // 0: common.ErrorRep.fields:type_name -> common.ErrorRep.FieldsEntry
+	4, // 0: common.ErrorRep.fields:type_name -> common.ErrorRep.FieldsEntry
 	1, // [1:1] is the sub-list for method output_type
 	1, // [1:1] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
@@ -281,7 +340,7 @@ func file_common_common_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_common_common_proto_rawDesc), len(file_common_common_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

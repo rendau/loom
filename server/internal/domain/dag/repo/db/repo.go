@@ -13,15 +13,24 @@ import (
 	repoModel "github.com/rendau/loom/server/internal/domain/dag/repo/db/model"
 )
 
+// Repo читает даги из view dag_full (даг + образ проекта + манифест
+// шаблона), а пишет в таблицу dag — отсюда два ModelStore.
 type Repo struct {
 	*commonRepoPg.Base
 	ModelStore *mobone.ModelStore
+	WriteStore *mobone.ModelStore
 }
 
 func New(base *commonRepoPg.Base) *Repo {
 	return &Repo{
 		Base: base,
 		ModelStore: &mobone.ModelStore{
+			Con:                base.Con,
+			TransactionManager: base.TxM,
+			QB:                 base.QB,
+			TableName:          "dag_full",
+		},
+		WriteStore: &mobone.ModelStore{
 			Con:                base.Con,
 			TransactionManager: base.TxM,
 			QB:                 base.QB,
@@ -56,8 +65,8 @@ func (r *Repo) List(ctx context.Context, pars *model.ListReq) ([]*model.Main, in
 	return lo.Map(items, repoModel.EncodeSelect), totalCount, nil
 }
 
-func (r *Repo) Get(ctx context.Context, name string) (*model.Main, bool, error) {
-	m := &repoModel.Select{Name: name}
+func (r *Repo) Get(ctx context.Context, ref model.Ref) (*model.Main, bool, error) {
+	m := &repoModel.Select{ProjectName: ref.Project, Name: ref.Name}
 	found, err := r.ModelStore.Get(ctx, m)
 	if err != nil {
 		return nil, false, fmt.Errorf("ModelStore.Get: %w", err)
@@ -68,28 +77,28 @@ func (r *Repo) Get(ctx context.Context, name string) (*model.Main, bool, error) 
 	return repoModel.EncodeSelect(m, 0), true, nil
 }
 
-func (r *Repo) UpdateOrCreate(ctx context.Context, name string, obj *model.Edit) error {
+func (r *Repo) Create(ctx context.Context, ref model.Ref, obj *model.Edit) error {
 	m := repoModel.DecodeUpsert(obj)
-	m.PKName = name
-	if err := r.ModelStore.UpdateOrCreate(ctx, m); err != nil {
-		return fmt.Errorf("ModelStore.UpdateOrCreate: %w", err)
+	m.PKProject, m.PKName = ref.Project, ref.Name
+	if err := r.WriteStore.Create(ctx, m); err != nil {
+		return fmt.Errorf("WriteStore.Create: %w", err)
 	}
 	return nil
 }
 
-func (r *Repo) Update(ctx context.Context, name string, obj *model.Edit) error {
+func (r *Repo) Update(ctx context.Context, ref model.Ref, obj *model.Edit) error {
 	m := repoModel.DecodeUpsert(obj)
-	m.PKName = name
-	if err := r.ModelStore.Update(ctx, m); err != nil {
-		return fmt.Errorf("ModelStore.Update: %w", err)
+	m.PKProject, m.PKName = ref.Project, ref.Name
+	if err := r.WriteStore.Update(ctx, m); err != nil {
+		return fmt.Errorf("WriteStore.Update: %w", err)
 	}
 	return nil
 }
 
-func (r *Repo) Delete(ctx context.Context, name string) error {
-	m := &repoModel.Upsert{PKName: name}
-	if err := r.ModelStore.Delete(ctx, m); err != nil {
-		return fmt.Errorf("ModelStore.Delete: %w", err)
+func (r *Repo) Delete(ctx context.Context, ref model.Ref) error {
+	m := &repoModel.Upsert{PKProject: ref.Project, PKName: ref.Name}
+	if err := r.WriteStore.Delete(ctx, m); err != nil {
+		return fmt.Errorf("WriteStore.Delete: %w", err)
 	}
 	return nil
 }

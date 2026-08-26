@@ -1,6 +1,6 @@
 // Package registrycli — лёгкий клиент Docker Registry HTTP API v2 для
-// авто-обновления дагов: резолв текущего digest'а тега без
-// скачивания образа (HEAD /v2/<repo>/manifests/<tag>). Поддерживает
+// авто-обновления дагов: резолв текущего digest'а тега и размера образа
+// без его скачивания (HEAD/GET /v2/<repo>/manifests/<ref>). Поддерживает
 // anonymous-доступ, Basic и token-auth (Bearer challenge, как у ghcr и
 // Docker Hub); креды — стандартный docker config.json (путь в
 // REGISTRY_AUTH_FILE). localhost-registry опрашивается по http (как в
@@ -21,6 +21,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/samber/lo"
 )
 
 const (
@@ -77,6 +79,114 @@ func (s *Service) ResolveDigest(ctx context.Context, image string) (string, erro
 		return "", fmt.Errorf("registry %s: no digest for %s:%s", ref.host, ref.repo, ref.tag)
 	}
 	return digest, nil
+}
+
+// ResolveSize возвращает размер образа в registry — сумму config'а и слоёв
+// так, как они там лежат (сжатыми): это объём, который тянет pull. Размер
+// на диске после распаковки больше, но он зависит от узла, а не от образа,
+// и в k8s его неоткуда взять — registry един для обоих executor'ов.
+// Мультиплатформенный образ (индекс) считается по linux-манифесту.
+func (s *Service) ResolveSize(ctx context.Context, image string) (int64, error) {
+	ref, err := parseRef(image)
+	if err != nil {
+		return 0, err
+	}
+
+	reference := ref.tag
+	if ref.digest != "" {
+		reference = ref.digest
+	}
+	return s.manifestSize(ctx, ref, reference, false)
+}
+
+// manifestSize скачивает манифест и складывает размеры; indexed — признак
+// того, что это уже разыменование индекса (вложенные индексы не бывают, а
+// цикл по битому registry нам не нужен).
+func (s *Service) manifestSize(ctx context.Context, ref imageRef, reference string, indexed bool) (int64, error) {
+	manifestUrl := fmt.Sprintf("%s://%s/v2/%s/manifests/%s", ref.scheme(), ref.host, ref.repo, reference)
+
+	body, err := s.fetchManifestBody(ctx, manifestUrl, ref, "")
+	if err != nil {
+		return 0, err
+	}
+
+	var m manifestDoc
+	if err = json.Unmarshal(body, &m); err != nil {
+		return 0, fmt.Errorf("decode manifest: %w", err)
+	}
+
+	if len(m.Manifests) > 0 {
+		if indexed {
+			return 0, fmt.Errorf("registry %s: nested manifest index for %s", ref.host, ref.repo)
+		}
+		// в индексе кроме образов лежат attestation'ы (platform
+		// unknown/unknown) — они не то, что тянет pull
+		child, ok := lo.Find(m.Manifests, func(v manifestEntry) bool {
+			return v.Platform.Os == "linux" &&
+				v.Platform.Architecture != "" && v.Platform.Architecture != "unknown"
+		})
+		if !ok {
+			return 0, fmt.Errorf("registry %s: no linux manifest for %s", ref.host, ref.repo)
+		}
+		return s.manifestSize(ctx, ref, child.Digest, true)
+	}
+
+	return m.Config.Size + lo.SumBy(m.Layers, func(l manifestBlob) int64 { return l.Size }), nil
+}
+
+// manifestDoc — то, что нужно от манифеста (или индекса) для размера:
+// блобы образа либо список платформенных манифестов.
+type manifestDoc struct {
+	Config    manifestBlob    `json:"config"`
+	Layers    []manifestBlob  `json:"layers"`
+	Manifests []manifestEntry `json:"manifests"` // непусто — это индекс
+}
+
+type manifestBlob struct {
+	Size int64 `json:"size"`
+}
+
+type manifestEntry struct {
+	Digest   string `json:"digest"`
+	Platform struct {
+		Os           string `json:"os"`
+		Architecture string `json:"architecture"`
+	} `json:"platform"`
+}
+
+// fetchManifestBody — GET манифеста с прохождением auth-challenge.
+func (s *Service) fetchManifestBody(ctx context.Context, manifestUrl string, ref imageRef, authHeader string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", acceptManifests)
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("registry request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized && authHeader == "" {
+		header, authErr := s.authorize(ctx, resp.Header.Get("WWW-Authenticate"), ref)
+		if authErr != nil {
+			return nil, authErr
+		}
+		return s.fetchManifestBody(ctx, manifestUrl, ref, header)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("registry %s: GET manifest %s: HTTP %d", ref.host, ref.repo, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodySize))
+	if err != nil {
+		return nil, fmt.Errorf("read manifest: %w", err)
+	}
+	return body, nil
 }
 
 // fetchDigest делает запрос манифеста, при 401 проходит auth-challenge и

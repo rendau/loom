@@ -2,16 +2,18 @@
 import type { TableColumn } from '@nuxt/ui'
 import { setSecret } from '~/api/secret.api'
 import { setVariable } from '~/api/variable.api'
+import type { DagRef, Scope } from '~/types/common'
 import type { DagEnvRequirement } from '~/utils/dagenv'
 
 // Что даг требует от окружения: переменные и секреты, объявленные в его
 // коде (манифест describe), рядом — заведено ли значение и в каком скоупе.
-// Заполнить можно прямо отсюда: глобально (значение увидят все даги) или
-// локально для дага (перекрывает глобальное). Данные грузит карточка дага
+// Заполнить можно прямо отсюда: глобально (значение увидят все даги), на
+// проект (все даги образа) или на этот даг — более узкий скоуп перекрывает
+// более широкий. Данные грузит карточка дага
 // (useDagEnvRequirements) — счётчик «не заполнено» нужен ей самой для бейджа.
 
 const props = defineProps<{
-  dagName: string
+  dagRef: DagRef
   requirements: DagEnvRequirement[]
   loading?: boolean
   loadError?: string
@@ -19,7 +21,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ reload: [] }>()
 
-const { isAdmin, canManageDag } = useAuth()
+const { isAdmin, canManageDag, canManageProject } = useAuth()
 
 const action = useApiAction()
 
@@ -35,32 +37,79 @@ const columns: TableColumn<DagEnvRequirement>[] = [
 ]
 
 // право заполнить в конкретном скоупе: глобальный — только admin,
-// локальный — владелец дага
-function canManageScope(scope: string): boolean {
-  return canManageDag(scope || undefined)
+// проектный — владелец проекта, скоуп дага — владелец дага
+function canManageScope(scope: Scope): boolean {
+  switch (scopeKind(scope)) {
+    case 'dag':
+      return canManageDag({ project: scope.project, name: scope.dag })
+    case 'project':
+      return canManageProject(scope.project)
+    default:
+      return isAdmin.value
+  }
 }
 
-const canFillSomething = computed(() => isAdmin.value || canManageDag(props.dagName))
+const canFillSomething = computed(() => isAdmin.value || canManageDag(props.dagRef))
 
 // ── заполнение значения ────────────────────────────────
 
-const GLOBAL_SCOPE = '__global__'
+// reka-ui Select работает со строками — скоупы кодируются метками
+const SCOPE_GLOBAL = 'global'
+const SCOPE_PROJECT = 'project'
+const SCOPE_DAG = 'dag'
 
 const editOpen = ref(false)
 const editTarget = ref<DagEnvRequirement | null>(null)
-const editScope = ref<string>(GLOBAL_SCOPE)
+const editScope = ref<string>(SCOPE_GLOBAL)
 const editValue = ref('')
 
 const editScopeItems = computed(() => [
-  { label: 'Глобально — для всех дагов', value: GLOBAL_SCOPE, disabled: !isAdmin.value },
-  { label: `Локально — только для дага ${props.dagName}`, value: props.dagName, disabled: !canManageDag(props.dagName) },
+  { label: 'Глобально — для всех дагов', value: SCOPE_GLOBAL, disabled: !isAdmin.value },
+  {
+    label: `Проект ${props.dagRef.project} — все даги образа`,
+    value: SCOPE_PROJECT,
+    disabled: !canManageProject(props.dagRef.project),
+  },
+  {
+    label: `Только даг ${props.dagRef.name}`,
+    value: SCOPE_DAG,
+    disabled: !canManageDag(props.dagRef),
+  },
 ])
+
+// метка скоупа записи → значение селекта
+function scopeValue(scope: Scope): string {
+  switch (scopeKind(scope)) {
+    case 'dag':
+      return SCOPE_DAG
+    case 'project':
+      return SCOPE_PROJECT
+    default:
+      return SCOPE_GLOBAL
+  }
+}
+
+// значение селекта → скоуп записи
+function selectedScope(): Scope {
+  switch (editScope.value) {
+    case SCOPE_DAG:
+      return dagScope(props.dagRef)
+    case SCOPE_PROJECT:
+      return projectScope(props.dagRef.project)
+    default:
+      return globalScope
+  }
+}
 
 function openEdit(req: DagEnvRequirement) {
   editTarget.value = req
-  // уже заполненное правим в его же скоупе, новое — в том, где есть права
-  // (по умолчанию локально: значение одного дага реже задевает соседей)
-  editScope.value = req.scope === '' ? GLOBAL_SCOPE : req.scope ?? (canManageDag(props.dagName) ? props.dagName : GLOBAL_SCOPE)
+  // уже заполненное правим в его же скоупе, новое — в самом узком, где
+  // есть права: значение одного дага реже задевает соседей
+  editScope.value = req.scope
+    ? scopeValue(req.scope)
+    : canManageDag(props.dagRef)
+      ? SCOPE_DAG
+      : canManageProject(props.dagRef.project) ? SCOPE_PROJECT : SCOPE_GLOBAL
   editValue.value = req.kind === 'variable' && req.scope !== undefined ? (req.value ?? '') : ''
   editOpen.value = true
 }
@@ -85,7 +134,7 @@ async function submit() {
   const req = editTarget.value
   if (!req || !canSubmit.value)
     return
-  const scope = editScope.value === GLOBAL_SCOPE ? '' : editScope.value
+  const scope = selectedScope()
   const isVariable = req.kind === 'variable'
   const ok = await action.run(
     () => isVariable ? setVariable(scope, req.name, editValue.value) : setSecret(scope, req.name, editValue.value),
@@ -101,8 +150,8 @@ async function submit() {
 // ссылка на запись в общем разделе /env (там правка, удаление, история)
 function envLink(req: DagEnvRequirement): string {
   const query = new URLSearchParams({ kind: req.kind, q: req.name })
-  if (req.scope)
-    query.set('dag_name', req.scope)
+  if (req.scope && !scopeEq(req.scope, globalScope))
+    query.set('scope', scopeLabel(req.scope))
   return `/env?${query.toString()}`
 }
 </script>
@@ -152,11 +201,17 @@ function envLink(req: DagEnvRequirement): string {
                 >
                   {{ row.original.name }}
                 </NuxtLink>
-                <UBadge v-if="row.original.scope === ''" color="neutral" variant="subtle" size="sm">
-                  глобальная
-                </UBadge>
-                <UBadge v-else-if="row.original.scope !== undefined" color="info" variant="subtle" size="sm">
-                  локальная
+                <UBadge
+                  v-if="row.original.scope !== undefined"
+                  :color="scopeKind(row.original.scope) === 'dag'
+                    ? 'info'
+                    : scopeKind(row.original.scope) === 'project' ? 'primary' : 'neutral'"
+                  variant="subtle"
+                  size="sm"
+                >
+                  {{ scopeKind(row.original.scope) === 'dag'
+                    ? 'дага'
+                    : scopeKind(row.original.scope) === 'project' ? 'проекта' : 'глобальная' }}
                 </UBadge>
               </div>
               <p v-if="row.original.description" class="mt-0.5 max-w-100 text-xs text-muted">
@@ -215,7 +270,7 @@ function envLink(req: DagEnvRequirement): string {
       <UIcon name="i-lucide-info" class="size-3.5 shrink-0" />
       <span>
         Состав задаёт код дага (обновляется при регистрации образа), значения — админка.
-        Локальное значение перекрывает глобальное с тем же именем. Полный список записей —
+        Значение дага перекрывает значение проекта, а оно — глобальное. Полный список записей —
         в разделе <NuxtLink to="/env" class="text-primary hover:underline">Переменные и секреты</NuxtLink>.
       </span>
     </p>
@@ -223,7 +278,7 @@ function envLink(req: DagEnvRequirement): string {
     <UModal v-model:open="editOpen" :title="editTitle" :description="editTarget?.description || undefined">
       <template #body>
         <div class="space-y-4">
-          <UFormField label="Скоуп" hint="локальный перекрывает глобальный">
+          <UFormField label="Скоуп" hint="более узкий перекрывает более широкий">
             <USelect v-model="editScope" :items="editScopeItems" value-key="value" class="w-full" />
           </UFormField>
           <UFormField

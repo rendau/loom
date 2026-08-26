@@ -2,6 +2,7 @@ import type { Ref } from 'vue'
 import { apiErrorMessage } from '~/api/client'
 import { listSecrets } from '~/api/secret.api'
 import { listVariables } from '~/api/variable.api'
+import type { DagRef } from '~/types/common'
 import type { DagTask } from '~/types/dag'
 import type { SecretMeta } from '~/types/secret'
 import type { Variable } from '~/types/variable'
@@ -10,7 +11,7 @@ import type { Variable } from '~/types/variable'
 // заполненность — из записей переменных и секретов. Загрузку держит
 // карточка дага, а не таба: счётчик «не заполнено» нужен на бейдже до
 // того, как табу открыли.
-export function useDagEnvRequirements(dagName: Ref<string>, tasks: Ref<DagTask[]>) {
+export function useDagEnvRequirements(dagRef: Ref<DagRef>, tasks: Ref<DagTask[]>) {
   const variables = ref<Variable[]>([])
   const secrets = ref<SecretMeta[]>([])
   const loading = ref(false)
@@ -33,7 +34,7 @@ export function useDagEnvRequirements(dagName: Ref<string>, tasks: Ref<DagTask[]
   }
 
   const requirements = computed(() =>
-    resolveDagEnv(tasks.value, dagName.value, variables.value, secrets.value))
+    resolveDagEnv(tasks.value, dagRef.value, variables.value, secrets.value))
 
   const missing = computed(() => countMissingEnv(requirements.value))
 

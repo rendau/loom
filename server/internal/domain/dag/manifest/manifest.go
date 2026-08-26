@@ -1,6 +1,7 @@
-// Package manifest — разбор JSON-манифеста дага (вывод `describe` SDK).
-// Единственное место на server, знающее этот формат: им пользуются repo
-// дага и рана, планировщик и регистрация образа.
+// Package manifest — разбор JSON-каталога образа и манифестов дагов
+// (вывод `describe` SDK). Единственное место на server, знающее этот
+// формат: им пользуются repo шаблона и рана, планировщик и регистрация
+// образа.
 package manifest
 
 import (
@@ -12,8 +13,19 @@ import (
 	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 )
 
+// catalogDTO — вывод `describe`: даги образа и общая на образ версия SDK.
+type catalogDTO struct {
+	SdkVersion string          `json:"sdk_version"`
+	Dags       []catalogDagDTO `json:"dags"`
+}
+
+type catalogDagDTO struct {
+	Name     string           `json:"name"`
+	Manifest *json.RawMessage `json:"manifest"`
+	Error    string           `json:"error"`
+}
+
 type manifestDTO struct {
-	SdkVersion    string         `json:"sdk_version"`
 	Name          string         `json:"name"`
 	MaxActiveRuns int            `json:"max_active_runs"`
 	Tasks         []manifestTask `json:"tasks"`
@@ -55,6 +67,37 @@ type manifestResources struct {
 	MemoryLimit   string `json:"memory_limit"`
 }
 
+// ParseCatalog разбирает вывод `describe`. Манифест каждого дага
+// сохраняется и в исходном виде (Raw): он снапшотится в шаблон и в ран.
+func ParseCatalog(raw []byte) (*dagModel.Catalog, error) {
+	var c catalogDTO
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return nil, fmt.Errorf("unmarshal catalog: %w", err)
+	}
+
+	result := &dagModel.Catalog{
+		SdkVersion: c.SdkVersion,
+		Dags:       make([]dagModel.CatalogDag, 0, len(c.Dags)),
+	}
+
+	for _, d := range c.Dags {
+		item := dagModel.CatalogDag{Name: d.Name, Error: d.Error}
+
+		if d.Manifest != nil {
+			m, err := Parse(*d.Manifest)
+			if err != nil {
+				return nil, fmt.Errorf("dag %q: %w", d.Name, err)
+			}
+			item.Manifest = m
+			item.Raw = *d.Manifest
+		}
+
+		result.Dags = append(result.Dags, item)
+	}
+
+	return result, nil
+}
+
 func Parse(raw []byte) (*dagModel.Manifest, error) {
 	var m manifestDTO
 	if err := json.Unmarshal(raw, &m); err != nil {
@@ -62,7 +105,6 @@ func Parse(raw []byte) (*dagModel.Manifest, error) {
 	}
 
 	return &dagModel.Manifest{
-		SdkVersion:    m.SdkVersion,
 		Name:          m.Name,
 		MaxActiveRuns: m.MaxActiveRuns,
 		Tasks:         lo.Map(m.Tasks, encodeManifestTask),

@@ -1,12 +1,19 @@
 import { apiFetch } from '~/api/client'
-import type { ListParams, PaginationInfo } from '~/types/common'
+import type { DagRef, ListParams, PaginationInfo } from '~/types/common'
 import type { DagTask } from '~/types/dag'
 import type { Attempt, Run, RunCount, RunEnv, TaskInstance, TaskValue } from '~/types/run'
 
 export type RunListQuery = {
   list_params: ListParams
+  // Фильтры: конкретный даг (project + dag_name) или все раны проекта.
+  project?: string
   dag_name?: string
   status?: string
+}
+
+// Фильтр списка ранов по дагу: пара задаётся целиком.
+export function runDagQuery(ref?: DagRef) {
+  return ref ? { project: ref.project, dag_name: ref.name } : {}
 }
 
 export function listRuns(query: RunListQuery) {
@@ -26,19 +33,19 @@ export function getRun(id: string) {
   }>(`/run/${encodeURIComponent(id)}`)
 }
 
-export function triggerRun(dagName: string, params?: Record<string, unknown>) {
+export function triggerRun(ref: DagRef, params?: Record<string, unknown>) {
   return apiFetch<{ run_id: string }>('/run', {
     method: 'POST',
-    body: { dag_name: dagName, ...(params ? { params } : {}) },
+    body: { project: ref.project, dag_name: ref.name, ...(params ? { params } : {}) },
   })
 }
 
 // Backfill: по рану на каждый тик cron-расписания в [from, to) —
 // ISO-таймстампы; params — общие параметры всех создаваемых ранов.
-export function backfillRuns(dagName: string, from: string, to: string, params?: Record<string, unknown>) {
+export function backfillRuns(ref: DagRef, from: string, to: string, params?: Record<string, unknown>) {
   return apiFetch<{ run_ids: string[] }>('/run/backfill', {
     method: 'POST',
-    body: { dag_name: dagName, from, to, ...(params ? { params } : {}) },
+    body: { project: ref.project, dag_name: ref.name, from, to, ...(params ? { params } : {}) },
   })
 }
 
@@ -47,8 +54,8 @@ export function listRunValues(runId: string) {
 }
 
 // Счётчики ранов по статусам — для фильтров-чипов списка.
-export function countRuns(dagName?: string) {
-  return apiFetch<RunCount>('/run-count', { query: { dag_name: dagName } })
+export function countRuns(ref?: DagRef) {
+  return apiFetch<RunCount>('/run-count', { query: runDagQuery(ref) })
 }
 
 // Принудительная остановка выполняющегося рана: живые попытки убиваются,

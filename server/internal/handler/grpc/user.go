@@ -8,6 +8,7 @@ import (
 
 	pb "github.com/rendau/loom/api/server_v1"
 	userModel "github.com/rendau/loom/server/internal/domain/user/model"
+	"github.com/rendau/loom/server/internal/handler/grpc/dto"
 	userUsc "github.com/rendau/loom/server/internal/usecase/user"
 )
 
@@ -36,7 +37,8 @@ func (h *User) CreateUser(ctx context.Context, req *pb.UserCreateReq) (*pb.UserM
 		Username: req.GetUsername(),
 		Password: req.GetPassword(),
 		Role:     req.GetRole(),
-		DagNames: req.GetDagNames(),
+		Dags:     lo.Map(req.GetDags(), dto.DecodeDagRefPb),
+		Projects: req.GetProjects(),
 	})
 	if err != nil {
 		return nil, encodeErr(err)
@@ -48,8 +50,10 @@ func (h *User) UpdateUser(ctx context.Context, req *pb.UserUpdateReq) (*emptypb.
 	err := h.usecase.Update(ctx, req.GetId(), userModel.UpdateSpec{
 		Password:    req.Password,
 		Role:        req.Role,
-		DagNames:    req.GetDagNames(),
-		SetDagNames: req.GetSetDagNames(),
+		Dags:        lo.Map(req.GetDags(), dto.DecodeDagRefPb),
+		Projects:    req.GetProjects(),
+		SetDags:     req.GetSetDags(),
+		SetProjects: req.GetSetProjects(),
 	})
 	if err != nil {
 		return nil, encodeErr(err)

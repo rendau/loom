@@ -17,6 +17,7 @@ import (
 const (
 	EnvServerAddr   = "LOOM_SERVER_ADDR"   // адрес control plane (значения тасков); пусто — без PushValue/PullValue
 	EnvArtifactAddr = "LOOM_ARTIFACT_ADDR" // адрес artifact-сервера (data plane: артефакты и лог-стрим)
+	EnvDag          = "LOOM_DAG"           // имя дага в образе (образ несёт несколько); пусто — если даг один
 	EnvRunID        = "LOOM_RUN_ID"
 	EnvTask         = "LOOM_TASK"
 	EnvAttempt      = "LOOM_ATTEMPT"

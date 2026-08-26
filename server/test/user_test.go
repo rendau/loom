@@ -12,6 +12,7 @@ import (
 	"github.com/rendau/loom/server/internal/authctx"
 	"github.com/rendau/loom/server/internal/authz"
 	commonRepoPg "github.com/rendau/loom/server/internal/domain/common/repo/pg"
+	dagModel "github.com/rendau/loom/server/internal/domain/dag/model"
 	userModel "github.com/rendau/loom/server/internal/domain/user/model"
 	userDb "github.com/rendau/loom/server/internal/domain/user/repo/db"
 	userService "github.com/rendau/loom/server/internal/domain/user/service"
@@ -108,15 +109,15 @@ func TestUserDagPermissions(t *testing.T) {
 		Username: "analyst",
 		Password: "analyst-pass",
 		Role:     userModel.RoleUser,
-		DagNames: []string{dagName},
+		Dags:     []dagModel.Ref{dagName},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, []string{dagName}, user.DagNames)
+	assert.Equal(t, []dagModel.Ref{dagName}, user.Dags)
 
 	adminInfo := userModel.AuthInfo{UserId: admin.Id, Role: userModel.RoleAdmin}
 	userInfo := userModel.AuthInfo{UserId: user.Id, Role: userModel.RoleUser}
 
-	for _, dag := range []string{dagName, otherDag, ""} {
+	for _, dag := range []dagModel.Ref{dagName, otherDag, {}} {
 		allowed, aErr := svc.CanManageDag(ctx, adminInfo, dag)
 		require.NoError(t, aErr)
 		assert.True(t, allowed, "admin может всё, даг %q", dag)
@@ -130,16 +131,34 @@ func TestUserDagPermissions(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, allowed, "чужой даг недоступен")
 
-	allowed, err = svc.CanManageDag(ctx, userInfo, "")
+	allowed, err = svc.CanManageDag(ctx, userInfo, dagModel.Ref{})
 	require.NoError(t, err)
 	assert.False(t, allowed, "глобальный скоуп — только admin")
+
+	// назначенный проект открывает все его даги, включая заведённые позже
+	projectUser, err := svc.Create(ctx, userModel.CreateSpec{
+		Username: "project-analyst",
+		Password: "analyst-pass",
+		Role:     userModel.RoleUser,
+		Projects: []string{otherDag.Project},
+	})
+	require.NoError(t, err)
+	projectInfo := userModel.AuthInfo{UserId: projectUser.Id, Role: userModel.RoleUser}
+
+	allowed, err = svc.CanManageDag(ctx, projectInfo, otherDag)
+	require.NoError(t, err)
+	assert.True(t, allowed, "даг назначенного проекта доступен")
+
+	allowed, err = svc.CanManageDag(ctx, projectInfo, dagName)
+	require.NoError(t, err)
+	assert.False(t, allowed, "даг чужого проекта недоступен")
 
 	// повышение до admin очищает назначения (ему доступны все даги)
 	require.NoError(t, svc.Update(ctx, user.Id, userModel.UpdateSpec{Role: new(userModel.RoleAdmin)}))
 	updated, err := svc.Get(ctx, user.Id)
 	require.NoError(t, err)
 	assert.Equal(t, userModel.RoleAdmin, updated.Role)
-	assert.Empty(t, updated.DagNames)
+	assert.Empty(t, updated.Dags)
 
 	// дубль логина отклоняется
 	_, err = svc.Create(ctx, userModel.CreateSpec{
@@ -177,7 +196,7 @@ func TestRunUsecasePermissions(t *testing.T) {
 	require.NoError(t, err)
 	user, err := svc.Create(ctx, userModel.CreateSpec{
 		Username: "analyst", Password: "analyst-pass",
-		Role: userModel.RoleUser, DagNames: []string{owned},
+		Role: userModel.RoleUser, Dags: []dagModel.Ref{owned},
 	})
 	require.NoError(t, err)
 

@@ -26,28 +26,20 @@ func NewDag(uc *dagUsc.Usecase) *Dag {
 	return &Dag{usecase: uc}
 }
 
-func (h *Dag) RegisterDag(ctx context.Context, req *pb.DagRegisterReq) (*pb.DagRegisterRep, error) {
-	reg, err := h.usecase.Register(ctx, dto.DecodeDagRegisterReq(req))
+func (h *Dag) CreateDag(ctx context.Context, req *pb.DagCreateReq) (*pb.DagMain, error) {
+	item, err := h.usecase.Create(ctx, dagUsc.CreateSpec{
+		Project:  req.GetProject(),
+		Template: req.GetTemplate(),
+		Name:     req.GetName(),
+		Schedule: req.Schedule,
+		Catchup:  req.Catchup,
+		Paused:   req.Paused,
+		Pool:     req.Pool,
+	})
 	if err != nil {
 		return nil, encodeErr(err)
 	}
-	return &pb.DagRegisterRep{RegistrationId: reg.Id}, nil
-}
-
-func (h *Dag) ListDagRegistration(ctx context.Context, req *pb.DagRegistrationListReq) (*pb.DagRegistrationListRep, error) {
-	items, err := h.usecase.ListRegistrations(ctx, dto.DecodeDagRegistrationListReq(req))
-	if err != nil {
-		return nil, encodeErr(err)
-	}
-	return &pb.DagRegistrationListRep{Results: lo.Map(items, dto.EncodeDagRegistrationMain)}, nil
-}
-
-func (h *Dag) GetDagRegistration(ctx context.Context, req *pb.DagRegistrationGetReq) (*pb.DagRegistrationMain, error) {
-	item, err := h.usecase.GetRegistration(ctx, req.GetId())
-	if err != nil {
-		return nil, encodeErr(err)
-	}
-	return dto.EncodeDagRegistrationMain(item, 0), nil
+	return dto.EncodeDagMain(item, 0), nil
 }
 
 func (h *Dag) ListDag(ctx context.Context, req *pb.DagListReq) (*pb.DagListRep, error) {
@@ -71,7 +63,7 @@ func (h *Dag) ListDag(ctx context.Context, req *pb.DagListReq) (*pb.DagListRep, 
 }
 
 func (h *Dag) GetDag(ctx context.Context, req *pb.DagGetReq) (*pb.DagMain, error) {
-	item, err := h.usecase.Get(ctx, req.GetName())
+	item, err := h.usecase.Get(ctx, dto.DecodeDagRef(req.GetProject(), req.GetName()))
 	if err != nil {
 		return nil, encodeErr(err)
 	}
@@ -79,7 +71,8 @@ func (h *Dag) GetDag(ctx context.Context, req *pb.DagGetReq) (*pb.DagMain, error
 }
 
 func (h *Dag) GetDagStats(ctx context.Context, req *pb.DagStatsReq) (*pb.DagStatsRep, error) {
-	runs, stats, err := h.usecase.GetStats(ctx, req.GetName(), int64(req.GetLastRuns()))
+	runs, stats, err := h.usecase.GetStats(ctx,
+		dto.DecodeDagRef(req.GetProject(), req.GetName()), int64(req.GetLastRuns()))
 	if err != nil {
 		return nil, encodeErr(err)
 	}
@@ -100,59 +93,39 @@ func (h *Dag) GetDagStats(ctx context.Context, req *pb.DagStatsReq) (*pb.DagStat
 }
 
 func (h *Dag) SetDagSchedule(ctx context.Context, req *pb.DagSetScheduleReq) (*emptypb.Empty, error) {
-	if err := h.usecase.SetSchedule(ctx, req.GetName(), req.GetSchedule(), req.GetCatchup()); err != nil {
+	err := h.usecase.SetSchedule(ctx, dto.DecodeDagRef(req.GetProject(), req.GetName()),
+		req.GetSchedule(), req.GetCatchup())
+	if err != nil {
 		return nil, encodeErr(err)
 	}
 	return &emptypb.Empty{}, nil
 }
 
 func (h *Dag) SetDagPaused(ctx context.Context, req *pb.DagSetPausedReq) (*emptypb.Empty, error) {
-	if err := h.usecase.SetPaused(ctx, req.GetName(), req.GetPaused()); err != nil {
+	err := h.usecase.SetPaused(ctx, dto.DecodeDagRef(req.GetProject(), req.GetName()), req.GetPaused())
+	if err != nil {
 		return nil, encodeErr(err)
 	}
 	return &emptypb.Empty{}, nil
 }
 
 func (h *Dag) SetDagPool(ctx context.Context, req *pb.DagSetPoolReq) (*emptypb.Empty, error) {
-	if err := h.usecase.SetPool(ctx, req.GetName(), req.GetPool()); err != nil {
-		return nil, encodeErr(err)
-	}
-	return &emptypb.Empty{}, nil
-}
-
-func (h *Dag) SyncDag(ctx context.Context, req *pb.DagSyncReq) (*pb.DagSyncRep, error) {
-	reg, err := h.usecase.Sync(ctx, req.GetName())
+	err := h.usecase.SetPool(ctx, dto.DecodeDagRef(req.GetProject(), req.GetName()), req.GetPool())
 	if err != nil {
-		return nil, encodeErr(err)
-	}
-	return &pb.DagSyncRep{RegistrationId: reg.Id}, nil
-}
-
-func (h *Dag) SetDagAutoUpdate(ctx context.Context, req *pb.DagSetAutoUpdateReq) (*emptypb.Empty, error) {
-	if err := h.usecase.SetAutoUpdate(ctx, req.GetName(), req.GetAutoUpdate()); err != nil {
 		return nil, encodeErr(err)
 	}
 	return &emptypb.Empty{}, nil
 }
 
 func (h *Dag) DeleteDag(ctx context.Context, req *pb.DagDeleteReq) (*emptypb.Empty, error) {
-	if err := h.usecase.Delete(ctx, req.GetName()); err != nil {
-		return nil, encodeErr(err)
-	}
-	return &emptypb.Empty{}, nil
-}
-
-// PushDagManifest — внутренний вызов describe-Job'а; вместо
-// токена его авторизует одноразовый непубличный describe_id.
-func (h *Dag) PushDagManifest(ctx context.Context, req *pb.DagPushManifestReq) (*emptypb.Empty, error) {
-	if err := h.usecase.PushManifest(ctx, req.GetDescribeId(), req.GetManifest(), req.GetError()); err != nil {
+	if err := h.usecase.Delete(ctx, dto.DecodeDagRef(req.GetProject(), req.GetName())); err != nil {
 		return nil, encodeErr(err)
 	}
 	return &emptypb.Empty{}, nil
 }
 
 func (h *Dag) ListTaskResources(ctx context.Context, req *pb.TaskResourcesListReq) (*pb.TaskResourcesListRep, error) {
-	items, err := h.usecase.ListTaskResources(ctx, req.GetName())
+	items, err := h.usecase.ListTaskResources(ctx, dto.DecodeDagRef(req.GetProject(), req.GetName()))
 	if err != nil {
 		return nil, encodeErr(err)
 	}
@@ -160,12 +133,13 @@ func (h *Dag) ListTaskResources(ctx context.Context, req *pb.TaskResourcesListRe
 }
 
 func (h *Dag) SetTaskResources(ctx context.Context, req *pb.TaskResourcesSetReq) (*emptypb.Empty, error) {
-	err := h.usecase.SetTaskResources(ctx, req.GetName(), req.GetTask(), dagModel.TaskResources{
-		CPURequest:    req.GetCpuRequest(),
-		CPULimit:      req.GetCpuLimit(),
-		MemoryRequest: req.GetMemoryRequest(),
-		MemoryLimit:   req.GetMemoryLimit(),
-	})
+	err := h.usecase.SetTaskResources(ctx, dto.DecodeDagRef(req.GetProject(), req.GetName()),
+		req.GetTask(), dagModel.TaskResources{
+			CPURequest:    req.GetCpuRequest(),
+			CPULimit:      req.GetCpuLimit(),
+			MemoryRequest: req.GetMemoryRequest(),
+			MemoryLimit:   req.GetMemoryLimit(),
+		})
 	if err != nil {
 		return nil, encodeErr(err)
 	}
@@ -173,7 +147,9 @@ func (h *Dag) SetTaskResources(ctx context.Context, req *pb.TaskResourcesSetReq)
 }
 
 func (h *Dag) DeleteTaskResources(ctx context.Context, req *pb.TaskResourcesDeleteReq) (*emptypb.Empty, error) {
-	if err := h.usecase.DeleteTaskResources(ctx, req.GetName(), req.GetTask()); err != nil {
+	err := h.usecase.DeleteTaskResources(ctx,
+		dto.DecodeDagRef(req.GetProject(), req.GetName()), req.GetTask())
+	if err != nil {
 		return nil, encodeErr(err)
 	}
 	return &emptypb.Empty{}, nil

@@ -50,8 +50,7 @@ const dagsByTemplate = computed(() => {
 const activeRegistrations = computed(() =>
   registrations.value.filter(r => r.status === 'pending' || r.status === 'running'))
 
-const failedRegistrations = computed(() =>
-  registrations.value.filter(r => r.status === 'failed').slice(0, 5))
+const { failed: failedRegistrations, dismiss: dismissFailed } = useRegistrationFailures(registrations)
 
 async function load() {
   loading.value = true
@@ -228,7 +227,11 @@ const templateColumns: TableColumn<ProjectTemplate>[] = [
         :actions="[{ label: 'Повторить', color: 'error', variant: 'soft', onClick: () => load() }]"
       />
 
-      <DagRegistrationQueue :active="activeRegistrations" :failed="failedRegistrations" />
+      <DagRegistrationQueue
+        :active="activeRegistrations"
+        :failed="failedRegistrations"
+        @dismiss-failed="dismissFailed"
+      />
 
       <template v-if="project">
         <MetaGrid>

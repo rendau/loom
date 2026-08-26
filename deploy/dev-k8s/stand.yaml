@@ -221,6 +221,9 @@ spec:
             - { name: K8S_METRICS_TICK, value: "0" }
             - { name: GRPC_PORT, value: "5052" }
             - { name: HTTP_PORT, value: "8082" }
+            # админка на 8081, gateway на 8082 — для браузера это разные
+            # origin, без CORS запросы из SPA не уходят
+            - { name: HTTP_CORS, value: "true" }
             - { name: ADMIN_PORT, value: "8081" }
             - { name: SYSTEM_HTTP_PORT, value: "3003" }
             - { name: SECRET_KEY, value: dev-secret }

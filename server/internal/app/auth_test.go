@@ -10,6 +10,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+
+	_ "github.com/rendau/loom/api/server_v1"
 
 	"github.com/rendau/loom/server/internal/authctx"
 	userModel "github.com/rendau/loom/server/internal/domain/user/model"
@@ -36,15 +40,15 @@ func ctxWithAuth(values ...string) context.Context {
 }
 
 func TestAuthRequired(t *testing.T) {
-	assert.True(t, authRequired("/server_v1.DagService/RegisterDag"))
+	assert.True(t, authRequired("/server_v1.ProjectService/RegisterProject"))
 	assert.True(t, authRequired("/server_v1.RunService/TriggerRun"))
 	assert.True(t, authRequired("/server_v1.TaskLogService/ReadTaskLog"))
 	assert.True(t, authRequired("/server_v1.TaskValueService/ListTaskValues"))
 	assert.True(t, authRequired("/server_v1.AuthService/GetMe"))
 	assert.True(t, authRequired("/server_v1.UserService/ListUser"))
 
-	// task-facing ручки — открыты внутри кластера (describe_id у манифеста)
-	assert.False(t, authRequired("/server_v1.DagService/PushDagManifest"))
+	// task-facing ручки — открыты внутри кластера (describe_id у каталога)
+	assert.False(t, authRequired("/server_v1.ProjectService/PushDagCatalog"))
 	assert.False(t, authRequired("/server_v1.TaskValueService/PushTaskValue"))
 	assert.False(t, authRequired("/server_v1.TaskValueService/PullTaskValue"))
 	assert.False(t, authRequired("/grpc.reflection.v1.ServerReflection/ServerReflectionInfo"))
@@ -58,11 +62,12 @@ func TestAuthRequired(t *testing.T) {
 func TestAdminRequired(t *testing.T) {
 	assert.True(t, adminRequired("/server_v1.UserService/ListUser"))
 	assert.True(t, adminRequired("/server_v1.UserService/CreateUser"))
-	assert.True(t, adminRequired("/server_v1.DagService/RegisterDag"))
+	assert.True(t, adminRequired("/server_v1.ProjectService/DeleteProject"))
 	assert.True(t, adminRequired("/server_v1.DagService/DeleteDag"))
 	assert.True(t, adminRequired("/server_v1.PoolService/SetPool"))
 
-	// права на конкретный даг проверяет usecase — интерцептор не мешает
+	// права на конкретный проект и даг проверяет usecase — интерцептор не мешает
+	assert.False(t, adminRequired("/server_v1.ProjectService/RegisterProject"))
 	assert.False(t, adminRequired("/server_v1.DagService/SetDagSchedule"))
 	assert.False(t, adminRequired("/server_v1.RunService/TriggerRun"))
 	assert.False(t, adminRequired("/server_v1.SecretService/GetSecretValue"))
@@ -118,4 +123,30 @@ func TestAuthenticate(t *testing.T) {
 			fakeAuthenticator{role: userModel.RoleUser}, "/server_v1.DagService/SetDagSchedule")
 		require.NoError(t, err)
 	})
+}
+
+// Списки методов — строки: переименованный RPC тихо теряет исключение, и
+// describe-Job перестаёт доставлять каталог (ловилось только на живом
+// k8s-стенде). Сверяем имена с дескрипторами proto.
+func TestAuthMethodNamesExist(t *testing.T) {
+	known := map[string]struct{}{}
+	protoregistry.GlobalFiles.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
+		services := fd.Services()
+		for i := range services.Len() {
+			svc := services.Get(i)
+			methods := svc.Methods()
+			for j := range methods.Len() {
+				known["/"+string(svc.FullName())+"/"+string(methods.Get(j).Name())] = struct{}{}
+			}
+		}
+		return true
+	})
+	require.NotEmpty(t, known, "дескрипторы server_v1 не зарегистрированы")
+
+	for method := range authExemptMethods {
+		assert.Contains(t, known, method, "метод из authExemptMethods не существует")
+	}
+	for method := range adminOnlyMethods {
+		assert.Contains(t, known, method, "метод из adminOnlyMethods не существует")
+	}
 }

@@ -18,12 +18,14 @@ import (
 // Админские RPC требуют сессии пользователя (`Authorization: Bearer
 // <token>` — токен выдаёт AuthService.Login). Исключения:
 //   - task-facing ручки: Push/PullTaskValue открыты внутри кластера,
-//     PushDagManifest — одноразовый describe_id;
+//     PushDagCatalog — одноразовый describe_id;
 //   - вход и первичная настройка: без них залогиниться было бы нельзя.
 //
-// Новые RPC защищены по умолчанию.
+// Новые RPC защищены по умолчанию. Имена сверяются с дескрипторами proto
+// в тесте: переименованный метод иначе тихо теряет исключение (и
+// describe-Job перестаёт доставлять каталог).
 var authExemptMethods = map[string]struct{}{
-	"/server_v1.DagService/PushDagManifest":     {},
+	"/server_v1.ProjectService/PushDagCatalog":  {},
 	"/server_v1.TaskValueService/PushTaskValue": {},
 	"/server_v1.TaskValueService/PullTaskValue": {},
 	"/server_v1.AuthService/GetAuthStatus":      {},
@@ -31,17 +33,14 @@ var authExemptMethods = map[string]struct{}{
 	"/server_v1.AuthService/Login":              {},
 }
 
-// adminOnlyMethods — операции уровня инсталляции: регистрация, обновление
-// образа (sync, авто-обновление) и удаление дагов, пулы, управление
-// пользователями. Права на
-// конкретный даг (расписание, триггер, переменные) проверяются в usecase —
-// интерцептору имя дага не видно.
+// adminOnlyMethods — операции уровня инсталляции: удаление проекта со
+// всеми его дагами, удаление дага, пулы, управление пользователями. Права
+// на конкретный проект или даг (регистрация образа, расписание, триггер,
+// переменные) проверяются в usecase — интерцептору имя дага не видно.
 var adminOnlyMethods = map[string]struct{}{
-	"/server_v1.DagService/RegisterDag":      {},
-	"/server_v1.DagService/DeleteDag":        {},
-	"/server_v1.DagService/SetDagAutoUpdate": {},
-	"/server_v1.DagService/SyncDag":          {},
-	"/server_v1.PoolService/SetPool":         {},
+	"/server_v1.ProjectService/DeleteProject": {},
+	"/server_v1.DagService/DeleteDag":         {},
+	"/server_v1.PoolService/SetPool":          {},
 }
 
 // AuthenticatorI — проверка токена сессии (реализует user-сервис).

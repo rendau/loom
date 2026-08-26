@@ -1,0 +1,248 @@
+# Dev-стенд loom в docker-desktop kubernetes.
+# Всё в namespace loom; образы loom-server:dev / loom-artifact:dev берутся из
+# локального docker (runtime у docker-desktop — docker://, поэтому pull не нужен).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: loom
+---
+# ── Postgres ──────────────────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pg-data
+  namespace: loom
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: loom
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          env:
+            - { name: POSTGRES_PASSWORD, value: postgres }
+            - { name: POSTGRES_DB, value: loom }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: pg-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: loom
+spec:
+  selector: { app: postgres }
+  ports: [{ port: 5432, targetPort: 5432 }]
+---
+# ── Registry образов дагов ────────────────────────────────────────────
+# describe-Job всегда пуллит образ (imagePullPolicy: Always), поэтому образ
+# дага должен лежать в настоящем registry. NodePort 30500 виден и с хоста
+# (docker push localhost:30500/...), и с узла — так что kubelet тянет по
+# тому же адресу, который записан в образе.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-data
+  namespace: loom
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  namespace: loom
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: registry }
+  template:
+    metadata:
+      labels: { app: registry }
+    spec:
+      containers:
+        - name: registry
+          image: registry:2
+          ports: [{ containerPort: 5000 }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/registry }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: registry-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  namespace: loom
+spec:
+  type: NodePort
+  selector: { app: registry }
+  ports:
+    - port: 5000
+      targetPort: 5000
+      nodePort: 30500
+---
+# ── Artifact (data plane) ─────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: artifact-data
+  namespace: loom
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: artifact
+  namespace: loom
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: artifact }
+  template:
+    metadata:
+      labels: { app: artifact }
+    spec:
+      containers:
+        - name: artifact
+          image: loom-artifact:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: GRPC_PORT, value: "5051" }
+            - { name: SYSTEM_HTTP_PORT, value: "3004" }
+            - { name: DATA_DIR, value: /data/artifacts }
+            - { name: LOG_DIR, value: /data/logs }
+          ports:
+            - { containerPort: 5051, name: grpc }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: artifact-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: artifact
+  namespace: loom
+spec:
+  selector: { app: artifact }
+  ports: [{ port: 5051, targetPort: 5051 }]
+---
+# ── Server (control plane) ────────────────────────────────────────────
+# Ему нужны права на Job'ы (запуск тасков и describe), их поды и логи.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: loom-server
+  namespace: loom
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: loom-server
+  namespace: loom
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: loom-server
+  namespace: loom
+subjects:
+  - kind: ServiceAccount
+    name: loom-server
+    namespace: loom
+roleRef:
+  kind: Role
+  name: loom-server
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+  namespace: loom
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: server }
+  template:
+    metadata:
+      labels: { app: server }
+    spec:
+      serviceAccountName: loom-server
+      containers:
+        - name: server
+          image: loom-server:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: PG_DSN, value: "postgres://postgres:postgres@postgres:5432/loom?sslmode=disable" }
+            - { name: EXECUTOR, value: k8s }
+            - { name: K8S_NAMESPACE, value: loom }
+            # metrics.k8s.io в docker-desktop нет — семплинг памяти выключен
+            - { name: K8S_METRICS_TICK, value: "0" }
+            - { name: GRPC_PORT, value: "5052" }
+            - { name: HTTP_PORT, value: "8082" }
+            - { name: ADMIN_PORT, value: "8081" }
+            - { name: SYSTEM_HTTP_PORT, value: "3003" }
+            - { name: SECRET_KEY, value: dev-secret }
+            - { name: ARTIFACT_ADDR, value: "artifact:5051" }
+            # адреса, какими их видят поды тасков
+            - { name: TASK_ARTIFACT_ADDR, value: "artifact.loom.svc:5051" }
+            - { name: TASK_SERVER_ADDR, value: "server.loom.svc:5052" }
+            # браузер ходит в gateway через port-forward на localhost
+            - { name: ADMIN_API_BASE_URL, value: "http://localhost:8082" }
+          ports:
+            - { containerPort: 8081, name: admin }
+            - { containerPort: 8082, name: http }
+            - { containerPort: 5052, name: grpc }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+  namespace: loom
+spec:
+  selector: { app: server }
+  ports:
+    - { name: admin, port: 8081, targetPort: 8081 }
+    - { name: http, port: 8082, targetPort: 8082 }
+    - { name: grpc, port: 5052, targetPort: 5052 }

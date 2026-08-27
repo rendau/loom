@@ -68,87 +68,39 @@
    Семантика статусов (success/error/warning/info) намеренно НЕ трогается:
    зелёный «успех» и красный «провал» не должны зависеть от темы. */
 
-/* Indigo Obsidian — почти чёрный фон с синевой, индиго-акцент */
-:root[data-loom-theme='indigo'] {
-  --ui-color-primary-50: oklch(96.2% 0.018 272.314);
-  --ui-color-primary-100: oklch(93% 0.034 272.788);
-  --ui-color-primary-200: oklch(87% 0.065 274.039);
-  --ui-color-primary-300: oklch(78.5% 0.115 274.713);
-  --ui-color-primary-400: oklch(67.3% 0.182 276.935);
-  --ui-color-primary-500: oklch(58.5% 0.233 277.117);
-  --ui-color-primary-600: oklch(51.1% 0.262 276.966);
-  --ui-color-primary-700: oklch(45.7% 0.24 277.023);
-  --ui-color-primary-800: oklch(39.8% 0.195 277.366);
-  --ui-color-primary-900: oklch(35.9% 0.144 278.697);
-  --ui-color-primary-950: oklch(25.7% 0.09 281.288);
+/* Naive Mint — почти чёрный фон с холодным отливом и мятный акцент; палитра
+   снята с тёмной темы Naive UI (body #101014, поверхности #26262c, акцент
+   #63e2b7 / #18a058 в светлом режиме). Радиус меньше дефолтного: у Naive UI
+   углы почти прямые, и без этого тема читается как «просто другой зелёный». */
+:root[data-loom-theme='naive'] {
+  --ui-radius: 0.1875rem;
 
-  --ui-color-neutral-50: oklch(98.4% 0.0052 273);
-  --ui-color-neutral-100: oklch(96.6% 0.0104 273);
-  --ui-color-neutral-200: oklch(92.5% 0.0182 273);
-  --ui-color-neutral-300: oklch(86% 0.0286 273);
-  --ui-color-neutral-400: oklch(69% 0.0416 273);
-  --ui-color-neutral-500: oklch(52% 0.0546 273);
-  --ui-color-neutral-600: oklch(40% 0.065 273);
-  --ui-color-neutral-700: oklch(28% 0.0715 273);
-  --ui-color-neutral-800: oklch(20% 0.0806 273);
-  --ui-color-neutral-900: oklch(14% 0.091 273);
-  --ui-color-neutral-950: oklch(8% 0.078 273);
-}
+  --ui-color-primary-50: oklch(97.4% 0.0156 160.6);
+  --ui-color-primary-100: oklch(94.3% 0.0389 165.6);
+  --ui-color-primary-200: oklch(89% 0.0792 165.2);
+  --ui-color-primary-300: oklch(85.5% 0.1061 167.1);
+  /* dark берёт акцент из 400, light — из 500: ровно пара Naive UI */
+  --ui-color-primary-400: oklch(82.9% 0.1296 168);
+  --ui-color-primary-500: oklch(62.1% 0.153 153.2);
+  --ui-color-primary-600: oklch(55.7% 0.1392 153);
+  --ui-color-primary-700: oklch(47.7% 0.117 153.6);
+  --ui-color-primary-800: oklch(40.9% 0.0973 154.3);
+  --ui-color-primary-900: oklch(36.2% 0.0827 155.5);
+  --ui-color-primary-950: oklch(25.6% 0.0579 156.5);
 
-/* Emerald Carbon — глубокий тёмно-зелёный фон, изумрудный акцент
-   (преемственность с исходной зелёной темой) */
-:root[data-loom-theme='emerald'] {
-  --ui-color-primary-50: oklch(97.9% 0.021 166.113);
-  --ui-color-primary-100: oklch(95% 0.052 163.051);
-  --ui-color-primary-200: oklch(90.5% 0.093 164.15);
-  --ui-color-primary-300: oklch(84.5% 0.143 164.978);
-  --ui-color-primary-400: oklch(76.5% 0.177 163.223);
-  --ui-color-primary-500: oklch(69.6% 0.17 162.48);
-  --ui-color-primary-600: oklch(59.6% 0.145 163.225);
-  --ui-color-primary-700: oklch(50.8% 0.118 165.612);
-  --ui-color-primary-800: oklch(43.2% 0.095 166.913);
-  --ui-color-primary-900: oklch(37.8% 0.077 168.94);
-  --ui-color-primary-950: oklch(26.2% 0.051 172.552);
-
-  --ui-color-neutral-50: oklch(98.4% 0.0052 165);
-  --ui-color-neutral-100: oklch(96.6% 0.0104 165);
-  --ui-color-neutral-200: oklch(92.5% 0.0182 165);
-  --ui-color-neutral-300: oklch(86% 0.0286 165);
-  --ui-color-neutral-400: oklch(69% 0.0416 165);
-  --ui-color-neutral-500: oklch(52% 0.0546 165);
-  --ui-color-neutral-600: oklch(40% 0.065 165);
-  --ui-color-neutral-700: oklch(28% 0.0715 165);
-  --ui-color-neutral-800: oklch(20% 0.0806 165);
-  --ui-color-neutral-900: oklch(14% 0.091 165);
-  --ui-color-neutral-950: oklch(8% 0.078 165);
-}
-
-/* Amber Ember — тёплый угольный фон, янтарный акцент. Акцент намеренно
-   сдвинут в оранжевую сторону: чистое золото сливается с warning-жёлтым. */
-:root[data-loom-theme='amber'] {
-  --ui-color-primary-50: oklch(98% 0.016 73.684);
-  --ui-color-primary-100: oklch(95.4% 0.038 75.164);
-  --ui-color-primary-200: oklch(90.1% 0.076 70.697);
-  --ui-color-primary-300: oklch(83.7% 0.128 66.29);
-  --ui-color-primary-400: oklch(75% 0.183 55.934);
-  --ui-color-primary-500: oklch(70.5% 0.213 47.604);
-  --ui-color-primary-600: oklch(64.6% 0.222 41.116);
-  --ui-color-primary-700: oklch(55.3% 0.195 38.402);
-  --ui-color-primary-800: oklch(47% 0.157 37.304);
-  --ui-color-primary-900: oklch(40.8% 0.123 38.172);
-  --ui-color-primary-950: oklch(26.6% 0.079 36.259);
-
-  --ui-color-neutral-50: oklch(98.4% 0.004 55);
-  --ui-color-neutral-100: oklch(96.6% 0.008 55);
-  --ui-color-neutral-200: oklch(92.5% 0.014 55);
-  --ui-color-neutral-300: oklch(86% 0.022 55);
-  --ui-color-neutral-400: oklch(69% 0.032 55);
-  --ui-color-neutral-500: oklch(52% 0.042 55);
-  --ui-color-neutral-600: oklch(40% 0.05 55);
-  --ui-color-neutral-700: oklch(28% 0.055 55);
-  --ui-color-neutral-800: oklch(20% 0.062 55);
-  --ui-color-neutral-900: oklch(14% 0.07 55);
-  --ui-color-neutral-950: oklch(8% 0.06 55);
+  --ui-color-neutral-50: oklch(98% 0.0026 286.4);
+  --ui-color-neutral-100: oklch(95.6% 0.0053 286.3);
+  --ui-color-neutral-200: oklch(90.2% 0.0081 286.2);
+  --ui-color-neutral-300: oklch(83.8% 0.011 286.2);
+  --ui-color-neutral-400: oklch(71.2% 0.0129 286.1);
+  --ui-color-neutral-500: oklch(59.3% 0.0151 285.9);
+  --ui-color-neutral-600: oklch(45.3% 0.0161 285.7);
+  --ui-color-neutral-700: oklch(35.2% 0.0138 285.7);
+  /* 800 — границы и поверхности инпутов; у Naive UI они заметно светлее
+     фона, поэтому шаг от 900 к 800 крупнее обычного */
+  --ui-color-neutral-800: oklch(27.1% 0.011 285.6);
+  --ui-color-neutral-900: oklch(17.5% 0.0082 285.5);
+  --ui-color-neutral-950: oklch(13.6% 0.0068 285.5);
 }
 
 /* Slate Classic — прежний стиль админки: сланцевый фон, зелёный акцент

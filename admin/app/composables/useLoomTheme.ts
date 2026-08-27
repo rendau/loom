@@ -6,14 +6,14 @@ export const LOOM_THEME_STORAGE_KEY = 'loom-theme'
 
 export const LOOM_THEMES = [
   { value: 'classic', label: 'Slate Classic', description: 'прежний стиль: сланцевый фон, зелёный акцент' },
-  { value: 'emerald', label: 'Emerald Carbon', description: 'тёмно-зелёный, изумрудный акцент' },
-  { value: 'indigo', label: 'Indigo Obsidian', description: 'почти чёрный, индиго-акцент' },
-  { value: 'amber', label: 'Amber Ember', description: 'тёплый угольный, янтарный акцент' },
+  { value: 'naive', label: 'Naive Mint', description: 'почти чёрный фон, мятный акцент — как в Naive UI' },
 ] as const
 
 export type LoomTheme = (typeof LOOM_THEMES)[number]['value']
 
 // Дефолт — прежний вид админки: тот, кто тему не выбирал, ничего не теряет.
+// Убранная тема в localStorage не ломает загрузку: isLoomTheme её отсеет и
+// плагин вернётся к дефолту.
 export const DEFAULT_LOOM_THEME: LoomTheme = 'classic'
 
 export function isLoomTheme(v: unknown): v is LoomTheme {

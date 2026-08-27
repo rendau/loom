@@ -3,7 +3,7 @@ module github.com/rendau/loom/sdk
 go 1.27
 
 require (
-	github.com/rendau/loom/api v0.4.0
+	github.com/rendau/loom/api v0.4.1
 	github.com/samber/lo v1.53.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/sync v0.22.0

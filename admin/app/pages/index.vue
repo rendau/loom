@@ -166,7 +166,6 @@ const busyPools = computed(() =>
                   <span v-if="run.exit_reason" class="truncate font-mono text-xs text-error">{{ run.exit_reason }}</span>
                 </template>
                 <span v-else class="text-muted">провал</span>
-                <span class="truncate font-mono text-xs text-dimmed">{{ run.run_id }}</span>
                 <span class="ms-auto shrink-0 text-xs text-muted"><RelativeTime :time="run.finished_at" /></span>
               </NuxtLink>
               <NuxtLink
@@ -192,7 +191,6 @@ const busyPools = computed(() =>
                 <span class="font-medium text-highlighted">{{ run.dag_name }}</span>
                 <span class="text-xs text-dimmed">{{ run.project }}</span>
                 <span class="text-muted">дольше обычного — идёт {{ formatDuration(run.created_at, undefined, now) }}</span>
-                <span class="truncate font-mono text-xs text-dimmed">{{ run.id }}</span>
               </NuxtLink>
             </div>
           </UCard>

@@ -20,9 +20,9 @@ function formatSec(sec: number): string {
 
 <template>
   <div class="space-y-2">
-    <div v-for="item in items" :key="item.dag_name" class="space-y-1">
+    <div v-for="item in items" :key="dagRefLabel(runDagRef(item))" class="space-y-1">
       <div class="flex items-baseline justify-between gap-2 text-sm">
-        <NuxtLink :to="`/dags/${encodeURIComponent(item.dag_name)}`" class="truncate hover:text-primary hover:underline">
+        <NuxtLink :to="dagLink(runDagRef(item))" class="truncate hover:text-primary hover:underline">
           {{ item.dag_name }}
         </NuxtLink>
         <span class="shrink-0 text-xs text-muted">

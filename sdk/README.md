@@ -119,3 +119,17 @@ go run . run --dag=orders_etl        # локальный прогон одно�
 
 Семантика артефактов, commit/abort и жизненный цикл попыток — в
 [README монорепы](https://github.com/rendau/loom#readme).
+
+## Скилл для агента
+
+Рядом с SDK лежит скилл `skills/loom-dag/` — инструкция для AI-агента (Claude Code
+и совместимых) по написанию дагов: API и семантика артефактов, подводные камни,
+жизненный цикл дага на control plane. Установка в проект дага:
+
+```bash
+mkdir -p .claude/skills
+cp -r "$(go list -m -f '{{.Dir}}' github.com/rendau/loom/sdk)/skills/loom-dag" .claude/skills/
+chmod -R u+w .claude/skills/loom-dag
+```
+
+Подробности — `skills/loom-dag/README.md`.

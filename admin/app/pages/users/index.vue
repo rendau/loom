@@ -76,6 +76,10 @@ const roleItems = [
   { label: 'Пользователь', value: 'user' },
 ]
 
+// точечные даги, уже покрытые назначенными проектами (метка — «проект/даг»)
+const redundantDags = computed(() =>
+  editDags.value.filter(label => editProjects.value.some(p => label.startsWith(`${p}/`))))
+
 function openCreate() {
   editTarget.value = null
   editUsername.value = ''
@@ -265,20 +269,32 @@ const columns: TableColumn<User>[] = [
             <UFormField label="Роль">
               <USelect v-model="editRole" :items="roleItems" value-key="value" class="w-full" />
             </UFormField>
+            <!-- UInputMenu вместо USelectMenu: выбранное показывается
+                 удаляемыми тегами — иначе не видно, как снять назначение -->
             <UFormField
               v-if="editRole === 'user'"
               label="Назначенные проекты"
-              hint="все даги проекта, включая заведённые позже"
+              hint="даёт права на ВСЕ даги проекта, включая заведённые позже"
             >
-              <USelectMenu v-model="editProjects" :items="projectNames" multiple class="w-full" />
+              <UInputMenu v-model="editProjects" :items="projectNames" multiple delete-icon="i-lucide-x" class="w-full" />
             </UFormField>
             <UFormField
               v-if="editRole === 'user'"
               label="Назначенные даги"
               hint="точечно, сверх проектов"
             >
-              <USelectMenu v-model="editDags" :items="dagNames" multiple class="w-full" />
+              <UInputMenu v-model="editDags" :items="dagNames" multiple delete-icon="i-lucide-x" class="w-full" />
             </UFormField>
+            <!-- даг, уже покрытый назначенным проектом, ничего не добавляет —
+                 подсветим, чтобы набор назначений оставался осмысленным -->
+            <UAlert
+              v-if="redundantDags.length"
+              color="info"
+              variant="subtle"
+              icon="i-lucide-info"
+              :title="`Уже покрыты назначенным проектом: ${redundantDags.join(', ')}`"
+              description="Назначенный проект открывает все свои даги — точечное назначение этих дагов ничего не меняет."
+            />
           </div>
         </template>
         <template #footer>

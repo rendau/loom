@@ -18,6 +18,7 @@ import (
 type DagAccessI interface {
 	CanManageDag(ctx context.Context, info userModel.AuthInfo, ref dagModel.Ref) (bool, error)
 	CanManageProject(ctx context.Context, info userModel.AuthInfo, project string) (bool, error)
+	CanSyncProject(ctx context.Context, info userModel.AuthInfo, project string) (bool, error)
 }
 
 type Checker struct {
@@ -58,6 +59,25 @@ func (c *Checker) RequireProject(ctx context.Context, project string) error {
 	allowed, err := c.access.CanManageProject(ctx, info, project)
 	if err != nil {
 		return fmt.Errorf("access.CanManageProject: %w", err)
+	}
+	if !allowed {
+		return errs.ErrFull{Err: errs.PermissionDenied,
+			Desc: fmt.Sprintf("нет прав на проект %q", project)}
+	}
+	return nil
+}
+
+// RequireProjectSync разрешает обновить проект из registry: admin, владелец
+// проекта или владелец хотя бы одного его дага — sync выкатывает новый код
+// дага, но настроек проекта не меняет.
+func (c *Checker) RequireProjectSync(ctx context.Context, project string) error {
+	info, ok := authctx.Info(ctx)
+	if !ok {
+		return nil
+	}
+	allowed, err := c.access.CanSyncProject(ctx, info, project)
+	if err != nil {
+		return fmt.Errorf("access.CanSyncProject: %w", err)
 	}
 	if !allowed {
 		return errs.ErrFull{Err: errs.PermissionDenied,

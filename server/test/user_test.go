@@ -153,6 +153,19 @@ func TestUserDagPermissions(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, allowed, "даг чужого проекта недоступен")
 
+	// sync проекта шире прочих операций: доступен и владельцу дага проекта
+	allowed, err = svc.CanSyncProject(ctx, userInfo, dagName.Project)
+	require.NoError(t, err)
+	assert.True(t, allowed, "владелец дага может обновить проект из registry")
+
+	allowed, err = svc.CanManageProject(ctx, userInfo, dagName.Project)
+	require.NoError(t, err)
+	assert.False(t, allowed, "но настройки проекта менять не может")
+
+	allowed, err = svc.CanSyncProject(ctx, userInfo, otherDag.Project)
+	require.NoError(t, err)
+	assert.False(t, allowed, "чужой проект недоступен и для sync")
+
 	// повышение до admin очищает назначения (ему доступны все даги)
 	require.NoError(t, svc.Update(ctx, user.Id, userModel.UpdateSpec{Role: new(userModel.RoleAdmin)}))
 	updated, err := svc.Get(ctx, user.Id)

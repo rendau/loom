@@ -124,7 +124,9 @@ func (u *Usecase) Register(ctx context.Context, spec projectregModel.EnqueueSpec
 // его текущего образа прямо сейчас, не дожидаясь тика авто-обновления.
 // Образ берётся из записи проекта (тег, каким его задали при регистрации),
 // поэтому pull + describe подтягивают актуальное содержимое тега; digest и
-// шаблоны переписываются результатом, настройки дагов — нет.
+// шаблоны переписываются результатом, настройки дагов — нет. Права шире
+// прочих операций проекта: sync доступен и владельцу дага проекта — так он
+// выкатывает новый код своего дага.
 func (u *Usecase) Sync(ctx context.Context, name string) (*projectregModel.Main, error) {
 	if name == "" {
 		return nil, errs.IdRequired
@@ -134,7 +136,7 @@ func (u *Usecase) Sync(ctx context.Context, name string) (*projectregModel.Main,
 	if err != nil {
 		return nil, fmt.Errorf("svc.Get: %w", err)
 	}
-	if err = u.authz.RequireProject(ctx, name); err != nil {
+	if err = u.authz.RequireProjectSync(ctx, name); err != nil {
 		return nil, err
 	}
 

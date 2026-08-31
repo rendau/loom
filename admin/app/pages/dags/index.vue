@@ -259,6 +259,14 @@ const columns: TableColumn<Dag>[] = [
         <template #name-cell="{ row }">
           <div class="flex items-center gap-2">
             <span class="font-medium text-highlighted">{{ row.original.name }}</span>
+            <!-- обычному пользователю видно, какие даги назначены ему;
+                 admin управляет всеми — бейдж был бы шумом -->
+            <UTooltip v-if="!isAdmin && canManageDag(row.original)" text="Даг назначен вам: настройки, запуск и остановка ранов доступны">
+              <UBadge color="primary" variant="subtle" size="sm">
+                <UIcon name="i-lucide-user-check" class="size-3" />
+                ваш
+              </UBadge>
+            </UTooltip>
             <UTooltip v-if="envGaps.missing(row.original)" text="Не заполнены переменные или секреты — запуск таска упадёт launch_failed">
               <UBadge color="error" variant="subtle" size="sm">
                 <UIcon name="i-lucide-triangle-alert" class="size-3" />

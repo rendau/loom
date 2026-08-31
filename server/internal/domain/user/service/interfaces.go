@@ -21,6 +21,7 @@ type RepoDbI interface {
 	SetUserDags(ctx context.Context, userId string, dags []dagModel.Ref) error
 	ListUserDags(ctx context.Context, userId string) ([]dagModel.Ref, error)
 	HasUserDag(ctx context.Context, userId string, ref dagModel.Ref) (bool, error)
+	HasUserDagInProject(ctx context.Context, userId, project string) (bool, error)
 	SetUserProjects(ctx context.Context, userId string, projects []string) error
 	ListUserProjects(ctx context.Context, userId string) ([]string, error)
 	HasUserProject(ctx context.Context, userId, project string) (bool, error)

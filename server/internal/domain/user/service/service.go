@@ -351,6 +351,22 @@ func (s *Service) CanManageProject(ctx context.Context, info model.AuthInfo, pro
 	return ok, nil
 }
 
+// CanSyncProject — право обновить проект из registry: шире CanManageProject —
+// достаточно хотя бы одного назначенного дага проекта. Владельцу дага sync
+// нужен, чтобы выкатить новый код своего дага, не дожидаясь тика
+// авто-обновления; настройки проекта он при этом менять не может.
+func (s *Service) CanSyncProject(ctx context.Context, info model.AuthInfo, project string) (bool, error) {
+	ok, err := s.CanManageProject(ctx, info, project)
+	if err != nil || ok {
+		return ok, err
+	}
+
+	if ok, err = s.repoDb.HasUserDagInProject(ctx, info.UserId, project); err != nil {
+		return false, fmt.Errorf("repoDb.HasUserDagInProject: %w", err)
+	}
+	return ok, nil
+}
+
 func validatePassword(password string) error {
 	if len(password) < model.MinPasswordLen {
 		return errs.ErrFull{Err: errs.InvalidRequest,

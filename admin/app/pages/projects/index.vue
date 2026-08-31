@@ -16,7 +16,7 @@ import type { Project, ProjectRegistration } from '~/types/project'
 // настройками. Здесь регистрируют образ, следят за обновлениями и видят
 // очередь регистраций; сами даги — в разделе «Даги».
 
-const { isAdmin, canManageProject } = useAuth()
+const { isAdmin, canManageProject, canSyncProject } = useAuth()
 
 const PAGE_SIZE = 100
 
@@ -225,13 +225,16 @@ async function confirmDelete() {
 
 function menuItems(project: Project): DropdownMenuItem[][] {
   const main: DropdownMenuItem[] = []
-  if (canManageProject(project.name)) {
+  // sync доступен шире прочих действий проекта: и владельцу его дага
+  if (canSyncProject(project.name)) {
     main.push({
       label: 'Обновить из registry',
       icon: 'i-lucide-cloud-download',
       disabled: isUpdating(project),
       onSelect: () => sync(project),
     })
+  }
+  if (canManageProject(project.name)) {
     main.push({
       label: project.auto_update ? 'Выключить авто-обновление' : 'Включить авто-обновление',
       icon: 'i-lucide-refresh-ccw-dot',

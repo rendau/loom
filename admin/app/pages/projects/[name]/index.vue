@@ -16,8 +16,10 @@ import type { Project, ProjectRegistration, ProjectTemplate } from '~/types/proj
 const route = useRoute()
 const projectName = String(route.params.name)
 
-const { canManageProject } = useAuth()
+const { canManageProject, canSyncProject } = useAuth()
 const canManage = computed(() => canManageProject(projectName))
+// sync доступен шире прочих действий проекта: и владельцу его дага
+const canSync = computed(() => canSyncProject(projectName))
 
 const project = ref<Project | null>(null)
 const dags = ref<Dag[]>([])
@@ -204,7 +206,7 @@ const templateColumns: TableColumn<ProjectTemplate>[] = [
             @click="load"
           />
           <UButton
-            v-if="canManage"
+            v-if="canSync"
             icon="i-lucide-cloud-download"
             color="neutral"
             variant="subtle"

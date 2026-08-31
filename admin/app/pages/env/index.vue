@@ -255,7 +255,12 @@ function openCreate(kind: EnvKind) {
   editIsNew.value = true
   editOrigin.value = null
   editKind.value = kind
-  editScope.value = scopeFilter.value === ALL_SCOPES ? GLOBAL_SCOPE : scopeFilter.value
+  // скоуп по умолчанию — из фильтра, но только если вызывающий вправе в нём
+  // писать; иначе первый доступный (у обычного пользователя глобального нет)
+  const preset = scopeFilter.value === ALL_SCOPES ? GLOBAL_SCOPE : scopeFilter.value
+  editScope.value = editScopeItems.value.some(i => i.value === preset)
+    ? preset
+    : (editScopeItems.value[0]?.value ?? GLOBAL_SCOPE)
   editName.value = ''
   editValue.value = ''
   editOpen.value = true
@@ -430,7 +435,8 @@ const columns: TableColumn<EnvEntry>[] = [
       <UDashboardNavbar title="Переменные и секреты">
         <template #right>
           <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" aria-label="Обновить список" @click="load" />
-          <UDropdownMenu :items="createItems">
+          <!-- создавать некуда — у вызывающего нет ни одного скоупа с правом записи -->
+          <UDropdownMenu v-if="editScopeItems.length > 0" :items="createItems">
             <UButton icon="i-lucide-plus" label="Создать" trailing-icon="i-lucide-chevron-down" />
           </UDropdownMenu>
         </template>
@@ -513,7 +519,9 @@ const columns: TableColumn<EnvEntry>[] = [
             </template>
             <template v-else>
               <span class="font-mono text-xs text-muted">••••••</span>
-              <UTooltip text="Показать значение">
+              <!-- значение секрета отдаётся только владельцу скоупа — чужим
+                   глаз не показываем, сервер всё равно откажет -->
+              <UTooltip v-if="canManageScope(row.original.scope)" text="Показать значение">
                 <UButton icon="i-lucide-eye" size="xs" color="neutral" variant="ghost" aria-label="Показать значение" @click="toggleValue(row.original)" />
               </UTooltip>
             </template>

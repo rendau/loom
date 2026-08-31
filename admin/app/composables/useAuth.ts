@@ -37,6 +37,17 @@ export function useAuth() {
     return !!project && (me.value.projects ?? []).includes(project)
   }
 
+  // canSyncProject — право обновить проект из registry: шире canManageProject —
+  // достаточно хотя бы одного назначенного дага проекта (так владелец дага
+  // выкатывает свой новый код, не трогая настроек проекта).
+  function canSyncProject(project?: string): boolean {
+    if (canManageProject(project))
+      return true
+    if (!me.value || !project)
+      return false
+    return (me.value.dags ?? []).some(d => d.project === project)
+  }
+
   async function fetchStatus() {
     usersExist.value = (await authApi.getAuthStatus()).users_exist
     return usersExist.value
@@ -88,5 +99,5 @@ export function useAuth() {
   }
 
   return { me, usersExist, isAuthenticated, isAdmin, canManageDag,
-    canManageProject, fetchStatus, restore, login, setupFirstAdmin, logout }
+    canManageProject, canSyncProject, fetchStatus, restore, login, setupFirstAdmin, logout }
 }

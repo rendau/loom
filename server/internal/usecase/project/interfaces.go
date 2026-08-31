@@ -49,9 +49,11 @@ type CatalogSinkI interface {
 	Deliver(id string, catalog []byte, errMsg string) bool
 }
 
-// AuthzI — права вызывающего: проект целиком (регистрация, настройки).
+// AuthzI — права вызывающего: проект целиком (регистрация, настройки);
+// sync доступен шире — и владельцу дага проекта.
 type AuthzI interface {
 	RequireProject(ctx context.Context, project string) error
+	RequireProjectSync(ctx context.Context, project string) error
 	RequireAdmin(ctx context.Context) error
 }
 

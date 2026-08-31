@@ -204,6 +204,19 @@ func (r *Repo) HasUserDag(ctx context.Context, userId string, ref dagModel.Ref) 
 	return exists, nil
 }
 
+func (r *Repo) HasUserDagInProject(ctx context.Context, userId, project string) (bool, error) {
+	var exists bool
+	err := r.TxM.GetConnection(ctx).QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM user_dag
+			WHERE user_id = $1 AND project_name = $2)`,
+		userId, project).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("HasUserDagInProject: %w", err)
+	}
+	return exists, nil
+}
+
 // ── права на проекты: даг проекта считается назначенным целиком ─────────
 
 func (r *Repo) SetUserProjects(ctx context.Context, userId string, projects []string) error {

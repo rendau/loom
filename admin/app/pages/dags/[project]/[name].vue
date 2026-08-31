@@ -309,6 +309,14 @@ const regColumns: TableColumn<ProjectRegistration>[] = [
           <PageCrumbs :items="crumbs" kind="даг" />
         </template>
         <template #right>
+          <!-- обычному пользователю видно, что даг назначен ему; admin
+               управляет всеми — бейдж был бы шумом -->
+          <UTooltip v-if="!isAdmin && canManage" text="Даг назначен вам: настройки, запуск и остановка ранов доступны">
+            <UBadge color="primary" variant="subtle" size="lg">
+              <UIcon name="i-lucide-user-check" />
+              назначен вам
+            </UBadge>
+          </UTooltip>
           <UBadge v-if="dag?.paused" color="warning" variant="subtle" size="lg">пауза</UBadge>
           <UTooltip v-if="dagEnv.missing.value > 0" text="Запуск таска упадёт launch_failed — заполните значения">
             <UBadge

@@ -183,6 +183,9 @@ type ListReq struct {
 	Project  *string
 	Template *string
 	Paused   *bool
+	// LastRunFailed — true: только даги, чей последний ран упал (даг без
+	// ранов не попадает); false: остальные.
+	LastRunFailed *bool
 	// AutoUpdate — фильтр по флагу проекта (join): кандидаты dagsync.
 	AutoUpdate *bool
 }

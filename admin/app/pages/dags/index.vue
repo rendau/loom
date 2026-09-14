@@ -15,6 +15,7 @@ import type { Project, ProjectRegistration } from '~/types/project'
 const { isAdmin, canManageDag } = useAuth()
 
 const route = useRoute()
+const router = useRouter()
 
 const PAGE_SIZE = 100
 
@@ -41,6 +42,30 @@ const projectItems = computed(() => [
   ...projects.value.map(p => ({ label: p.name, value: p.name })),
 ])
 
+// фильтр по состоянию (активные/на паузе) и срез «последний ран упал» —
+// оба серверные (страница — не весь парк) и живут в URL, как на ранах
+const ALL_STATES = 'all'
+
+const stateFilter = ref<string>(
+  route.query.state === 'active' || route.query.state === 'paused' ? String(route.query.state) : ALL_STATES,
+)
+const failedFilter = ref(route.query.failed === '1')
+
+const stateItems = [
+  { label: 'Все', value: ALL_STATES },
+  { label: 'Активные', value: 'active' },
+  { label: 'На паузе', value: 'paused' },
+]
+
+const hasFilters = computed(() =>
+  projectFilter.value !== ALL_PROJECTS || stateFilter.value !== ALL_STATES || failedFilter.value)
+
+function resetFilters() {
+  projectFilter.value = ALL_PROJECTS
+  stateFilter.value = ALL_STATES
+  failedFilter.value = false
+}
+
 async function load() {
   loading.value = true
   try {
@@ -52,6 +77,8 @@ async function load() {
         sort: ['project_name', 'name'],
       },
       project: projectFilter.value === ALL_PROJECTS ? undefined : projectFilter.value,
+      paused: stateFilter.value === ALL_STATES ? undefined : stateFilter.value === 'paused',
+      last_run_failed: failedFilter.value ? true : undefined,
     })
     dags.value = rep.results
     totalCount.value = Number(rep.pagination_info.total_count)
@@ -70,9 +97,16 @@ async function load() {
 
 watch(page, load)
 
-watch(projectFilter, async (v) => {
+watch([projectFilter, stateFilter, failedFilter], async () => {
   page.value = 1
-  await navigateTo({ query: v === ALL_PROJECTS ? {} : { project: v } })
+  const query: Record<string, string> = {}
+  if (projectFilter.value !== ALL_PROJECTS)
+    query.project = projectFilter.value
+  if (stateFilter.value !== ALL_STATES)
+    query.state = stateFilter.value
+  if (failedFilter.value)
+    query.failed = '1'
+  router.replace({ query })
   await load()
 })
 
@@ -212,13 +246,6 @@ const columns: TableColumn<Dag>[] = [
     <template #header>
       <UDashboardNavbar title="Даги">
         <template #right>
-          <USelectMenu
-            v-model="projectFilter"
-            :items="projectItems"
-            value-key="value"
-            class="w-48"
-            size="sm"
-          />
           <UButton
             icon="i-lucide-refresh-cw"
             color="neutral"
@@ -237,6 +264,34 @@ const columns: TableColumn<Dag>[] = [
           />
         </template>
       </UDashboardNavbar>
+      <UDashboardToolbar>
+        <template #left>
+          <UTabs
+            v-model="stateFilter"
+            :items="stateItems"
+            :content="false"
+            color="neutral"
+            variant="pill"
+            size="sm"
+          />
+          <UButton
+            icon="i-lucide-circle-x"
+            size="sm"
+            :color="failedFilter ? 'error' : 'neutral'"
+            :variant="failedFilter ? 'subtle' : 'ghost'"
+            label="Последний ран упал"
+            :aria-pressed="failedFilter"
+            @click="failedFilter = !failedFilter"
+          />
+          <USelectMenu
+            v-model="projectFilter"
+            :items="projectItems"
+            value-key="value"
+            class="w-48"
+            size="sm"
+          />
+        </template>
+      </UDashboardToolbar>
     </template>
 
     <template #body>
@@ -372,6 +427,14 @@ const columns: TableColumn<Dag>[] = [
         <template #empty>
           <!-- при ошибке загрузки пустота — не «дагов нет», причина в алерте выше -->
           <div v-if="loadError" class="py-6" />
+          <EmptyState
+            v-else-if="hasFilters"
+            icon="i-lucide-workflow"
+            title="Дагов не найдено"
+            description="Под выбранные фильтры не попал ни один даг."
+          >
+            <UButton size="sm" color="neutral" variant="subtle" label="Сбросить фильтры" @click="resetFilters" />
+          </EmptyState>
           <EmptyState
             v-else
             icon="i-lucide-workflow"

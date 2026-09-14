@@ -8,6 +8,8 @@ export type DagListQuery = {
   // Фильтры: даги проекта / заведённые от конкретного шаблона.
   project?: string
   template?: string
+  // true — только даги, чей последний ран упал.
+  last_run_failed?: boolean
 }
 
 // Путь дага: идентификатор составной — проект и имя инстанса.

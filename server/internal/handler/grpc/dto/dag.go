@@ -81,10 +81,11 @@ func DecodeDagListReq(v *pb.DagListReq) *domainModel.ListReq {
 		return &domainModel.ListReq{}
 	}
 	return &domainModel.ListReq{
-		ListParams: DecodeListParams(v.ListParams),
-		Paused:     v.Paused,
-		Project:    v.Project,
-		Template:   v.Template,
+		ListParams:    DecodeListParams(v.ListParams),
+		Paused:        v.Paused,
+		Project:       v.Project,
+		Template:      v.Template,
+		LastRunFailed: v.LastRunFailed,
 	}
 }
 

@@ -1810,3 +1810,60 @@ func TestVariableAndSecretMove(t *testing.T) {
 	err = e.secretSvc.Move(ctx, global, dagName.Scope(), "missing")
 	require.ErrorIs(t, err, errs.SecretNotFound)
 }
+
+// Фильтр списка дагов «последний ран упал»: в срез попадает только даг,
+// чей самый свежий ран failed; успешный последний ран и даг без ранов —
+// в дополнение (false). Новый ран поверх падения выводит даг из среза.
+func TestDagListLastRunFailedFilter(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+
+	okDag := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "lrf-ok",
+		"tasks": [{"name": "ok_a"}]
+	}`)
+	badDag := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "lrf-bad",
+		"tasks": [{"name": "bad_a"}]
+	}`)
+	idleDag := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "lrf-idle",
+		"tasks": [{"name": "idle_a"}]
+	}`)
+
+	okRun, err := e.runUsecase.Trigger(ctx, okDag, nil)
+	require.NoError(t, err)
+	a := e.waitLaunched(t, "ok_a")
+	e.executor.started(a.Ref)
+	e.executor.finished(a.Ref, true, 0, "")
+	e.waitRunStatus(t, okRun, runModel.RunStatusSuccess)
+
+	badRun, err := e.runUsecase.Trigger(ctx, badDag, nil)
+	require.NoError(t, err)
+	b := e.waitLaunched(t, "bad_a")
+	e.executor.started(b.Ref)
+	e.executor.finished(b.Ref, false, 1, "Error")
+	e.waitRunStatus(t, badRun, runModel.RunStatusFailed)
+
+	failing, _, err := e.dagSvc.List(ctx, &dagModel.ListReq{LastRunFailed: new(true)})
+	require.NoError(t, err)
+	require.Len(t, failing, 1)
+	assert.Equal(t, badDag, failing[0].Ref)
+
+	rest, _, err := e.dagSvc.List(ctx, &dagModel.ListReq{LastRunFailed: new(false)})
+	require.NoError(t, err)
+	refs := lo.Map(rest, func(d *dagModel.Main, _ int) dagModel.Ref { return d.Ref })
+	assert.Contains(t, refs, okDag)
+	assert.Contains(t, refs, idleDag)
+	assert.NotContains(t, refs, badDag)
+
+	// новый (ещё бегущий) ран — теперь последний: даг уходит из среза
+	_, err = e.runUsecase.Trigger(ctx, badDag, nil)
+	require.NoError(t, err)
+	failing, _, err = e.dagSvc.List(ctx, &dagModel.ListReq{LastRunFailed: new(true)})
+	require.NoError(t, err)
+	assert.Empty(t, failing)
+}

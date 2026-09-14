@@ -221,6 +221,9 @@ message DagListReq {
   // Фильтры: даги проекта / заведённые от конкретного шаблона.
   optional string project = 3;
   optional string template = 4;
+  // true — только даги, чей последний ран упал (running-ран считается
+  // последним: даг с падением, уже ушедший в новый ран, не попадает).
+  optional bool last_run_failed = 5;
 }
 
 message DagListRep {

@@ -776,8 +776,11 @@ type DagListReq struct {
 	ListParams *common.ListParamsSt   `protobuf:"bytes,1,opt,name=list_params,json=listParams,proto3" json:"list_params,omitempty"`
 	Paused     *bool                  `protobuf:"varint,2,opt,name=paused,proto3,oneof" json:"paused,omitempty"`
 	// Фильтры: даги проекта / заведённые от конкретного шаблона.
-	Project       *string `protobuf:"bytes,3,opt,name=project,proto3,oneof" json:"project,omitempty"`
-	Template      *string `protobuf:"bytes,4,opt,name=template,proto3,oneof" json:"template,omitempty"`
+	Project  *string `protobuf:"bytes,3,opt,name=project,proto3,oneof" json:"project,omitempty"`
+	Template *string `protobuf:"bytes,4,opt,name=template,proto3,oneof" json:"template,omitempty"`
+	// true — только даги, чей последний ран упал (running-ран считается
+	// последним: даг с падением, уже ушедший в новый ран, не попадает).
+	LastRunFailed *bool `protobuf:"varint,5,opt,name=last_run_failed,json=lastRunFailed,proto3,oneof" json:"last_run_failed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -838,6 +841,13 @@ func (x *DagListReq) GetTemplate() string {
 		return *x.Template
 	}
 	return ""
+}
+
+func (x *DagListReq) GetLastRunFailed() bool {
+	if x != nil && x.LastRunFailed != nil {
+		return *x.LastRunFailed
+	}
+	return false
 }
 
 type DagListRep struct {
@@ -1800,18 +1810,20 @@ const file_server_v1_dag_proto_rawDesc = "" +
 	"\n" +
 	"\b_catchupB\t\n" +
 	"\a_pausedB\a\n" +
-	"\x05_pool\"\xc4\x01\n" +
+	"\x05_pool\"\x85\x02\n" +
 	"\n" +
 	"DagListReq\x125\n" +
 	"\vlist_params\x18\x01 \x01(\v2\x14.common.ListParamsStR\n" +
 	"listParams\x12\x1b\n" +
 	"\x06paused\x18\x02 \x01(\bH\x00R\x06paused\x88\x01\x01\x12\x1d\n" +
 	"\aproject\x18\x03 \x01(\tH\x01R\aproject\x88\x01\x01\x12\x1f\n" +
-	"\btemplate\x18\x04 \x01(\tH\x02R\btemplate\x88\x01\x01B\t\n" +
+	"\btemplate\x18\x04 \x01(\tH\x02R\btemplate\x88\x01\x01\x12+\n" +
+	"\x0flast_run_failed\x18\x05 \x01(\bH\x03R\rlastRunFailed\x88\x01\x01B\t\n" +
 	"\a_pausedB\n" +
 	"\n" +
 	"\b_projectB\v\n" +
-	"\t_template\"}\n" +
+	"\t_templateB\x12\n" +
+	"\x10_last_run_failed\"}\n" +
 	"\n" +
 	"DagListRep\x12A\n" +
 	"\x0fpagination_info\x18\x01 \x01(\v2\x18.common.PaginationInfoStR\x0epaginationInfo\x12,\n" +

@@ -36,6 +36,17 @@ func (r *Repo) getConditions(pars *model.ListReq) (map[string]any, map[string][]
 	if pars.Paused != nil {
 		conditions["paused"] = *pars.Paused
 	}
+	if pars.LastRunFailed != nil {
+		// running-ран тоже «последний»: даг с падением, уже ушедший в новый
+		// ран, из среза выпадает; даг без ранов — не «упавший» (coalesce)
+		exp := `coalesce((SELECT r.status FROM run r
+			WHERE r.project_name = dag_full.project_name AND r.dag_name = dag_full.name
+			ORDER BY r.created_at DESC LIMIT 1), '') = 'failed'`
+		if !*pars.LastRunFailed {
+			exp = "NOT (" + exp + ")"
+		}
+		conditionExps[exp] = nil
+	}
 	if pars.AutoUpdate != nil {
 		conditions["auto_update"] = *pars.AutoUpdate
 	}

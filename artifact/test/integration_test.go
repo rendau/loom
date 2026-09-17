@@ -311,7 +311,13 @@ func (rs *restartableServer) serve(lis net.Listener) {
 	tasklogSvc, err := tasklogDomain.New(rs.logDir)
 	require.NoError(rs.t, err)
 
-	srv := grpc.NewServer()
+	// WaitForHandlers: Stop() по умолчанию не ждёт завершения хендлеров, и
+	// недобитый Append старого «инкарната» может дописать файл лога ПОСЛЕ
+	// того, как домены нового пересчитали его размер, — новый сервер
+	// недосчитывает строки (досылка дублируется), а читатель, ограниченный
+	// посчитанным размером, отдаёт дубли вместо хвоста. В проде гонки нет —
+	// рестарт убивает процесс целиком, тут «рестарт» in-process.
+	srv := grpc.NewServer(grpc.WaitForHandlers(true))
 	artifactpb.RegisterArtifactServiceServer(srv, handler.NewArtifact(svc, storageDomain.New(rs.dataDir, rs.logDir)))
 	artifactpb.RegisterTaskLogServiceServer(srv, handler.NewTaskLog(tasklogSvc))
 

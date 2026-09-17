@@ -142,7 +142,7 @@ func (d *DAG) RunTask(ctx context.Context, spec TaskRunSpec) error {
 		capture.start(sink)
 	}
 
-	err := d.runTaskWithSink(ctx, t, spec, sink)
+	err := d.runTaskWithSink(ctx, t, spec, sink, dup)
 
 	// порядок: сначала дочитать пайпы перехвата в sink, затем дослать sink
 	if capture != nil {
@@ -167,7 +167,7 @@ func newLogSink(spec TaskRunSpec, dup io.Writer) logSink {
 	return sink
 }
 
-func (d *DAG) runTaskWithSink(ctx context.Context, t *Task, spec TaskRunSpec, sink logSink) error {
+func (d *DAG) runTaskWithSink(ctx context.Context, t *Task, spec TaskRunSpec, sink logSink, dup io.Writer) error {
 	store, err := dialGrpcStore(spec.ArtifactAddr)
 	if err != nil {
 		return err
@@ -186,7 +186,16 @@ func (d *DAG) runTaskWithSink(ctx context.Context, t *Task, spec TaskRunSpec, si
 		values = vs
 	}
 
-	log := slog.New(slog.NewTextHandler(&sinkLineWriter{sink: sink, source: logSourceLog}, nil)).
+	// два формата по назначению: JSON — в лог-стрим artifact-сервера
+	// (админка фильтрует по level), text — в честный stdout контейнера
+	// (читаемо в kubectl logs, и сборщик логов кластера — loki и т.п. — не
+	// парсит level, т.е. рабочие ошибки тасков не становятся алёртами;
+	// алёртный сигнал о падении — error-строки самого loom-server)
+	handlers := []slog.Handler{slog.NewJSONHandler(&sinkLineWriter{sink: sink, source: logSourceLog}, nil)}
+	if dup != nil {
+		handlers = append(handlers, slog.NewTextHandler(dup, nil))
+	}
+	log := slog.New(fanoutHandler{handlers: handlers}).
 		With("dag", d.name, "run_id", spec.RunID, "task", spec.Task, "attempt", spec.Attempt)
 
 	// таймаут таска: дедлайн видят и тело таска, и операции Runtime

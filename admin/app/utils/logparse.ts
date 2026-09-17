@@ -148,9 +148,22 @@ export function parseLogLine(raw: string, ctx?: LogContext): ParsedLogLine {
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {
       const json = JSON.parse(trimmed) as Record<string, unknown>
+      // top-level поля — в пары для компактного рендера (как у logfmt);
+      // служебные time/level/msg и совпавшие с контекстом попытки прячем
+      const fields: Array<[string, string]> = []
+      for (const [k, raw] of Object.entries(json)) {
+        if (k === 'time' || k === 'ts' || k === 'level' || k === 'lvl' || k === 'severity'
+          || k === 'msg' || k === 'message')
+          continue
+        const v = typeof raw === 'string' ? raw : JSON.stringify(raw)
+        if (ctx && isContextField(k, v, ctx))
+          continue
+        fields.push([k, v])
+      }
       return {
         kind: 'json',
         json,
+        fields,
         clean,
         segments: segments ?? undefined,
         level: normalizeLevel(json.level ?? json.lvl ?? json.severity),

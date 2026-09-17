@@ -32,9 +32,10 @@ const (
 //   - полный буфер блокирует push (backpressure): пока попытка жива, строки
 //     не отбрасываются, таск ждёт восстановления канала.
 //
-// Каждая строка синхронно дублируется в dup — настоящий stdout контейнера:
-// страховка на случай смерти процесса вместе с SDK, обычный путь чтения
-// логов — стрим.
+// Строки перехваченных stdout/stderr синхронно дублируются в dup —
+// настоящий stdout контейнера: страховка на случай смерти процесса вместе с
+// SDK, обычный путь чтения логов — стрим. Структурные строки логгера в dup
+// не дублируются: их text-копию пишет второй хендлер fanout-логгера.
 type grpcLogSink struct {
 	conn   *grpc.ClientConn
 	client pb.TaskLogServiceClient
@@ -57,7 +58,7 @@ type grpcLogSink struct {
 }
 
 // newGrpcLogSink создаёт sink и запускает отправщик. dup — настоящий stdout
-// (до перехвата fd), туда синхронно дублируется каждая строка.
+// (до перехвата fd), туда синхронно дублируются строки перехвата.
 func newGrpcLogSink(addr string, dup io.Writer, runID, task string, attempt int) (*grpcLogSink, error) {
 	conn, err := grpc.NewClient(addr, dialOpts()...)
 	if err != nil {
@@ -83,7 +84,10 @@ func newGrpcLogSink(addr string, dup io.Writer, runID, task string, attempt int)
 }
 
 func (s *grpcLogSink) push(e logEntry) {
-	if s.dup != nil {
+	// структурные строки логгера (JSON для стрима) в stdout не дублируем: их
+	// текстовую копию туда уже пишет второй хендлер fanout-логгера — иначе в
+	// логах контейнера была бы и text-, и JSON-версия каждой строки
+	if s.dup != nil && e.source != logSourceLog {
 		fmt.Fprintln(s.dup, e.line)
 	}
 

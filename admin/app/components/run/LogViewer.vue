@@ -313,7 +313,12 @@ defineExpose({ restart: () => start() })
                       class="mr-1 inline-block size-3 text-muted"
                     />
                     <span v-if="filteredRows[vRow.index]!.parsed.msg" class="text-highlighted">{{ filteredRows[vRow.index]!.parsed.msg }}</span>
-                    <span class="ml-1 text-muted">{{ expanded.has(filteredRows[vRow.index]!.entry) ? '' : filteredRows[vRow.index]!.parsed.clean }}</span>
+                    <template v-if="filteredRows[vRow.index]!.parsed.msg !== undefined && !expanded.has(filteredRows[vRow.index]!.entry)">
+                      <span v-for="[k, v] in filteredRows[vRow.index]!.parsed.fields" :key="k" class="ml-2 text-muted">
+                        {{ k }}=<span class="text-default">{{ v }}</span>
+                      </span>
+                    </template>
+                    <span v-else-if="!expanded.has(filteredRows[vRow.index]!.entry)" class="ml-1 text-muted">{{ filteredRows[vRow.index]!.parsed.clean }}</span>
                   </template>
                   <template v-else-if="ansiColors && filteredRows[vRow.index]!.parsed.segments">
                     <span

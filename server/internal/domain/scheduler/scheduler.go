@@ -490,7 +490,17 @@ func (s *Scheduler) replanRun(ctx context.Context, run *runModel.Main) error {
 			metricRunFinished.WithLabelValues(p.RunStatus).Inc()
 			metricRunDuration.WithLabelValues(p.RunStatus).Observe(time.Since(run.CreatedAt).Seconds())
 		}
-		slog.Info("run finished", "run_id", run.Id, "status", p.RunStatus)
+		// уровень — по исходу: алёртинг по логам (loki → level) должен видеть
+		// упавший ран как error без разбора атрибутов
+		lvl := slog.LevelInfo
+		switch p.RunStatus {
+		case runModel.RunStatusFailed:
+			lvl = slog.LevelError
+		case runModel.RunStatusCanceled:
+			lvl = slog.LevelWarn
+		}
+		slog.Log(ctx, lvl, "run finished", "run_id", run.Id,
+			"project", run.Dag.Project, "dag", run.Dag.Name, "status", p.RunStatus)
 	}
 
 	return nil
@@ -786,7 +796,17 @@ func (s *Scheduler) finalizeCtx(ctx context.Context, ref runModel.AttemptRef, ex
 		slog.Warn("finish task log", "run_id", ref.RunId, "task", ref.Task, "attempt", ref.Attempt, "error", err)
 	}
 
-	slog.Info("attempt finished", "run_id", ref.RunId, "task", ref.Task, "attempt", ref.Attempt,
+	// уровень — по исходу: окончательное падение — error (алёртинг по level),
+	// падение с назначенным ретраем и отмена — warn
+	lvl := slog.LevelInfo
+	switch {
+	case exit.Success:
+	case exit.Canceled || retryAt != nil:
+		lvl = slog.LevelWarn
+	default:
+		lvl = slog.LevelError
+	}
+	slog.Log(ctx, lvl, "attempt finished", "run_id", ref.RunId, "task", ref.Task, "attempt", ref.Attempt,
 		"success", exit.Success, "reason", exit.Reason, "retry", retryAt != nil)
 
 	s.Nudge()

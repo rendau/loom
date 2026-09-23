@@ -467,10 +467,24 @@ func (s *Scheduler) replanRun(ctx context.Context, run *runModel.Main) error {
 
 	p := buildPlan(m.Tasks, statuses)
 
-	if len(p.UpstreamFailed) > 0 {
-		err = s.runSvc.PromoteTasks(ctx, run.Id, p.UpstreamFailed, runModel.TaskStatusPending, runModel.TaskStatusUpstreamFailed)
-		if err != nil {
-			return fmt.Errorf("runSvc.PromoteTasks(upstream_failed): %w", err)
+	// каскад и демоция guarded по fromStatus: гонку с конкурентным claim'ом
+	// выигрывает claim (UPDATE не находит строку), его попытку добьёт
+	// финализация и следующий проход
+	for _, g := range []struct {
+		tasks []string
+		from  string
+		to    string
+	}{
+		{p.UpstreamFailed, runModel.TaskStatusPending, runModel.TaskStatusUpstreamFailed},
+		{p.UpstreamFailedQueued, runModel.TaskStatusQueued, runModel.TaskStatusUpstreamFailed},
+		{p.UpstreamFailedRetry, runModel.TaskStatusUpForRetry, runModel.TaskStatusUpstreamFailed},
+		{p.Demote, runModel.TaskStatusQueued, runModel.TaskStatusPending},
+	} {
+		if len(g.tasks) == 0 {
+			continue
+		}
+		if err = s.runSvc.PromoteTasks(ctx, run.Id, g.tasks, g.from, g.to); err != nil {
+			return fmt.Errorf("runSvc.PromoteTasks(%s->%s): %w", g.from, g.to, err)
 		}
 	}
 

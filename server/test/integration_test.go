@@ -552,6 +552,59 @@ func TestSchedulerFailureCascade(t *testing.T) {
 	assert.Contains(t, entries[len(entries)-1].Line, "OOMKilled")
 }
 
+// Терминальное падение стримового отправителя добивает ко-стартовавшего
+// получателя из up_for_retry каскадом upstream_failed: его ретрай упал бы
+// на чтении мёртвого стрима, новая попытка не заводится, ран закрывается
+// сразу, не дожидаясь backoff'а.
+func TestSchedulerUpstreamFailedCoversRetry(t *testing.T) {
+	e := newEnv(t)
+	// backoff получателя заведомо больше длительности теста: до правки ран
+	// висел бы running до ретрая, обречённого на artifact_not_found
+	dagName := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "stream-retry-cascade",
+		"tasks": [
+			{"name": "a", "retries": 1, "retry_delay_sec": 1},
+			{"name": "b", "retries": 3, "retry_delay_sec": 3600,
+				"depends_on": [{"task": "a", "streamed": true}]}
+		]
+	}`)
+
+	runId, err := e.runUsecase.Trigger(context.Background(), dagName, nil)
+	require.NoError(t, err)
+
+	// ко-старт: получатель запускается вместе с отправителем
+	a1 := e.waitLaunchedAttempt(t, "a", 1)
+	e.executor.started(a1.Ref)
+	b1 := e.waitLaunchedAttempt(t, "b", 1)
+	e.executor.started(b1.Ref)
+
+	// отправитель падает, его стрим абортится — получатель падает на чтении
+	// и уходит ждать ретрая
+	e.executor.finished(a1.Ref, false, 1, "Error")
+	e.executor.finished(b1.Ref, false, 1, "artifact_aborted")
+	require.Eventually(t, func() bool {
+		return e.taskStatuses(t, runId)["b"] == runModel.TaskStatusUpForRetry
+	}, waitTimeout, 10*time.Millisecond)
+
+	// вторая попытка отправителя исчерпывает его ретраи
+	a2 := e.waitLaunchedAttempt(t, "a", 2)
+	e.executor.started(a2.Ref)
+	e.executor.finished(a2.Ref, false, 1, "Error")
+
+	// получатель закрыт каскадом без новой попытки, ран - failed
+	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
+	assert.Equal(t, map[string]string{
+		"a": runModel.TaskStatusFailed,
+		"b": runModel.TaskStatusUpstreamFailed,
+	}, e.taskStatuses(t, runId))
+
+	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
+	require.NoError(t, err)
+	bAttempts := lo.Filter(attempts, func(at *runModel.Attempt, _ int) bool { return at.Task == "b" })
+	require.Len(t, bAttempts, 1, "новых попыток получателю не заводится")
+}
+
 // Ошибка Launch фиксируется как проваленная попытка с reason=launch_failed.
 func TestSchedulerLaunchFailure(t *testing.T) {
 	e := newEnv(t)

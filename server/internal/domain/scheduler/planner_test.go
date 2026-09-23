@@ -131,6 +131,56 @@ func TestBuildPlan_FailedStreamedSenderFailsPendingReceiver(t *testing.T) {
 	assert.Equal(t, runModel.RunStatusFailed, p.RunStatus)
 }
 
+func TestBuildPlan_UpstreamFailedCoversQueuedAndRetry(t *testing.T) {
+	tasks := []dagModel.Task{
+		task("a"),
+		task("b", streamedDep("a")),
+		task("c", streamedDep("a")),
+		task("d", dep("b")),
+	}
+
+	// отправитель терминально упал: ко-стартовавшие получатели закрываются
+	// из queued и up_for_retry без новых попыток, их потомки — из pending
+	p := buildPlan(tasks, map[string]string{
+		"a": runModel.TaskStatusFailed,
+		"b": runModel.TaskStatusUpForRetry,
+		"c": runModel.TaskStatusQueued,
+		"d": runModel.TaskStatusPending,
+	})
+
+	assert.Equal(t, []string{"b"}, p.UpstreamFailedRetry)
+	assert.Equal(t, []string{"c"}, p.UpstreamFailedQueued)
+	assert.Equal(t, []string{"d"}, p.UpstreamFailed)
+	assert.Empty(t, p.Promote)
+	assert.Empty(t, p.Demote)
+	require.True(t, p.RunDone)
+	assert.Equal(t, runModel.RunStatusFailed, p.RunStatus)
+}
+
+func TestBuildPlan_DemoteQueuedWhenStreamedSenderRetries(t *testing.T) {
+	tasks := []dagModel.Task{task("a"), task("b", streamedDep("a"))}
+
+	// отправитель выбыл в up_for_retry (не терминален): ко-стартовавший
+	// получатель уходит из очереди обратно в pending — дождаться новой
+	// попытки отправителя, а не читать абортированный стрим
+	p := buildPlan(tasks, map[string]string{
+		"a": runModel.TaskStatusUpForRetry,
+		"b": runModel.TaskStatusQueued,
+	})
+	assert.Equal(t, []string{"b"}, p.Demote)
+	assert.Empty(t, p.UpstreamFailedQueued)
+	assert.Empty(t, p.Promote)
+	assert.False(t, p.RunDone)
+
+	// новая попытка отправителя запустилась — очередь не трогаем
+	p = buildPlan(tasks, map[string]string{
+		"a": runModel.TaskStatusRunning,
+		"b": runModel.TaskStatusQueued,
+	})
+	assert.Empty(t, p.Demote)
+	assert.False(t, p.RunDone)
+}
+
 func TestBuildPlan_UpForRetryKeepsRunAlive(t *testing.T) {
 	tasks := []dagModel.Task{
 		task("a"),

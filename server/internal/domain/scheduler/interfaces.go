@@ -22,6 +22,7 @@ type RunServiceI interface {
 	PromoteRetries(ctx context.Context) (int64, error)
 	ListStaleAttempts(ctx context.Context, olderThan time.Time) ([]runModel.StaleAttempt, error)
 	MarkAttemptRunning(ctx context.Context, ref runModel.AttemptRef) (bool, error)
+	GetAttempt(ctx context.Context, ref runModel.AttemptRef, errNE bool) (*runModel.Attempt, bool, error)
 	FinalizeAttempt(ctx context.Context, ref runModel.AttemptRef, exit runModel.ExitInfo, retryAt *time.Time) (bool, *time.Time, error)
 	SetAttemptPeakMemory(ctx context.Context, ref runModel.AttemptRef, peakBytes int64) error
 	FinishRun(ctx context.Context, runId, status string) (bool, error)

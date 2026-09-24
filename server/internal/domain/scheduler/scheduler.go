@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -505,7 +506,9 @@ func (s *Scheduler) replanRun(ctx context.Context, run *runModel.Main) error {
 			metricRunDuration.WithLabelValues(p.RunStatus).Observe(time.Since(run.CreatedAt).Seconds())
 		}
 		// уровень — по исходу: алёртинг по логам (loki → level) должен видеть
-		// упавший ран как error без разбора атрибутов
+		// упавший ран как error без разбора атрибутов. Это единственный
+		// алёрт на ран (попытки пишутся на info), поэтому он несёт и
+		// упавшие таски с причинами — сообщение самодостаточно
 		lvl := slog.LevelInfo
 		switch p.RunStatus {
 		case runModel.RunStatusFailed:
@@ -513,11 +516,32 @@ func (s *Scheduler) replanRun(ctx context.Context, run *runModel.Main) error {
 		case runModel.RunStatusCanceled:
 			lvl = slog.LevelWarn
 		}
-		slog.Log(ctx, lvl, "run finished", "run_id", run.Id,
-			"project", run.Dag.Project, "dag", run.Dag.Name, "status", p.RunStatus)
+		attrs := []any{"run_id", run.Id, "project", run.Dag.Project, "dag", run.Dag.Name, "status", p.RunStatus}
+		if p.RunStatus == runModel.RunStatusFailed {
+			attrs = append(attrs, "failed_tasks", s.failedTasksSummary(ctx, tis))
+		}
+		slog.Log(ctx, lvl, "run finished", attrs...)
 	}
 
 	return nil
+}
+
+// failedTasksSummary — упавшие таски рана с причиной последней попытки
+// («sync (Error), load (OOMKilled)») для алёрта `run finished`. Best effort:
+// не прочиталась попытка — таск остаётся в списке без причины.
+func (s *Scheduler) failedTasksSummary(ctx context.Context, tis []*runModel.TaskInstance) string {
+	failed := lo.FilterMap(tis, func(ti *runModel.TaskInstance, _ int) (string, bool) {
+		if ti.Status != runModel.TaskStatusFailed {
+			return "", false
+		}
+		ref := runModel.AttemptRef{RunId: ti.RunId, Task: ti.Task, Attempt: ti.Attempt}
+		a, found, err := s.runSvc.GetAttempt(ctx, ref, false)
+		if err != nil || !found || a.ExitReason == "" {
+			return ti.Task, true
+		}
+		return fmt.Sprintf("%s (%s)", ti.Task, a.ExitReason), true
+	})
+	return strings.Join(failed, ", ")
 }
 
 // killTimedOut находит running-попытки, превысившие timeout_sec манифеста,
@@ -810,17 +834,11 @@ func (s *Scheduler) finalizeCtx(ctx context.Context, ref runModel.AttemptRef, ex
 		slog.Warn("finish task log", "run_id", ref.RunId, "task", ref.Task, "attempt", ref.Attempt, "error", err)
 	}
 
-	// уровень — по исходу: окончательное падение — error (алёртинг по level),
-	// падение с назначенным ретраем и отмена — warn
-	lvl := slog.LevelInfo
-	switch {
-	case exit.Success:
-	case exit.Canceled || retryAt != nil:
-		lvl = slog.LevelWarn
-	default:
-		lvl = slog.LevelError
-	}
-	slog.Log(ctx, lvl, "attempt finished", "run_id", ref.RunId, "task", ref.Task, "attempt", ref.Attempt,
+	// всегда info, даже при падении: алёртинг (loki → level) срабатывает на
+	// warn+, а падение таска и так доходит до него одной строкой
+	// `run finished` (error, с упавшими тасками) — иначе один упавший ран
+	// с ретраями давал бы алёрт на каждую попытку
+	slog.Info("attempt finished", "run_id", ref.RunId, "task", ref.Task, "attempt", ref.Attempt,
 		"success", exit.Success, "reason", exit.Reason, "retry", retryAt != nil)
 
 	s.Nudge()

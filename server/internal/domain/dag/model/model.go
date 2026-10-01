@@ -186,6 +186,8 @@ type ListReq struct {
 	// LastRunFailed — true: только даги, чей последний ран упал (даг без
 	// ранов не попадает); false: остальные.
 	LastRunFailed *bool
+	// Search — поиск по тексту: подстрока имени дага, без учёта регистра.
+	Search *string
 	// AutoUpdate — фильтр по флагу проекта (join): кандидаты dagsync.
 	AutoUpdate *bool
 }

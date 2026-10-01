@@ -224,6 +224,8 @@ message DagListReq {
   // true — только даги, чей последний ран упал (running-ран считается
   // последним: даг с падением, уже ушедший в новый ран, не попадает).
   optional bool last_run_failed = 5;
+  // Поиск по тексту: подстрока имени дага, без учёта регистра.
+  optional string search = 6;
 }
 
 message DagListRep {

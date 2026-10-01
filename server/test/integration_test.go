@@ -1920,3 +1920,34 @@ func TestDagListLastRunFailedFilter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, failing)
 }
+
+// Поиск в списке дагов: подстрока имени без учёта регистра; `%` и `_` в
+// запросе — обычные символы, а не маски; пустой запрос фильтром не считается.
+func TestDagListSearch(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+
+	orders := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "srch-orders_etl",
+		"tasks": [{"name": "a"}]
+	}`)
+	stock := e.registerDag(t, `{
+		"sdk_version": "0.1.0",
+		"name": "srch-stock-sync",
+		"tasks": [{"name": "a"}]
+	}`)
+
+	search := func(q string) []dagModel.Ref {
+		items, _, err := e.dagSvc.List(ctx, &dagModel.ListReq{Search: new(q)})
+		require.NoError(t, err)
+		return lo.Map(items, func(d *dagModel.Main, _ int) dagModel.Ref { return d.Ref })
+	}
+
+	assert.Equal(t, []dagModel.Ref{orders}, search("ORDERS"))
+	assert.Equal(t, []dagModel.Ref{orders}, search("  s_etl "))
+	assert.ElementsMatch(t, []dagModel.Ref{orders, stock}, search("srch-"))
+	assert.Empty(t, search("srch-%"))
+	assert.Empty(t, search("stock_sync"))
+	assert.ElementsMatch(t, []dagModel.Ref{orders, stock}, search(" "))
+}

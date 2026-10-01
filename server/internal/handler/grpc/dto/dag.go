@@ -86,6 +86,7 @@ func DecodeDagListReq(v *pb.DagListReq) *domainModel.ListReq {
 		Project:       v.Project,
 		Template:      v.Template,
 		LastRunFailed: v.LastRunFailed,
+		Search:        v.Search,
 	}
 }
 

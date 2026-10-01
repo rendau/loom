@@ -781,6 +781,8 @@ type DagListReq struct {
 	// true — только даги, чей последний ран упал (running-ран считается
 	// последним: даг с падением, уже ушедший в новый ран, не попадает).
 	LastRunFailed *bool `protobuf:"varint,5,opt,name=last_run_failed,json=lastRunFailed,proto3,oneof" json:"last_run_failed,omitempty"`
+	// Поиск по тексту: подстрока имени дага, без учёта регистра.
+	Search        *string `protobuf:"bytes,6,opt,name=search,proto3,oneof" json:"search,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -848,6 +850,13 @@ func (x *DagListReq) GetLastRunFailed() bool {
 		return *x.LastRunFailed
 	}
 	return false
+}
+
+func (x *DagListReq) GetSearch() string {
+	if x != nil && x.Search != nil {
+		return *x.Search
+	}
+	return ""
 }
 
 type DagListRep struct {
@@ -1810,7 +1819,7 @@ const file_server_v1_dag_proto_rawDesc = "" +
 	"\n" +
 	"\b_catchupB\t\n" +
 	"\a_pausedB\a\n" +
-	"\x05_pool\"\x85\x02\n" +
+	"\x05_pool\"\xad\x02\n" +
 	"\n" +
 	"DagListReq\x125\n" +
 	"\vlist_params\x18\x01 \x01(\v2\x14.common.ListParamsStR\n" +
@@ -1818,12 +1827,14 @@ const file_server_v1_dag_proto_rawDesc = "" +
 	"\x06paused\x18\x02 \x01(\bH\x00R\x06paused\x88\x01\x01\x12\x1d\n" +
 	"\aproject\x18\x03 \x01(\tH\x01R\aproject\x88\x01\x01\x12\x1f\n" +
 	"\btemplate\x18\x04 \x01(\tH\x02R\btemplate\x88\x01\x01\x12+\n" +
-	"\x0flast_run_failed\x18\x05 \x01(\bH\x03R\rlastRunFailed\x88\x01\x01B\t\n" +
+	"\x0flast_run_failed\x18\x05 \x01(\bH\x03R\rlastRunFailed\x88\x01\x01\x12\x1b\n" +
+	"\x06search\x18\x06 \x01(\tH\x04R\x06search\x88\x01\x01B\t\n" +
 	"\a_pausedB\n" +
 	"\n" +
 	"\b_projectB\v\n" +
 	"\t_templateB\x12\n" +
-	"\x10_last_run_failed\"}\n" +
+	"\x10_last_run_failedB\t\n" +
+	"\a_search\"}\n" +
 	"\n" +
 	"DagListRep\x12A\n" +
 	"\x0fpagination_info\x18\x01 \x01(\v2\x18.common.PaginationInfoStR\x0epaginationInfo\x12,\n" +

@@ -10,6 +10,8 @@ export type DagListQuery = {
   template?: string
   // true — только даги, чей последний ран упал.
   last_run_failed?: boolean
+  // Поиск по тексту: подстрока имени дага, без учёта регистра.
+  search?: string
 }
 
 // Путь дага: идентификатор составной — проект и имя инстанса.

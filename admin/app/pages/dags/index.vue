@@ -57,16 +57,25 @@ const stateItems = [
   { label: 'На паузе', value: 'paused' },
 ]
 
+// поиск по тексту (сейчас — по имени дага) тоже серверный: список постраничный
+const search = ref(typeof route.query.q === 'string' ? route.query.q : '')
+
 const hasFilters = computed(() =>
-  projectFilter.value !== ALL_PROJECTS || stateFilter.value !== ALL_STATES || failedFilter.value)
+  projectFilter.value !== ALL_PROJECTS || stateFilter.value !== ALL_STATES || failedFilter.value
+  || search.value.trim() !== '')
 
 function resetFilters() {
+  search.value = ''
   projectFilter.value = ALL_PROJECTS
   stateFilter.value = ALL_STATES
   failedFilter.value = false
 }
 
+// ответ медленного запроса не должен перетирать более свежий (набор в поиске)
+let loadSeq = 0
+
 async function load() {
+  const seq = ++loadSeq
   loading.value = true
   try {
     const rep = await listDags({
@@ -79,7 +88,10 @@ async function load() {
       project: projectFilter.value === ALL_PROJECTS ? undefined : projectFilter.value,
       paused: stateFilter.value === ALL_STATES ? undefined : stateFilter.value === 'paused',
       last_run_failed: failedFilter.value ? true : undefined,
+      search: search.value.trim() || undefined,
     })
+    if (seq !== loadSeq)
+      return
     dags.value = rep.results
     totalCount.value = Number(rep.pagination_info.total_count)
     loadError.value = ''
@@ -87,19 +99,24 @@ async function load() {
     await envGaps.load(dags.value)
   }
   catch (error) {
+    if (seq !== loadSeq)
+      return
     // ошибка загрузки — inline alert (тост исчезает, а страница остаётся пустой)
     loadError.value = apiErrorMessage(error)
   }
   finally {
-    loading.value = false
+    if (seq === loadSeq)
+      loading.value = false
   }
 }
 
 watch(page, load)
 
-watch([projectFilter, stateFilter, failedFilter], async () => {
+async function applyFilters() {
   page.value = 1
   const query: Record<string, string> = {}
+  if (search.value.trim())
+    query.q = search.value.trim()
   if (projectFilter.value !== ALL_PROJECTS)
     query.project = projectFilter.value
   if (stateFilter.value !== ALL_STATES)
@@ -108,7 +125,12 @@ watch([projectFilter, stateFilter, failedFilter], async () => {
     query.failed = '1'
   router.replace({ query })
   await load()
-})
+}
+
+watch([projectFilter, stateFilter, failedFilter], applyFilters)
+
+// ввод в поиск — с задержкой, чтобы не слать запрос на каждую букву
+watch(search, debounceFn(applyFilters))
 
 // ── регистрации: индикация «проект обновляется» ────────────────────────
 // Панель статусов и ошибок живёт на странице проектов — здесь достаточно
@@ -290,6 +312,25 @@ const columns: TableColumn<Dag>[] = [
             class="w-48"
             size="sm"
           />
+          <UInput
+            v-model="search"
+            icon="i-lucide-search"
+            placeholder="Поиск по имени"
+            class="w-56"
+            size="sm"
+            :ui="{ trailing: 'pe-1' }"
+          >
+            <template v-if="search" #trailing>
+              <UButton
+                icon="i-lucide-x"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                aria-label="Очистить поиск"
+                @click="search = ''"
+              />
+            </template>
+          </UInput>
         </template>
       </UDashboardToolbar>
     </template>
@@ -431,7 +472,7 @@ const columns: TableColumn<Dag>[] = [
             v-else-if="hasFilters"
             icon="i-lucide-workflow"
             title="Дагов не найдено"
-            description="Под выбранные фильтры не попал ни один даг."
+            description="Под выбранные фильтры и поиск не попал ни один даг."
           >
             <UButton size="sm" color="neutral" variant="subtle" label="Сбросить фильтры" @click="resetFilters" />
           </EmptyState>

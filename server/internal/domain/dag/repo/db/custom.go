@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -46,6 +47,10 @@ func (r *Repo) getConditions(pars *model.ListReq) (map[string]any, map[string][]
 			exp = "NOT (" + exp + ")"
 		}
 		conditionExps[exp] = nil
+	}
+	if search := strings.TrimSpace(lo.FromPtr(pars.Search)); search != "" {
+		// strpos вместо ILIKE: `%` и `_` в запросе — обычные символы
+		conditionExps["strpos(lower(name), lower(?)) > 0"] = []any{search}
 	}
 	if pars.AutoUpdate != nil {
 		conditions["auto_update"] = *pars.AutoUpdate

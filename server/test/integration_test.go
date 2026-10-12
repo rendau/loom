@@ -107,6 +107,13 @@ func (e *fakeExecutor) vanish(ref runModel.AttemptRef) {
 
 func (e *fakeExecutor) Events() <-chan runModel.ExecEvent { return e.events }
 
+// jobExists — остался ли у executor'а Job попытки.
+func (e *fakeExecutor) jobExists(ref runModel.AttemptRef) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.alive[ref]
+}
+
 func (e *fakeExecutor) launched(task string) (runModel.LaunchSpec, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -683,6 +690,11 @@ func TestSchedulerRetrySucceeds(t *testing.T) {
 	}, waitTimeout, 10*time.Millisecond)
 	assert.Equal(t, runModel.RunStatusRunning, e.runStatus(t, runId))
 
+	// Job упавшей попытки с назначенным ретраем убирается сразу: иначе
+	// мониторинг кластера видел бы упавший Job у успешного в итоге рана
+	require.Eventually(t, func() bool { return !e.executor.jobExists(first.Ref) },
+		waitTimeout, 10*time.Millisecond)
+
 	tis, err := e.runSvc.ListTaskInstances(context.Background(), runId)
 	require.NoError(t, err)
 	assert.False(t, tis[0].RetryAt.IsZero(), "retry_at должен быть назначен")
@@ -726,6 +738,10 @@ func TestSchedulerRetriesExhausted(t *testing.T) {
 
 	e.waitRunStatus(t, runId, runModel.RunStatusFailed)
 	assert.Equal(t, runModel.TaskStatusFailed, e.taskStatuses(t, runId)["a"])
+
+	// Job последней попытки остаётся — честный сигнал об упавшем таске
+	assert.False(t, e.executor.jobExists(runModel.AttemptRef{RunId: runId, Task: "a", Attempt: 1}))
+	assert.True(t, e.executor.jobExists(runModel.AttemptRef{RunId: runId, Task: "a", Attempt: 2}))
 
 	_, _, _, attempts, _, err := e.runSvc.GetDetails(context.Background(), runId)
 	require.NoError(t, err)
@@ -772,6 +788,9 @@ func TestRetryTaskSubgraph(t *testing.T) {
 	assert.Equal(t, runModel.RunStatusRunning, e.runStatus(t, runId))
 
 	a2 := e.waitLaunchedAttempt(t, "a", 2)
+	// ручной ретрай заменил окончательно упавшую попытку — её Job убран
+	require.Eventually(t, func() bool { return !e.executor.jobExists(a1.Ref) },
+		waitTimeout, 10*time.Millisecond)
 	e.executor.started(a2.Ref)
 	e.executor.finished(a2.Ref, true, 0, "")
 

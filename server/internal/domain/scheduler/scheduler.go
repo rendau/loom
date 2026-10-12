@@ -702,8 +702,27 @@ func (s *Scheduler) launch(ctx context.Context, c runModel.ClaimedTask) error {
 	}
 	metricLaunches.Inc()
 
+	// новая попытка заменила предыдущую — её Job больше не нужен. Покрывает
+	// ручной RetryTask: Job окончательно упавшей попытки до него остаётся
+	if c.Attempt > 1 {
+		s.dropAttemptJob(ctx, runModel.AttemptRef{RunId: c.RunId, Task: c.Task, Attempt: c.Attempt - 1})
+	}
+
 	slog.Info("attempt launched", "run_id", c.RunId, "task", c.Task, "attempt", c.Attempt)
 	return nil
+}
+
+// dropAttemptJob удаляет Job (контейнер) завершённой попытки, которую
+// заменяет следующая. Упавший Job для мониторинга кластера — инцидент
+// (KubeJobFailed висит до k8s_job_ttl), хотя таск ещё может пройти на
+// ретрае; исход, причина и лог попытки уже сохранены в loom, так что Job
+// нужен только как сигнал — и остаётся лишь у последней попытки таска.
+// Best effort: не удалился — уберёт TTL.
+func (s *Scheduler) dropAttemptJob(ctx context.Context, ref runModel.AttemptRef) {
+	if err := s.executor.Kill(ctx, ref); err != nil {
+		slog.Warn("drop superseded attempt job", "run_id", ref.RunId, "task", ref.Task,
+			"attempt", ref.Attempt, "error", err)
+	}
 }
 
 // listenEvents обрабатывает события executor'а до остановки планировщика.
@@ -840,6 +859,12 @@ func (s *Scheduler) finalizeCtx(ctx context.Context, ref runModel.AttemptRef, ex
 	// с ретраями давал бы алёрт на каждую попытку
 	slog.Info("attempt finished", "run_id", ref.RunId, "task", ref.Task, "attempt", ref.Attempt,
 		"success", exit.Success, "reason", exit.Reason, "retry", retryAt != nil)
+
+	// ретрай назначен — попытка не последняя: Job убираем сразу, не дожидаясь
+	// запуска следующей (backoff может быть дольше выдержки алёрта)
+	if retryAt != nil {
+		s.dropAttemptJob(ctx, ref)
+	}
 
 	s.Nudge()
 }

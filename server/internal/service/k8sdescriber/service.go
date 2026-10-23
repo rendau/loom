@@ -191,8 +191,9 @@ func (s *Service) buildJob(name, image, id string) *batchv1.Job {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					RestartPolicy:    corev1.RestartPolicyNever,
-					ImagePullSecrets: pullSecretRefs(s.pullSecret),
+					RestartPolicy:      corev1.RestartPolicyNever,
+					ImagePullSecrets:   pullSecretRefs(s.pullSecret),
+					EnableServiceLinks: new(false),
 					Containers: []corev1.Container{{
 						Name: containerName,
 						// describe обязан смотреть актуальное содержимое тега:

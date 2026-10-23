@@ -257,6 +257,9 @@ func (s *Service) buildJob(spec runModel.LaunchSpec) (*batchv1.Job, error) {
 				Spec: corev1.PodSpec{
 					RestartPolicy:    corev1.RestartPolicyNever,
 					ImagePullSecrets: pullSecretRefs(s.pullSecret),
+					// без *_SERVICE_HOST/*_PORT всех сервисов неймспейса: таску
+					// они не нужны, а их имена могут совпасть с env дага
+					EnableServiceLinks: new(false),
 					Containers: []corev1.Container{{
 						Name:      containerName,
 						Image:     spec.Image,

@@ -97,6 +97,8 @@ func TestInspectSuccess(t *testing.T) {
 	assert.Equal(t, e.job.Name, e.job.Spec.Template.Labels[jobLabelKey])
 	assert.Equal(t, []corev1.LocalObjectReference{{Name: "dag-registry"}},
 		e.job.Spec.Template.Spec.ImagePullSecrets)
+	require.NotNil(t, e.job.Spec.Template.Spec.EnableServiceLinks)
+	assert.False(t, *e.job.Spec.Template.Spec.EnableServiceLinks)
 
 	// Job удалён сразу после чтения результата
 	deleted := false

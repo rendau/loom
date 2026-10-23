@@ -131,3 +131,13 @@ func TestKillWithoutJobIsNoop(t *testing.T) {
 
 	assert.NoError(t, svc.Kill(context.Background(), testSpec("demo-etl", "extract").Ref))
 }
+
+// Под таска не получает env-ссылки на сервисы неймспейса.
+func TestJobDisablesServiceLinks(t *testing.T) {
+	svc := New(fake.NewClientset(), nil, "ns", "", 0)
+
+	job, err := svc.buildJob(testSpec("demo-etl", "extract"))
+	require.NoError(t, err)
+	require.NotNil(t, job.Spec.Template.Spec.EnableServiceLinks)
+	assert.False(t, *job.Spec.Template.Spec.EnableServiceLinks)
+}
